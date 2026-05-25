@@ -3,8 +3,10 @@
 import pytest
 from pydantic import ValidationError
 from unittest.mock import MagicMock
+from openai import OpenAI
 
 from aaosa.core.agent import Agent
+from aaosa.schemas.claim import Claim
 from aaosa.schemas.task import Task
 from aaosa.schemas.output import Output, LLMMetadata
 
@@ -96,17 +98,89 @@ class TestAgentCreation:
 class TestAgentMethods:
     """Tests for Agent methods."""
 
-    def test_agent_claim_raises_not_implemented(self):
-        """Test that claim method raises NotImplementedError."""
+    def test_agent_claim_returns_claim(self):
+        """Test that claim returns a Claim with agent_id and task_id overridden from self."""
         agent = Agent(
             name="TestAgent",
             tags_with_elo={"python": 75},
             system_prompt="You are a test agent."
         )
-        task = Task(description="stub", required_tags={"python": 50})
+        task = Task(description="Write a Python function", required_tags={"python": 50})
 
-        with pytest.raises(NotImplementedError):
-            agent.claim(task, client=None)
+        # Build a fake parsed Claim (LLM would return wrong ids — override must happen)
+        fake_claim = Claim(
+            agent_id="irrelevant",
+            task_id="irrelevant",
+            decision="claim",
+            justification="test justification",
+        )
+
+        # Mock the structured output path
+        mock_parsed_response = MagicMock()
+        mock_parsed_response.choices[0].message.parsed = fake_claim
+
+        client = MagicMock(spec=OpenAI)
+        client.beta.chat.completions.parse.return_value = mock_parsed_response
+
+        result = agent.claim(task, client)
+
+        assert isinstance(result, Claim)
+        assert result.agent_id == agent.id  # override must have happened
+        assert result.task_id == task.id    # override must have happened
+        assert result.decision in ("claim", "no_claim")
+
+    def test_agent_claim_uses_fallback_when_parsed_is_none(self):
+        """Test that claim falls back to JSON parse when structured output returns parsed=None."""
+        agent = Agent(
+            name="TestAgent",
+            tags_with_elo={"python": 75},
+            system_prompt="You are a test agent."
+        )
+        task = Task(description="Write a Python function", required_tags={"python": 50})
+
+        client = MagicMock(spec=OpenAI)
+
+        # Structured output path returns parsed=None
+        mock_parse_response = MagicMock()
+        mock_parse_response.choices[0].message.parsed = None
+        client.beta.chat.completions.parse.return_value = mock_parse_response
+
+        # Fallback path returns valid JSON
+        mock_create_response = MagicMock()
+        mock_create_response.choices[0].message.content = '{"decision": "no_claim", "justification": "Out of scope"}'
+        client.chat.completions.create.return_value = mock_create_response
+
+        result = agent.claim(task, client)
+
+        assert isinstance(result, Claim)
+        assert result.decision == "no_claim"
+        assert result.agent_id == agent.id
+        assert result.task_id == task.id
+
+    def test_agent_claim_uses_fallback_when_parse_raises(self):
+        """Test that claim falls back to JSON parse when structured output raises an exception."""
+        agent = Agent(
+            name="TestAgent",
+            tags_with_elo={"python": 75},
+            system_prompt="You are a test agent."
+        )
+        task = Task(description="Write a Python function", required_tags={"python": 50})
+
+        client = MagicMock(spec=OpenAI)
+
+        # Structured output path raises
+        client.beta.chat.completions.parse.side_effect = RuntimeError("unsupported")
+
+        # Fallback path returns valid JSON
+        mock_create_response = MagicMock()
+        mock_create_response.choices[0].message.content = '{"decision": "claim", "justification": "I can do it"}'
+        client.chat.completions.create.return_value = mock_create_response
+
+        result = agent.claim(task, client)
+
+        assert isinstance(result, Claim)
+        assert result.decision == "claim"
+        assert result.agent_id == agent.id
 
 
 class TestAgentEdgeCases:

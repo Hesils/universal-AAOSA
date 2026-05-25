@@ -1,3 +1,4 @@
+import json
 import time
 import uuid
 
@@ -25,7 +26,50 @@ class Agent(BaseModel):
         return v
 
     def claim(self, task: Task, client: OpenAI) -> Claim:
-        raise NotImplementedError
+        from aaosa.claiming.prompts import prompt_template  # local import to avoid circular dependency
+
+        user_message = prompt_template(self, task)
+
+        # Try OpenAI structured output (SDK 2.x)
+        try:
+            response = client.beta.chat.completions.parse(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                response_format=Claim,
+            )
+            parsed = response.choices[0].message.parsed
+            if parsed is not None:
+                return Claim(
+                    agent_id=self.id,
+                    task_id=task.id,
+                    decision=parsed.decision,
+                    justification=parsed.justification,
+                )
+        except Exception:
+            pass  # structured output unavailable or failed — fall through to JSON fallback
+
+        # Fallback: raw completion + JSON parse
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+        )
+        raw = response.choices[0].message.content or ""
+        try:
+            data = json.loads(raw)
+            return Claim(
+                agent_id=self.id,
+                task_id=task.id,
+                decision=data["decision"],
+                justification=data["justification"],
+            )
+        except (json.JSONDecodeError, KeyError) as e:
+            raise ValueError(f"Failed to parse claim from LLM response: {e!r}. Raw: {raw!r}") from e
 
     def execute(self, task: Task, client: OpenAI) -> Output:
         start = time.monotonic()
