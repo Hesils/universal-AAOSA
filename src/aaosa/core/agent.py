@@ -10,7 +10,7 @@ from aaosa.schemas.task import Task
 
 
 class Agent(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
