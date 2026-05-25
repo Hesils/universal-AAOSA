@@ -211,3 +211,11 @@ def test_exact_elo_threshold_passes():
     agent = make_agent({"python": 40})  # exactly at threshold
     result = filter_candidates(task, [agent])
     assert len(result) == 1
+
+
+def test_multi_required_partial_fail():
+    """Agent with only 1 of 2 required tags fails (passes_filter uses AND, not OR)."""
+    task = make_task(required={"python": 50, "backend": 60})
+    agent = make_agent({"python": 70})  # has python but missing backend
+    result = filter_candidates(task, [agent])
+    assert result == []
