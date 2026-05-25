@@ -3,7 +3,8 @@ from aaosa.schemas.task import Task
 
 
 def prompt_template(agent: Agent, task: Task) -> str:
-    tags_lines = "\n".join(f"- {tag}: {elo}" for tag, elo in task.required_tags.items())
+    all_tags = {**task.required_tags, **task.acquirable_tags}
+    tags_lines = "\n".join(f"- {tag}: {elo}" for tag, elo in all_tags.items())
     return (
         f"{agent.system_prompt}\n\n"
         f"You are being asked to evaluate a task.\n\n"

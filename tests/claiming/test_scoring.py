@@ -2,7 +2,6 @@ import pytest
 from aaosa.claiming.scoring import passes_filter, fit_score
 from aaosa.core.agent import Agent
 from aaosa.schemas.task import Task
-from aaosa.schemas.elo import ELO_ACQUIRABLE_THRESHOLD
 
 
 def make_agent(tags: dict) -> Agent:
@@ -43,16 +42,16 @@ def test_passes_filter_required_tag_missing():
 
 
 def test_passes_filter_acquirable_tag_missing_passes():
-    """Acquirable tag (ELO <= 25) missing from agent passes."""
+    """Acquirable tag missing from agent passes (only required_tags are checked)."""
     agent = make_agent({"python": 80})
-    task = Task(description="Test", required_tags={"python": 50, "docker": 10})
+    task = Task(description="Test", required_tags={"python": 50}, acquirable_tags={"docker": 10})
     assert passes_filter(agent, task) is True
 
 
 def test_passes_filter_acquirable_tag_only_missing_passes():
     """Task with only acquirable tag missing from agent passes."""
     agent = make_agent({"python": 80})
-    task = Task(description="Test", required_tags={"python": 50, "tag_new": 20})
+    task = Task(description="Test", required_tags={"python": 50}, acquirable_tags={"tag_new": 20})
     assert passes_filter(agent, task) is True
 
 
@@ -78,9 +77,9 @@ def test_passes_filter_multiple_required_one_missing():
 
 
 def test_passes_filter_acquirable_agent_has_low_elo_passes():
-    """Acquirable tag with low agent ELO still passes (ignores acquirable)."""
+    """Acquirable tag not checked by passes_filter regardless of agent ELO."""
     agent = make_agent({"python": 80, "docker": 5})
-    task = Task(description="Test", required_tags={"python": 50, "docker": 20})
+    task = Task(description="Test", required_tags={"python": 50}, acquirable_tags={"docker": 20})
     assert passes_filter(agent, task) is True
 
 
@@ -121,7 +120,7 @@ def test_fit_score_multiple_tags_weighted():
 def test_fit_score_acquirable_tag_missing_penalizes():
     """Acquirable tag missing from agent contributes 0 to numerator."""
     agent = make_agent({"python": 60})
-    task = Task(description="Test", required_tags={"python": 50, "docker": 10})
+    task = Task(description="Test", required_tags={"python": 50}, acquirable_tags={"docker": 10})
     # (60 + 0) / (50 + 10) = 60 / 60 = 1.0
     assert fit_score(agent, task) == 1.0
 
@@ -129,7 +128,7 @@ def test_fit_score_acquirable_tag_missing_penalizes():
 def test_fit_score_acquirable_tag_present_improves():
     """Acquirable tag present in agent improves score."""
     agent = make_agent({"python": 60, "docker": 15})
-    task = Task(description="Test", required_tags={"python": 50, "docker": 10})
+    task = Task(description="Test", required_tags={"python": 50}, acquirable_tags={"docker": 10})
     # (60 + 15) / (50 + 10) = 75 / 60 = 1.25
     assert fit_score(agent, task) == 1.25
 

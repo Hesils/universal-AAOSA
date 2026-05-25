@@ -32,7 +32,8 @@ TASK_BUILD_DASHBOARD_UI = Task(
 
 TASK_DOCUMENT_API = Task(
     description="Write API documentation with examples",
-    required_tags={"writing": 30, "backend": 20},
+    required_tags={"writing": 30},
+    acquirable_tags={"backend": 20},
 )
 
 DEMO_TASKS = [
