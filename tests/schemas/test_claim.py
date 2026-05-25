@@ -1,7 +1,7 @@
 """Tests for the Claim schema."""
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import ValidationError
 from aaosa.schemas.claim import Claim
 
@@ -36,14 +36,14 @@ def test_claim_valid_no_claim_decision():
 
 def test_claim_timestamp_auto_generated():
     """Create Claim, assert timestamp is a datetime instance."""
-    before = datetime.utcnow()
+    before = datetime.now(timezone.utc)
     claim = Claim(
         agent_id="agent-3",
         task_id="task-3",
         decision="claim",
         justification="Auto-generated timestamp test."
     )
-    after = datetime.utcnow()
+    after = datetime.now(timezone.utc)
 
     assert isinstance(claim.timestamp, datetime)
     assert before <= claim.timestamp <= after
