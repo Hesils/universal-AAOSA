@@ -1,7 +1,7 @@
 import time
 import uuid
-from typing import Any
 
+from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from aaosa.schemas.claim import Claim
@@ -24,10 +24,10 @@ class Agent(BaseModel):
             raise ValueError("tags_with_elo cannot be empty")
         return v
 
-    def claim(self, task: Task, client: Any) -> Claim:
+    def claim(self, task: Task, client: OpenAI) -> Claim:
         raise NotImplementedError
 
-    def execute(self, task: Task, client: Any) -> Output:
+    def execute(self, task: Task, client: OpenAI) -> Output:
         start = time.monotonic()
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -40,7 +40,7 @@ class Agent(BaseModel):
         return Output(
             task_id=task.id,
             agent_id=self.id,
-            content=response.choices[0].message.content,
+            content=response.choices[0].message.content or "",
             llm_metadata=LLMMetadata(
                 model_name=response.model,
                 tokens_in=response.usage.prompt_tokens,
