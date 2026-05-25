@@ -1,0 +1,8 @@
+traces/
+__pycache__/
+*.pyc
+.venv/
+dist/
+*.egg-info/
+.idea/
+*.iml
