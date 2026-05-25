@@ -2,9 +2,11 @@
 
 import pytest
 from pydantic import ValidationError
+from unittest.mock import MagicMock
 
 from aaosa.core.agent import Agent
 from aaosa.schemas.task import Task
+from aaosa.schemas.output import Output, LLMMetadata
 
 
 class TestAgentCreation:
@@ -106,14 +108,136 @@ class TestAgentMethods:
         with pytest.raises(NotImplementedError):
             agent.claim(task, client=None)
 
-    def test_agent_execute_raises_not_implemented(self):
-        """Test that execute method raises NotImplementedError."""
+
+class TestAgentEdgeCases:
+    """Edge case tests for Agent schema."""
+
+    def test_agent_id_is_uuid_format(self):
+        """agent.id has len 36 and 4 tirets."""
         agent = Agent(
             name="TestAgent",
             tags_with_elo={"python": 75},
             system_prompt="You are a test agent."
         )
-        task = Task(description="stub", required_tags={"python": 50})
+        assert len(agent.id) == 36
+        assert agent.id.count("-") == 4
 
-        with pytest.raises(NotImplementedError):
-            agent.execute(task, client=None)
+    def test_agent_tags_with_elo_values_are_ints(self):
+        """All values in tags_with_elo are int."""
+        agent = Agent(
+            name="TestAgent",
+            tags_with_elo={"python": 75, "ml": 60, "devops": 50},
+            system_prompt="You are a test agent."
+        )
+        for value in agent.tags_with_elo.values():
+            assert isinstance(value, int)
+
+    def test_agent_single_tag_valid(self):
+        """tags_with_elo={'python': 1} is valid."""
+        agent = Agent(
+            name="TestAgent",
+            tags_with_elo={"python": 1},
+            system_prompt="You are a test agent."
+        )
+        assert agent.tags_with_elo == {"python": 1}
+
+
+class TestAgentExecute:
+    """Tests for Agent.execute method."""
+
+    def make_mock_client(self):
+        """Create a mock LLM client with standard response."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = "Done!"
+        mock_response.model = "gpt-4o-mini"
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 5
+        mock_client.chat.completions.create.return_value = mock_response
+        return mock_client
+
+    @pytest.fixture
+    def agent(self):
+        """Create a test agent."""
+        return Agent(
+            name="TestAgent",
+            tags_with_elo={"python": 80},
+            system_prompt="You are a Python expert."
+        )
+
+    @pytest.fixture
+    def task(self):
+        """Create a test task."""
+        return Task(description="Write a sorting function", required_tags={"python": 50})
+
+    def test_execute_returns_output_instance(self, agent, task):
+        """Test that execute returns an Output instance."""
+        mock_client = self.make_mock_client()
+        result = agent.execute(task, mock_client)
+        assert isinstance(result, Output)
+
+    def test_execute_output_task_id_matches(self, agent, task):
+        """Test that output task_id matches input task.id."""
+        mock_client = self.make_mock_client()
+        result = agent.execute(task, mock_client)
+        assert result.task_id == task.id
+
+    def test_execute_output_agent_id_matches(self, agent, task):
+        """Test that output agent_id matches agent.id."""
+        mock_client = self.make_mock_client()
+        result = agent.execute(task, mock_client)
+        assert result.agent_id == agent.id
+
+    def test_execute_output_content_from_llm(self, agent, task):
+        """Test that output content comes from LLM response."""
+        mock_client = self.make_mock_client()
+        result = agent.execute(task, mock_client)
+        assert result.content == "Done!"
+
+    def test_execute_llm_metadata_model_name(self, agent, task):
+        """Test that llm_metadata.model_name is set from response.model."""
+        mock_client = self.make_mock_client()
+        result = agent.execute(task, mock_client)
+        assert result.llm_metadata.model_name == "gpt-4o-mini"
+
+    def test_execute_llm_metadata_tokens_in(self, agent, task):
+        """Test that llm_metadata.tokens_in is set from response.usage.prompt_tokens."""
+        mock_client = self.make_mock_client()
+        result = agent.execute(task, mock_client)
+        assert result.llm_metadata.tokens_in == 10
+
+    def test_execute_llm_metadata_tokens_out(self, agent, task):
+        """Test that llm_metadata.tokens_out is set from response.usage.completion_tokens."""
+        mock_client = self.make_mock_client()
+        result = agent.execute(task, mock_client)
+        assert result.llm_metadata.tokens_out == 5
+
+    def test_execute_llm_metadata_latency_positive(self, agent, task):
+        """Test that llm_metadata.latency_ms is positive."""
+        mock_client = self.make_mock_client()
+        result = agent.execute(task, mock_client)
+        assert result.llm_metadata.latency_ms > 0
+
+    def test_execute_calls_client_once(self, agent, task):
+        """Test that client.chat.completions.create is called exactly once."""
+        mock_client = self.make_mock_client()
+        agent.execute(task, mock_client)
+        assert mock_client.chat.completions.create.call_count == 1
+
+    def test_execute_system_prompt_in_messages(self, agent, task):
+        """Test that agent.system_prompt is included in messages with role 'system'."""
+        mock_client = self.make_mock_client()
+        agent.execute(task, mock_client)
+        call_args = mock_client.chat.completions.create.call_args
+        messages = call_args.kwargs.get("messages") or (call_args.args[0] if call_args.args else call_args.kwargs["messages"])
+        system_msgs = [m for m in messages if m.get("role") == "system"]
+        assert any(agent.system_prompt in m["content"] for m in system_msgs)
+
+    def test_execute_task_description_as_user_message(self, agent, task):
+        """Test that task.description is included in messages with role 'user'."""
+        mock_client = self.make_mock_client()
+        agent.execute(task, mock_client)
+        call_args = mock_client.chat.completions.create.call_args
+        messages = call_args.kwargs.get("messages") or (call_args.args[0] if call_args.args else call_args.kwargs["messages"])
+        user_msgs = [m for m in messages if m.get("role") == "user"]
+        assert any(task.description in m["content"] for m in user_msgs)

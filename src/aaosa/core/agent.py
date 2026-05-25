@@ -1,10 +1,11 @@
+import time
 import uuid
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from aaosa.schemas.claim import Claim
-from aaosa.schemas.output import Output
+from aaosa.schemas.output import Output, LLMMetadata
 from aaosa.schemas.task import Task
 
 
@@ -27,4 +28,23 @@ class Agent(BaseModel):
         raise NotImplementedError
 
     def execute(self, task: Task, client: Any) -> Output:
-        raise NotImplementedError
+        start = time.monotonic()
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": task.description},
+            ],
+        )
+        latency_ms = (time.monotonic() - start) * 1000
+        return Output(
+            task_id=task.id,
+            agent_id=self.id,
+            content=response.choices[0].message.content,
+            llm_metadata=LLMMetadata(
+                model_name=response.model,
+                tokens_in=response.usage.prompt_tokens,
+                tokens_out=response.usage.completion_tokens,
+                latency_ms=latency_ms,
+            ),
+        )

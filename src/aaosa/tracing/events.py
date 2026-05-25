@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class _BaseEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_id: str
+    task_id: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
