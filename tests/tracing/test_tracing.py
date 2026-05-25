@@ -361,3 +361,28 @@ class TestTracer:
             line = f.readline().strip()
             data = json.loads(line)
             assert "session_id" in data
+
+    def test_tracer_flush_jsonl_round_trip(self, tmp_path):
+        """Flush → read JSONL → reconstruct via TypeAdapter → verify event fields."""
+        from pydantic import TypeAdapter
+        tracer = Tracer("round-trip-session")
+        event = Phase2ClaimedEvent(
+            session_id="round-trip-session",
+            task_id="t-rt",
+            agent_id="a-rt",
+            decision="claim",
+            justification="Round-trip test",
+        )
+        tracer.emit(event)
+        output_file = tmp_path / "rt.jsonl"
+        tracer.flush(output_file)
+
+        ta = TypeAdapter(ClaimEvent)
+        with open(output_file, "r", encoding="utf-8") as f:
+            reconstructed = ta.validate_json(f.readline().strip())
+
+        assert isinstance(reconstructed, Phase2ClaimedEvent)
+        assert reconstructed.session_id == "round-trip-session"
+        assert reconstructed.task_id == "t-rt"
+        assert reconstructed.agent_id == "a-rt"
+        assert reconstructed.decision == "claim"

@@ -274,3 +274,21 @@ def test_no_tracer_no_error_assigned():
     )
     assert result.status == "assigned"
     assert result.agent_id == "a1"
+
+
+# ---------------------------------------------------------------------------
+# Edge cases
+# ---------------------------------------------------------------------------
+
+def test_missing_agent_id_in_tie_break_raises():
+    """Claim references agent_id absent from agents list during tie-break → ValueError."""
+    task = make_task({"nlp": 800})
+    # Both claims have same fit score (triggers tie-break), but "ghost" not in agents
+    agents = [make_agent("a1", {"nlp": 900})]
+    claims = [
+        make_claim("a1", task.id),
+        make_claim("ghost", task.id),
+    ]
+    fit_scores = {"a1": 0.8, "ghost": 0.8}
+    with pytest.raises(ValueError, match="missing IDs"):
+        dispatch(claims=claims, task=task, agents=agents, fit_scores=fit_scores)

@@ -221,6 +221,31 @@ class TestFormatTimelineEmpty:
         result = format_timeline([])
         assert result == ""
 
+    def test_phase2_empty_justification_no_crash(self):
+        """Phase2ClaimedEvent with justification='' should format without error."""
+        event = Phase2ClaimedEvent(
+            session_id="s1",
+            task_id="t1",
+            agent_id="agent_x",
+            decision="claim",
+            justification="",
+            timestamp=datetime(2026, 5, 25, 10, 0, 0, tzinfo=timezone.utc),
+        )
+        result = format_timeline([event])
+        assert "PHASE2 agent_x → claim ()" in result
+
+    def test_executed_empty_output_summary_no_crash(self):
+        """ExecutedEvent with output_summary='' should format without error."""
+        event = ExecutedEvent(
+            session_id="s1",
+            task_id="t1",
+            agent_id="agent_y",
+            output_summary="",
+            timestamp=datetime(2026, 5, 25, 10, 0, 0, tzinfo=timezone.utc),
+        )
+        result = format_timeline([event])
+        assert "EXECUTED → agent_y ()" in result
+
 
 class TestFormatTimelineMixed:
     """Test formatting mixed event types."""
