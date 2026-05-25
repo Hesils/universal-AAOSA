@@ -4,14 +4,14 @@ version = "0.1.0"
 description = "Runtime multi-agents à coordination bottom-up par claiming, agnostique au domaine"
 requires-python = ">=3.14"
 dependencies = [
-    "pydantic>=2.0",
-    "openai>=1.0",
+    "pydantic>=2.13",
+    "openai>=2.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.24",
+    "pytest>=9.0",
+    "pytest-asyncio>=1.0",
 ]
 
 [build-system]
