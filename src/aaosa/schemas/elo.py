@@ -1,0 +1,10 @@
+"""ELO bootstrap ranges for skill levels."""
+
+ELO_EXPERT_MIN = 85
+ELO_EXPERT_MAX = 95
+
+ELO_COMPETENT_MIN = 30
+ELO_COMPETENT_MAX = 50
+
+ELO_BASIC_MIN = 10
+ELO_BASIC_MAX = 25
