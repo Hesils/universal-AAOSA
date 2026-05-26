@@ -1,12 +1,51 @@
 import pytest
-from aaosa.schemas.task import Task
+from unittest.mock import MagicMock, patch
+
+from aaosa.claiming.dispatch import DispatchResult
+from aaosa.core.agent import Agent
+from aaosa.demo.agents import AGENT_BACKEND, AGENT_FRONTEND, AGENT_FULLSTACK, DEMO_AGENTS
 from aaosa.demo.tasks import (
     DEMO_TASKS,
     TASK_FIX_CSS_HOVER,
-    TASK_WRITE_PYTHON_TESTS,
-    TASK_SECURITY_AUDIT,
     TASK_OPTIMIZE_SQL,
+    TASK_SECURITY_AUDIT,
+    TASK_WRITE_PYTHON_TESTS,
 )
+from aaosa.runtime.runner import run_task
+from aaosa.schemas.claim import Claim
+from aaosa.schemas.output import LLMMetadata, Output
+from aaosa.schemas.task import Task
+from aaosa.tracing.events import (
+    DispatchedEvent,
+    ExecutedEvent,
+    Phase1FilteredEvent,
+    Phase2ClaimedEvent,
+    UnassignedEvent,
+)
+from aaosa.tracing.tracer import Tracer
+
+
+def _make_claim(agent: Agent, task: Task, decision: str = "claim") -> Claim:
+    return Claim(
+        agent_id=agent.id,
+        task_id=task.id,
+        decision=decision,
+        justification="Mock justification.",
+    )
+
+
+def _make_output(agent: Agent, task: Task) -> Output:
+    return Output(
+        task_id=task.id,
+        agent_id=agent.id,
+        content="Mock output content.",
+        llm_metadata=LLMMetadata(
+            model_name="gpt-4o-mini",
+            tokens_in=10,
+            tokens_out=5,
+            latency_ms=50.0,
+        ),
+    )
 
 
 class TestDemoTasksList:
@@ -80,3 +119,76 @@ class TestUnderClaimTask:
     def test_under_claim_task_has_low_elo(self):
         """TASK_OPTIMIZE_SQL should have all tags with ELO <= 50."""
         assert all(v <= 50 for v in TASK_OPTIMIZE_SQL.required_tags.values())
+
+
+class TestDemoEndToEnd:
+    """Tests end-to-end du pipeline run_task avec les fixtures demo et LLM mocké."""
+
+    def test_css_hover_assigned_to_frontend(self):
+        """TASK_FIX_CSS_HOVER : seul FRONTEND passe Phase 1 (css:90 >= 70).
+        Mock claim + execute → Output avec agent_id == FRONTEND."""
+        task = TASK_FIX_CSS_HOVER
+        claim = _make_claim(AGENT_FRONTEND, task)
+        output = _make_output(AGENT_FRONTEND, task)
+
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                result = run_task(task, DEMO_AGENTS, MagicMock())
+
+        assert isinstance(result, Output)
+        assert result.agent_id == AGENT_FRONTEND.id
+
+    def test_security_audit_unassigned(self):
+        """TASK_SECURITY_AUDIT : aucun agent n'a le tag 'security' → 0 candidats.
+        Pas de mock LLM nécessaire → DispatchResult status='unassigned'."""
+        result = run_task(TASK_SECURITY_AUDIT, DEMO_AGENTS, MagicMock())
+
+        assert isinstance(result, DispatchResult)
+        assert result.status == "unassigned"
+
+    def test_optimize_sql_backend_wins_over_fullstack(self):
+        """TASK_OPTIMIZE_SQL : BACKEND (database:85, score=2.125) et FULLSTACK (database:40, score=1.0).
+        Les deux clament. BACKEND gagne par fit_score → Output avec BACKEND.id."""
+        task = TASK_OPTIMIZE_SQL
+        claim_backend = _make_claim(AGENT_BACKEND, task)
+        claim_fullstack = _make_claim(AGENT_FULLSTACK, task)
+        output = _make_output(AGENT_BACKEND, task)
+
+        # filter_candidates itère DEMO_AGENTS dans l'ordre → BACKEND avant FULLSTACK
+        with patch.object(Agent, "claim", side_effect=[claim_backend, claim_fullstack]):
+            with patch.object(Agent, "execute", return_value=output):
+                result = run_task(task, DEMO_AGENTS, MagicMock())
+
+        assert isinstance(result, Output)
+        assert result.agent_id == AGENT_BACKEND.id
+
+    def test_assigned_task_emits_tracer_events(self):
+        """TASK_FIX_CSS_HOVER avec tracer : vérifier Phase1Filtered (1 passed=True pour FRONTEND),
+        Phase2Claimed, Dispatched et Executed sont émis."""
+        task = TASK_FIX_CSS_HOVER
+        tracer = Tracer(session_id="test-e2e")
+        claim = _make_claim(AGENT_FRONTEND, task)
+        output = _make_output(AGENT_FRONTEND, task)
+
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                run_task(task, DEMO_AGENTS, MagicMock(), tracer=tracer)
+
+        event_types = {type(e) for e in tracer.events}
+        assert Phase1FilteredEvent in event_types
+        assert Phase2ClaimedEvent in event_types
+        assert DispatchedEvent in event_types
+        assert ExecutedEvent in event_types
+
+        phase1_passed = [e for e in tracer.events if isinstance(e, Phase1FilteredEvent) and e.passed]
+        assert len(phase1_passed) == 1
+        assert phase1_passed[0].agent_id == AGENT_FRONTEND.id
+
+    def test_unassigned_task_emits_unassigned_event(self):
+        """TASK_SECURITY_AUDIT avec tracer : vérifier UnassignedEvent est émis."""
+        tracer = Tracer(session_id="test-e2e")
+
+        run_task(TASK_SECURITY_AUDIT, DEMO_AGENTS, MagicMock(), tracer=tracer)
+
+        event_types = {type(e) for e in tracer.events}
+        assert UnassignedEvent in event_types
