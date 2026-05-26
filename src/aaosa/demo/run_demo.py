@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+
 from aaosa.claiming.dispatch import DispatchResult
 from aaosa.demo.agents import DEMO_AGENTS
 from aaosa.demo.tasks import DEMO_TASKS
@@ -9,6 +11,7 @@ from aaosa.tracing.tracer import Tracer
 
 
 def run_demo() -> None:
+    load_dotenv()
     client = create_client()
     tracer = Tracer(session_id="demo")
 
