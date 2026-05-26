@@ -22,9 +22,9 @@ def format_timeline(events: list[ClaimEvent]) -> str:
 
         if isinstance(event, Phase1FilteredEvent):
             if event.passed:
-                line = f"[{time_str}] PHASE1 {event.agent_id} → passed (fit={event.fit_score:.2f})"
+                line = f"[{time_str}] PHASE1 {event.agent_id} -> passed (fit={event.fit_score:.2f})"
             else:
-                line = f"[{time_str}] PHASE1 {event.agent_id} → filtered"
+                line = f"[{time_str}] PHASE1 {event.agent_id} -> filtered"
             lines.append(line)
 
         elif isinstance(event, Phase2ClaimedEvent):
@@ -33,11 +33,11 @@ def format_timeline(events: list[ClaimEvent]) -> str:
                 justification_display = justification[:50] + "..."
             else:
                 justification_display = justification
-            line = f"[{time_str}] PHASE2 {event.agent_id} → {event.decision} ({justification_display})"
+            line = f"[{time_str}] PHASE2 {event.agent_id} -> {event.decision} ({justification_display})"
             lines.append(line)
 
         elif isinstance(event, DispatchedEvent):
-            line = f"[{time_str}] DISPATCH → {event.agent_id} ({event.reason})"
+            line = f"[{time_str}] DISPATCH -> {event.agent_id} ({event.reason})"
             lines.append(line)
 
         elif isinstance(event, ExecutedEvent):
@@ -46,11 +46,11 @@ def format_timeline(events: list[ClaimEvent]) -> str:
                 output_display = output_summary[:60] + "..."
             else:
                 output_display = output_summary
-            line = f"[{time_str}] EXECUTED → {event.agent_id} ({output_display})"
+            line = f"[{time_str}] EXECUTED -> {event.agent_id} ({output_display})"
             lines.append(line)
 
         elif isinstance(event, UnassignedEvent):
-            line = f"[{time_str}] UNASSIGNED → {event.reason}"
+            line = f"[{time_str}] UNASSIGNED -> {event.reason}"
             lines.append(line)
 
     return "\n".join(lines)

@@ -24,9 +24,9 @@ def run_demo() -> None:
         result = run_task(task, DEMO_AGENTS, client, tracer)
         if isinstance(result, Output):
             agent = agent_by_id[result.agent_id]
-            print(f"  → Assigned: {agent.name}")
+            print(f"  -> Assigned: {agent.name}")
         else:
-            print(f"  → Unassigned")
+            print(f"  -> Unassigned")
         print()
 
     print("=== Timeline ===")
