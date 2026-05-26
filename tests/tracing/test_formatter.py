@@ -25,7 +25,7 @@ class TestFormatTimelinePhase1Filtered:
             timestamp=datetime(2026, 5, 25, 10, 30, 45, tzinfo=timezone.utc),
         )
         result = format_timeline([event])
-        assert "[10:30:45] PHASE1 agent_a → passed (fit=0.85)" in result
+        assert "[10:30:45] PHASE1 agent_a -> passed (fit=0.85)" in result
 
     def test_phase1_filtered_not_passed(self):
         """Phase1FilteredEvent with passed=False should show 'filtered'."""
@@ -38,7 +38,7 @@ class TestFormatTimelinePhase1Filtered:
             timestamp=datetime(2026, 5, 25, 10, 30, 45, tzinfo=timezone.utc),
         )
         result = format_timeline([event])
-        assert "[10:30:45] PHASE1 agent_b → filtered" in result
+        assert "[10:30:45] PHASE1 agent_b -> filtered" in result
 
 
 class TestFormatTimelinePhase2Claimed:
@@ -55,7 +55,7 @@ class TestFormatTimelinePhase2Claimed:
             timestamp=datetime(2026, 5, 25, 10, 31, 0, tzinfo=timezone.utc),
         )
         result = format_timeline([event])
-        assert "[10:31:00] PHASE2 agent_c → claim (I have the skills)" in result
+        assert "[10:31:00] PHASE2 agent_c -> claim (I have the skills)" in result
 
     def test_phase2_claimed_long_justification(self):
         """Phase2ClaimedEvent with justification > 50 chars should truncate with ..."""
@@ -69,7 +69,7 @@ class TestFormatTimelinePhase2Claimed:
             timestamp=datetime(2026, 5, 25, 10, 31, 30, tzinfo=timezone.utc),
         )
         result = format_timeline([event])
-        assert "[10:31:30] PHASE2 agent_d → claim (AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...)" in result
+        assert "[10:31:30] PHASE2 agent_d -> claim (AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...)" in result
 
     def test_phase2_claimed_no_claim_decision(self):
         """Phase2ClaimedEvent with decision='no_claim' should format correctly."""
@@ -82,7 +82,7 @@ class TestFormatTimelinePhase2Claimed:
             timestamp=datetime(2026, 5, 25, 10, 32, 0, tzinfo=timezone.utc),
         )
         result = format_timeline([event])
-        assert "[10:32:00] PHASE2 agent_e → no_claim (Not qualified)" in result
+        assert "[10:32:00] PHASE2 agent_e -> no_claim (Not qualified)" in result
 
     def test_phase2_claimed_exactly_50_chars(self):
         """Justification with exactly 50 chars should not be truncated."""
@@ -113,7 +113,7 @@ class TestFormatTimelineDispatched:
             timestamp=datetime(2026, 5, 25, 10, 33, 0, tzinfo=timezone.utc),
         )
         result = format_timeline([event])
-        assert "[10:33:00] DISPATCH → agent_g (only claimer)" in result
+        assert "[10:33:00] DISPATCH -> agent_g (only claimer)" in result
 
 
 class TestFormatTimelineExecuted:
@@ -129,7 +129,7 @@ class TestFormatTimelineExecuted:
             timestamp=datetime(2026, 5, 25, 10, 33, 30, tzinfo=timezone.utc),
         )
         result = format_timeline([event])
-        assert "[10:33:30] EXECUTED → agent_h (Task completed successfully)" in result
+        assert "[10:33:30] EXECUTED -> agent_h (Task completed successfully)" in result
 
     def test_executed_long_output(self):
         """ExecutedEvent with output_summary > 60 chars should truncate with ..."""
@@ -142,7 +142,7 @@ class TestFormatTimelineExecuted:
             timestamp=datetime(2026, 5, 25, 10, 34, 0, tzinfo=timezone.utc),
         )
         result = format_timeline([event])
-        assert "[10:34:00] EXECUTED → agent_i (AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...)" in result
+        assert "[10:34:00] EXECUTED -> agent_i (AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...)" in result
 
     def test_executed_exactly_60_chars(self):
         """Output_summary with exactly 60 chars should not be truncated."""
@@ -171,7 +171,7 @@ class TestFormatTimelineUnassigned:
             timestamp=datetime(2026, 5, 25, 10, 35, 0, tzinfo=timezone.utc),
         )
         result = format_timeline([event])
-        assert "[10:35:00] UNASSIGNED → no agents claimed" in result
+        assert "[10:35:00] UNASSIGNED -> no agents claimed" in result
 
 
 class TestFormatTimelineSorting:
@@ -232,7 +232,7 @@ class TestFormatTimelineEmpty:
             timestamp=datetime(2026, 5, 25, 10, 0, 0, tzinfo=timezone.utc),
         )
         result = format_timeline([event])
-        assert "PHASE2 agent_x → claim ()" in result
+        assert "PHASE2 agent_x -> claim ()" in result
 
     def test_executed_empty_output_summary_no_crash(self):
         """ExecutedEvent with output_summary='' should format without error."""
@@ -244,7 +244,7 @@ class TestFormatTimelineEmpty:
             timestamp=datetime(2026, 5, 25, 10, 0, 0, tzinfo=timezone.utc),
         )
         result = format_timeline([event])
-        assert "EXECUTED → agent_y ()" in result
+        assert "EXECUTED -> agent_y ()" in result
 
 
 class TestFormatTimelineMixed:
@@ -308,7 +308,7 @@ class TestPrintTimeline:
         )
         print_timeline([event])
         captured = capsys.readouterr()
-        assert "[10:30:45] PHASE1 a1 → passed (fit=0.85)" in captured.out
+        assert "[10:30:45] PHASE1 a1 -> passed (fit=0.85)" in captured.out
 
     def test_print_timeline_empty_list(self, capsys):
         """print_timeline([]) should print empty line."""
