@@ -1,9 +1,11 @@
 import pytest
 from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 from aaosa.claiming.dispatch import DispatchResult
 from aaosa.core.agent import Agent
 from aaosa.demo.agents import AGENT_BACKEND, AGENT_FRONTEND, AGENT_FULLSTACK, DEMO_AGENTS
+from aaosa.demo.run_demo import run_demo
 from aaosa.demo.tasks import (
     DEMO_TASKS,
     TASK_FIX_CSS_HOVER,
@@ -192,3 +194,75 @@ class TestDemoEndToEnd:
 
         event_types = {type(e) for e in tracer.events}
         assert UnassignedEvent in event_types
+
+
+class TestDemoV2:
+    def test_demo_runs_without_error(self, tmp_path, monkeypatch):
+        """La demo V2 complete ne crash pas."""
+        def fake_claim(self, task, client):
+            return Claim(agent_id=self.id, task_id=task.id, decision="claim", justification="ok")
+
+        def fake_execute(self, task, client):
+            tags_str = " ".join(task.required_tags.keys())
+            return Output(
+                task_id=task.id,
+                agent_id=self.id,
+                content=f"Comprehensive solution covering {tags_str} with detailed implementation",
+                llm_metadata=LLMMetadata(model_name="gpt-4o-mini", tokens_in=10, tokens_out=5, latency_ms=100.0),
+            )
+
+        monkeypatch.setattr(Agent, "claim", fake_claim)
+        monkeypatch.setattr(Agent, "execute", fake_execute)
+        monkeypatch.setenv("OPENAI_API_KEY", "fake")
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "elo_snapshots").mkdir()
+
+        run_demo()  # should not raise
+
+    def test_demo_handles_qa_failure(self, capsys, tmp_path, monkeypatch):
+        """La demo affiche QAFailure correctement sans crash."""
+        def fake_claim(self, task, client):
+            return Claim(agent_id=self.id, task_id=task.id, decision="claim", justification="ok")
+
+        def fake_execute(self, task, client):
+            return Output(
+                task_id=task.id,
+                agent_id=self.id,
+                content="short",  # fails QA (min_length)
+                llm_metadata=LLMMetadata(model_name="gpt-4o-mini", tokens_in=10, tokens_out=5, latency_ms=100.0),
+            )
+
+        monkeypatch.setattr(Agent, "claim", fake_claim)
+        monkeypatch.setattr(Agent, "execute", fake_execute)
+        monkeypatch.setenv("OPENAI_API_KEY", "fake")
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "elo_snapshots").mkdir()
+
+        run_demo()  # should not raise even with QA failures
+        captured = capsys.readouterr()
+        assert "FAIL" in captured.out or "QA" in captured.out
+
+    def test_demo_creates_snapshot(self, tmp_path, monkeypatch):
+        """La demo cree un snapshot ELO en fin de run."""
+        def fake_claim(self, task, client):
+            return Claim(agent_id=self.id, task_id=task.id, decision="claim", justification="ok")
+
+        def fake_execute(self, task, client):
+            tags_str = " ".join(task.required_tags.keys())
+            return Output(
+                task_id=task.id,
+                agent_id=self.id,
+                content=f"Comprehensive solution covering {tags_str} with detailed implementation",
+                llm_metadata=LLMMetadata(model_name="gpt-4o-mini", tokens_in=10, tokens_out=5, latency_ms=100.0),
+            )
+
+        monkeypatch.setattr(Agent, "claim", fake_claim)
+        monkeypatch.setattr(Agent, "execute", fake_execute)
+        monkeypatch.setenv("OPENAI_API_KEY", "fake")
+        monkeypatch.chdir(tmp_path)
+        snapshot_dir = tmp_path / "elo_snapshots"
+        snapshot_dir.mkdir()
+
+        run_demo()
+
+        assert (snapshot_dir / "latest.json").exists()
