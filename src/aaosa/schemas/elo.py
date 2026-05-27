@@ -12,3 +12,9 @@ ELO_BASIC_MAX = 25
 # Tags with required_elo <= this threshold are "acquirable" in Phase 1:
 # agents can pass the filter without having them, and may gain them on task success (V2).
 ELO_ACQUIRABLE_THRESHOLD = ELO_BASIC_MAX
+
+# V2 — Dynamic ELO update constants
+ELO_FLOOR = 1
+ELO_CEILING = ELO_EXPERT_MAX  # 95
+ELO_K = 5
+ELO_MAX_DELTA = 10
