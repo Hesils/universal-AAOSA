@@ -4,9 +4,11 @@ from aaosa.claiming.dispatch import DispatchResult, dispatch
 from aaosa.claiming.phase1 import filter_candidates
 from aaosa.claiming.phase2 import run_phase2
 from aaosa.core.agent import Agent
+from aaosa.elo.updater import update_agent_elo
+from aaosa.qa.protocol import QAEvaluator, QAFailure
 from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
-from aaosa.tracing.events import ExecutedEvent
+from aaosa.tracing.events import ExecutedEvent, QAEvaluatedEvent, EloUpdatedEvent, TagAcquiredEvent
 from aaosa.tracing.tracer import Tracer
 
 
@@ -15,7 +17,8 @@ def run_task(
     agents: list[Agent],
     client: OpenAI,
     tracer: Tracer | None = None,
-) -> Output | DispatchResult:
+    evaluator: QAEvaluator | None = None,
+) -> Output | DispatchResult | QAFailure:
     candidates = filter_candidates(task, agents, tracer)
     fit_scores = {agent.id: score for agent, score in candidates}
     claims = run_phase2(task, candidates, client, tracer)
@@ -38,4 +41,44 @@ def run_task(
             output_summary=output.content[:100],
         ))
 
-    return output
+    if evaluator is None:
+        return output
+
+    qa_result = evaluator.evaluate(task, output)
+
+    if tracer is not None:
+        tracer.emit(QAEvaluatedEvent(
+            session_id=tracer.session_id,
+            task_id=task.id,
+            agent_id=winner.id,
+            success=qa_result.success,
+            score=qa_result.score,
+            reason=qa_result.reason,
+        ))
+
+    elo_result = update_agent_elo(winner, task, success=qa_result.success)
+
+    if tracer is not None:
+        tracer.emit(EloUpdatedEvent(
+            session_id=tracer.session_id,
+            task_id=task.id,
+            agent_id=winner.id,
+            deltas=elo_result.deltas,
+        ))
+        for tag, elo in elo_result.acquired_tags.items():
+            tracer.emit(TagAcquiredEvent(
+                session_id=tracer.session_id,
+                task_id=task.id,
+                agent_id=winner.id,
+                tag=tag,
+                initial_elo=elo,
+            ))
+
+    if qa_result.success:
+        return output
+    return QAFailure(
+        task_id=task.id,
+        agent_id=winner.id,
+        output=output,
+        qa_result=qa_result,
+    )

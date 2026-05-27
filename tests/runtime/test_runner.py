@@ -18,7 +18,8 @@ from aaosa.schemas.claim import Claim
 from aaosa.schemas.output import Output, LLMMetadata
 from aaosa.schemas.task import Task
 from aaosa.claiming.dispatch import DispatchResult
-from aaosa.tracing.events import ExecutedEvent
+from aaosa.qa.protocol import QAResult, QAFailure
+from aaosa.tracing.events import ExecutedEvent, QAEvaluatedEvent, EloUpdatedEvent, TagAcquiredEvent
 from aaosa.tracing.tracer import Tracer
 
 
@@ -181,3 +182,204 @@ def test_run_task_unassigned_no_execute_called():
 
     assert isinstance(result, DispatchResult)
     assert execute_mock.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# V2 helpers
+# ---------------------------------------------------------------------------
+
+class AlwaysPassEvaluator:
+    def evaluate(self, task, output):
+        return QAResult(
+            task_id=task.id, agent_id=output.agent_id,
+            success=True, score=1.0, reason="ok",
+            criteria_results={"all": True},
+        )
+
+
+class AlwaysFailEvaluator:
+    def evaluate(self, task, output):
+        return QAResult(
+            task_id=task.id, agent_id=output.agent_id,
+            success=False, score=0.0, reason="bad",
+            criteria_results={"all": False},
+        )
+
+
+# ---------------------------------------------------------------------------
+# V2 Tests — Backward compat (evaluator=None)
+# ---------------------------------------------------------------------------
+
+class TestRunTaskV2BackwardCompat:
+    def test_evaluator_none_returns_output(self):
+        """evaluator=None -> V1 behavior exact, retourne Output."""
+        task = make_task()
+        agent = make_agent("A", 80)
+        claim = make_claim(agent, task, "claim")
+        output = make_output(agent, task)
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                result = run_task(task, [agent], MagicMock(), evaluator=None)
+        assert isinstance(result, Output)
+
+    def test_evaluator_none_no_elo_update(self):
+        """evaluator=None -> pas d'ELO update, pas de QA events."""
+        task = make_task()
+        agent = make_agent("A", 80)
+        original_elo = dict(agent.tags_with_elo)
+        claim = make_claim(agent, task, "claim")
+        output = make_output(agent, task)
+        tracer = Tracer(session_id="s1")
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                run_task(task, [agent], MagicMock(), evaluator=None, tracer=tracer)
+        assert agent.tags_with_elo == original_elo
+        qa_events = [e for e in tracer.events if isinstance(e, QAEvaluatedEvent)]
+        assert len(qa_events) == 0
+
+
+# ---------------------------------------------------------------------------
+# V2 Tests — QA pass
+# ---------------------------------------------------------------------------
+
+class TestRunTaskV2QAPass:
+    def test_qa_pass_returns_output(self):
+        """QA pass -> retourne Output (pas QAFailure)."""
+        task = make_task()
+        agent = make_agent("A", 80)
+        claim = make_claim(agent, task, "claim")
+        output = make_output(agent, task)
+        evaluator = AlwaysPassEvaluator()
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                result = run_task(task, [agent], MagicMock(), evaluator=evaluator)
+        assert isinstance(result, Output)
+
+    def test_qa_pass_updates_elo_up(self):
+        """QA pass -> ELO augmente sur les required tags."""
+        task = make_task()
+        agent = make_agent("A", 80)
+        elo_before = dict(agent.tags_with_elo)
+        claim = make_claim(agent, task, "claim")
+        output = make_output(agent, task)
+        evaluator = AlwaysPassEvaluator()
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                run_task(task, [agent], MagicMock(), evaluator=evaluator)
+        assert any(
+            agent.tags_with_elo[t] > elo_before[t]
+            for t in task.required_tags
+        )
+
+    def test_qa_pass_tracer_events(self):
+        """QA pass -> tracer recoit QAEvaluatedEvent + EloUpdatedEvent."""
+        task = make_task()
+        agent = make_agent("A", 80)
+        claim = make_claim(agent, task, "claim")
+        output = make_output(agent, task)
+        evaluator = AlwaysPassEvaluator()
+        tracer = Tracer(session_id="s1")
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                run_task(task, [agent], MagicMock(), evaluator=evaluator, tracer=tracer)
+        qa_events = [e for e in tracer.events if isinstance(e, QAEvaluatedEvent)]
+        elo_events = [e for e in tracer.events if isinstance(e, EloUpdatedEvent)]
+        assert len(qa_events) == 1
+        assert qa_events[0].success is True
+        assert len(elo_events) == 1
+
+
+# ---------------------------------------------------------------------------
+# V2 Tests — QA fail
+# ---------------------------------------------------------------------------
+
+class TestRunTaskV2QAFail:
+    def test_qa_fail_returns_qa_failure(self):
+        """QA fail -> retourne QAFailure."""
+        task = make_task()
+        agent = make_agent("A", 80)
+        claim = make_claim(agent, task, "claim")
+        output = make_output(agent, task)
+        evaluator = AlwaysFailEvaluator()
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                result = run_task(task, [agent], MagicMock(), evaluator=evaluator)
+        assert isinstance(result, QAFailure)
+        assert result.output == output
+        assert result.qa_result.success is False
+
+    def test_qa_fail_updates_elo_down(self):
+        """QA fail -> ELO diminue sur les required tags."""
+        task = make_task()
+        agent = make_agent("A", 80)
+        elo_before = dict(agent.tags_with_elo)
+        claim = make_claim(agent, task, "claim")
+        output = make_output(agent, task)
+        evaluator = AlwaysFailEvaluator()
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                run_task(task, [agent], MagicMock(), evaluator=evaluator)
+        assert any(
+            agent.tags_with_elo[t] < elo_before[t]
+            for t in task.required_tags
+        )
+
+    def test_qa_fail_tracer_events(self):
+        """QA fail -> tracer recoit QAEvaluatedEvent (success=False) + EloUpdatedEvent."""
+        task = make_task()
+        agent = make_agent("A", 80)
+        claim = make_claim(agent, task, "claim")
+        output = make_output(agent, task)
+        evaluator = AlwaysFailEvaluator()
+        tracer = Tracer(session_id="s1")
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                run_task(task, [agent], MagicMock(), evaluator=evaluator, tracer=tracer)
+        qa_events = [e for e in tracer.events if isinstance(e, QAEvaluatedEvent)]
+        assert len(qa_events) == 1
+        assert qa_events[0].success is False
+
+
+# ---------------------------------------------------------------------------
+# V2 Tests — Tag acquisition
+# ---------------------------------------------------------------------------
+
+class TestRunTaskV2TagAcquisition:
+    def test_qa_pass_with_acquirable_tags_emits_tag_acquired(self):
+        """Succes + acquirable tag absent -> TagAcquiredEvent emis."""
+        task = Task(
+            description="Build API",
+            required_tags={"python": 60},
+            acquirable_tags={"docker": 20},
+        )
+        agent = Agent(
+            name="A",
+            tags_with_elo={"python": 80},
+            system_prompt="test",
+        )
+        claim = make_claim(agent, task, "claim")
+        output = make_output(agent, task)
+        evaluator = AlwaysPassEvaluator()
+        tracer = Tracer(session_id="s1")
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                run_task(task, [agent], MagicMock(), evaluator=evaluator, tracer=tracer)
+        acq_events = [e for e in tracer.events if isinstance(e, TagAcquiredEvent)]
+        assert len(acq_events) == 1
+        assert acq_events[0].tag == "docker"
+        assert acq_events[0].initial_elo == 20
+
+
+# ---------------------------------------------------------------------------
+# V2 Tests — Unassigned path unaffected
+# ---------------------------------------------------------------------------
+
+class TestRunTaskV2Unassigned:
+    def test_unassigned_with_evaluator_returns_dispatch_result(self):
+        """Unassigned task with evaluator -> DispatchResult (no QA, no ELO)."""
+        task = make_task()
+        agent = make_agent("Unqualified", 10)
+        evaluator = AlwaysPassEvaluator()
+        result = run_task(task, [agent], MagicMock(), evaluator=evaluator)
+        assert isinstance(result, DispatchResult)
+        assert result.status == "unassigned"
