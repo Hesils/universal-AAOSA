@@ -1,0 +1,139 @@
+import pytest
+from pydantic import TypeAdapter
+
+from aaosa.tracing.events import (
+    ClaimEvent,
+    EloUpdatedEvent,
+    Phase1FilteredEvent,
+    QAEvaluatedEvent,
+    TagAcquiredEvent,
+)
+
+
+class TestQAEvaluatedEvent:
+    def test_valid_event(self):
+        e = QAEvaluatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", success=True, score=0.95,
+            reason="All criteria passed",
+        )
+        assert e.type == "qa_evaluated"
+        assert e.success is True
+        assert e.score == 0.95
+
+    def test_failure_event(self):
+        e = QAEvaluatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", success=False, score=0.2,
+            reason="Too short",
+        )
+        assert e.success is False
+
+    def test_json_roundtrip(self):
+        e = QAEvaluatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", success=True, score=0.8,
+            reason="ok",
+        )
+        data = e.model_dump_json()
+        e2 = QAEvaluatedEvent.model_validate_json(data)
+        assert e2.type == "qa_evaluated"
+        assert e2.score == 0.8
+
+    def test_extra_fields_rejected(self):
+        with pytest.raises(Exception):
+            QAEvaluatedEvent(
+                session_id="s1", task_id="t1",
+                agent_id="a1", success=True, score=0.8,
+                reason="ok", extra_field="bad",
+            )
+
+
+class TestEloUpdatedEvent:
+    def test_valid_event(self):
+        e = EloUpdatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", deltas={"python": 5, "backend": -3},
+        )
+        assert e.type == "elo_updated"
+        assert e.deltas == {"python": 5, "backend": -3}
+
+    def test_empty_deltas(self):
+        e = EloUpdatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", deltas={},
+        )
+        assert e.deltas == {}
+
+    def test_json_roundtrip(self):
+        e = EloUpdatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", deltas={"css": 10},
+        )
+        data = e.model_dump_json()
+        e2 = EloUpdatedEvent.model_validate_json(data)
+        assert e2.deltas == {"css": 10}
+
+
+class TestTagAcquiredEvent:
+    def test_valid_event(self):
+        e = TagAcquiredEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", tag="docker", initial_elo=20,
+        )
+        assert e.type == "tag_acquired"
+        assert e.tag == "docker"
+        assert e.initial_elo == 20
+
+    def test_json_roundtrip(self):
+        e = TagAcquiredEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", tag="k8s", initial_elo=15,
+        )
+        data = e.model_dump_json()
+        e2 = TagAcquiredEvent.model_validate_json(data)
+        assert e2.tag == "k8s"
+        assert e2.initial_elo == 15
+
+
+class TestClaimEventUnionV2:
+    def test_discriminator_qa_evaluated(self):
+        adapter = TypeAdapter(ClaimEvent)
+        data = {
+            "type": "qa_evaluated",
+            "session_id": "s1", "task_id": "t1",
+            "agent_id": "a1", "success": True, "score": 0.9,
+            "reason": "ok",
+        }
+        event = adapter.validate_python(data)
+        assert isinstance(event, QAEvaluatedEvent)
+
+    def test_discriminator_elo_updated(self):
+        adapter = TypeAdapter(ClaimEvent)
+        data = {
+            "type": "elo_updated",
+            "session_id": "s1", "task_id": "t1",
+            "agent_id": "a1", "deltas": {"python": 5},
+        }
+        event = adapter.validate_python(data)
+        assert isinstance(event, EloUpdatedEvent)
+
+    def test_discriminator_tag_acquired(self):
+        adapter = TypeAdapter(ClaimEvent)
+        data = {
+            "type": "tag_acquired",
+            "session_id": "s1", "task_id": "t1",
+            "agent_id": "a1", "tag": "docker", "initial_elo": 20,
+        }
+        event = adapter.validate_python(data)
+        assert isinstance(event, TagAcquiredEvent)
+
+    def test_existing_types_still_work(self):
+        adapter = TypeAdapter(ClaimEvent)
+        data = {
+            "type": "phase1_filtered",
+            "session_id": "s1", "task_id": "t1",
+            "agent_id": "a1", "passed": True, "fit_score": 0.9,
+        }
+        event = adapter.validate_python(data)
+        assert isinstance(event, Phase1FilteredEvent)

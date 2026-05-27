@@ -42,6 +42,27 @@ class UnassignedEvent(_BaseEvent):
     reason: str
 
 
+class QAEvaluatedEvent(_BaseEvent):
+    type: Literal["qa_evaluated"] = "qa_evaluated"
+    agent_id: str
+    success: bool
+    score: float
+    reason: str
+
+
+class EloUpdatedEvent(_BaseEvent):
+    type: Literal["elo_updated"] = "elo_updated"
+    agent_id: str
+    deltas: dict[str, int]
+
+
+class TagAcquiredEvent(_BaseEvent):
+    type: Literal["tag_acquired"] = "tag_acquired"
+    agent_id: str
+    tag: str
+    initial_elo: int
+
+
 ClaimEvent = Annotated[
     Union[
         Phase1FilteredEvent,
@@ -49,6 +70,9 @@ ClaimEvent = Annotated[
         DispatchedEvent,
         ExecutedEvent,
         UnassignedEvent,
+        QAEvaluatedEvent,
+        EloUpdatedEvent,
+        TagAcquiredEvent,
     ],
     Field(discriminator="type"),
 ]
