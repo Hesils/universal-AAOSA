@@ -7,6 +7,9 @@ from aaosa.tracing.events import (
     DispatchedEvent,
     ExecutedEvent,
     UnassignedEvent,
+    QAEvaluatedEvent,
+    EloUpdatedEvent,
+    TagAcquiredEvent,
 )
 from aaosa.tracing.formatter import format_timeline, print_timeline
 
@@ -338,3 +341,110 @@ class TestPrintTimeline:
         captured = capsys.readouterr()
         assert "PHASE1" in captured.out
         assert "UNASSIGNED" in captured.out
+
+
+class TestFormatTimelineQAEvaluated:
+    def test_qa_pass(self):
+        event = QAEvaluatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="Frontend", success=True, score=1.0,
+            reason="All criteria met",
+            timestamp=datetime(2026, 5, 27, 10, 30, 2, tzinfo=timezone.utc),
+        )
+        result = format_timeline([event])
+        assert "[10:30:02] QA Frontend -> PASS (score=1.00)" in result
+
+    def test_qa_fail(self):
+        event = QAEvaluatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="Backend", success=False, score=0.30,
+            reason="Too short",
+            timestamp=datetime(2026, 5, 27, 10, 30, 5, tzinfo=timezone.utc),
+        )
+        result = format_timeline([event])
+        assert "[10:30:05] QA Backend -> FAIL (score=0.30)" in result
+
+    def test_qa_score_formatting(self):
+        event = QAEvaluatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="A", success=True, score=0.5,
+            reason="ok",
+            timestamp=datetime(2026, 5, 27, 10, 0, 0, tzinfo=timezone.utc),
+        )
+        result = format_timeline([event])
+        assert "score=0.50" in result
+
+
+class TestFormatTimelineEloUpdated:
+    def test_elo_single_tag(self):
+        event = EloUpdatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="Frontend", deltas={"frontend": 4},
+            timestamp=datetime(2026, 5, 27, 10, 30, 2, tzinfo=timezone.utc),
+        )
+        result = format_timeline([event])
+        assert "[10:30:02] ELO Frontend -> frontend: +4" in result
+
+    def test_elo_multiple_tags(self):
+        event = EloUpdatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="Frontend", deltas={"frontend": 4, "css": 3},
+            timestamp=datetime(2026, 5, 27, 10, 30, 2, tzinfo=timezone.utc),
+        )
+        result = format_timeline([event])
+        assert "frontend: +4" in result
+        assert "css: +3" in result
+
+    def test_elo_negative_delta(self):
+        event = EloUpdatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="Backend", deltas={"python": -5},
+            timestamp=datetime(2026, 5, 27, 10, 30, 3, tzinfo=timezone.utc),
+        )
+        result = format_timeline([event])
+        assert "python: -5" in result
+
+    def test_elo_empty_deltas(self):
+        event = EloUpdatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="A", deltas={},
+            timestamp=datetime(2026, 5, 27, 10, 0, 0, tzinfo=timezone.utc),
+        )
+        result = format_timeline([event])
+        assert "[10:00:00] ELO A ->" in result
+
+
+class TestFormatTimelineTagAcquired:
+    def test_tag_acquired(self):
+        event = TagAcquiredEvent(
+            session_id="s1", task_id="t1",
+            agent_id="Fullstack", tag="docker", initial_elo=20,
+            timestamp=datetime(2026, 5, 27, 10, 30, 5, tzinfo=timezone.utc),
+        )
+        result = format_timeline([event])
+        assert "[10:30:05] ACQUIRED Fullstack -> docker: 20 (new tag)" in result
+
+
+class TestFormatTimelineMixedV1V2:
+    def test_v1_and_v2_events_sorted(self):
+        e1 = ExecutedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="Frontend", output_summary="Done",
+            timestamp=datetime(2026, 5, 27, 10, 0, 0, tzinfo=timezone.utc),
+        )
+        e2 = QAEvaluatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="Frontend", success=True, score=1.0, reason="ok",
+            timestamp=datetime(2026, 5, 27, 10, 0, 1, tzinfo=timezone.utc),
+        )
+        e3 = EloUpdatedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="Frontend", deltas={"frontend": 5},
+            timestamp=datetime(2026, 5, 27, 10, 0, 2, tzinfo=timezone.utc),
+        )
+        result = format_timeline([e3, e1, e2])  # out of order
+        lines = result.split("\n")
+        assert len(lines) == 3
+        assert "EXECUTED" in lines[0]
+        assert "QA" in lines[1]
+        assert "ELO" in lines[2]

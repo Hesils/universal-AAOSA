@@ -5,6 +5,9 @@ from aaosa.tracing.events import (
     DispatchedEvent,
     ExecutedEvent,
     UnassignedEvent,
+    QAEvaluatedEvent,
+    EloUpdatedEvent,
+    TagAcquiredEvent,
 )
 
 
@@ -51,6 +54,23 @@ def format_timeline(events: list[ClaimEvent]) -> str:
 
         elif isinstance(event, UnassignedEvent):
             line = f"[{time_str}] UNASSIGNED -> {event.reason}"
+            lines.append(line)
+
+        elif isinstance(event, QAEvaluatedEvent):
+            verdict = "PASS" if event.success else "FAIL"
+            line = f"[{time_str}] QA {event.agent_id} -> {verdict} (score={event.score:.2f})"
+            lines.append(line)
+
+        elif isinstance(event, EloUpdatedEvent):
+            deltas_str = ", ".join(
+                f"{tag}: {'+' if d > 0 else ''}{d}"
+                for tag, d in event.deltas.items()
+            )
+            line = f"[{time_str}] ELO {event.agent_id} -> {deltas_str}"
+            lines.append(line)
+
+        elif isinstance(event, TagAcquiredEvent):
+            line = f"[{time_str}] ACQUIRED {event.agent_id} -> {event.tag}: {event.initial_elo} (new tag)"
             lines.append(line)
 
     return "\n".join(lines)
