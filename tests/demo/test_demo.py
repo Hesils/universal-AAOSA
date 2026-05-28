@@ -266,3 +266,67 @@ class TestDemoV2:
         run_demo()
 
         assert (snapshot_dir / "latest.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# TestDemoV2b — démo bascule sur SpecEvaluator adaptatif par tâche
+# ---------------------------------------------------------------------------
+
+import aaosa.demo.run_demo as demo_module
+
+
+def _output_for_v2b(task, agent_id, content="x" * 80):
+    return Output(
+        task_id=task.id,
+        agent_id=agent_id,
+        content=content,
+        llm_metadata=LLMMetadata(model_name="m", tokens_in=1, tokens_out=1, latency_ms=1.0),
+    )
+
+
+def _qa_failure_for(task, agent_id):
+    from aaosa.qa.protocol import QAFailure, QAResult
+    output = _output_for_v2b(task, agent_id, content="")
+    return QAFailure(
+        task_id=task.id,
+        agent_id=agent_id,
+        output=output,
+        qa_result=QAResult(
+            task_id=task.id,
+            agent_id=agent_id,
+            success=False,
+            score=0.0,
+            reason="gate failed: non_empty",
+            criteria_results={"non_empty": False},
+        ),
+    )
+
+
+class TestDemoV2b:
+    def test_runs_without_crash(self, monkeypatch, tmp_path):
+        """run_demo() V2b ne crash pas quand run_task retourne un Output valide."""
+        from aaosa.demo.agents import DEMO_AGENTS
+        from aaosa.qa.adaptive import build_adaptive_spec as real_build
+
+        a_id = DEMO_AGENTS[0].id
+        monkeypatch.setattr(demo_module, "create_client", lambda: object())
+        monkeypatch.setattr(demo_module, "build_adaptive_spec", real_build)
+        monkeypatch.setattr(
+            demo_module, "run_task", lambda task, *a, **k: _output_for_v2b(task, a_id)
+        )
+        monkeypatch.setattr(demo_module, "save_snapshot", lambda agents, d: tmp_path / "latest.json")
+        run_demo()
+
+    def test_handles_qa_failure(self, monkeypatch, tmp_path):
+        """run_demo() V2b ne crash pas quand run_task retourne un QAFailure."""
+        from aaosa.demo.agents import DEMO_AGENTS
+        from aaosa.qa.adaptive import build_adaptive_spec as real_build
+
+        a_id = DEMO_AGENTS[0].id
+        monkeypatch.setattr(demo_module, "create_client", lambda: object())
+        monkeypatch.setattr(demo_module, "build_adaptive_spec", real_build)
+        monkeypatch.setattr(
+            demo_module, "run_task", lambda task, *a, **k: _qa_failure_for(task, a_id)
+        )
+        monkeypatch.setattr(demo_module, "save_snapshot", lambda agents, d: tmp_path / "latest.json")
+        run_demo()
