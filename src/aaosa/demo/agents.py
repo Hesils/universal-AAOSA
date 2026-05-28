@@ -9,7 +9,7 @@ AGENT_FRONTEND = Agent(
 AGENT_BACKEND = Agent(
     name="Backend",
     tags_with_elo={"backend": 90, "database": 85, "python": 80, "testing": 50},
-    system_prompt="You are a backend specialist focused on APIs, databases, and Python.",
+    system_prompt="You are a backend specialist focused on APIs, databases, Python, and backend performance optimization (middleware, connection pooling, caching, async patterns, query indexing).",
 )
 
 AGENT_DEVOPS = Agent(

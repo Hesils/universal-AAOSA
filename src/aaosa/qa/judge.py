@@ -6,9 +6,15 @@ from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
 
 
+class DimensionScore(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    score: float  # 0.0-1.0
+
+
 class JudgeResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    dimension_scores: dict[str, float]
+    dimension_scores: list[DimensionScore]
     overall: float
     reason: str
 

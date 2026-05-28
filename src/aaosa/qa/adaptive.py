@@ -8,7 +8,6 @@ def build_adaptive_spec(task: Task) -> EvaluatorSpec:
 
     criteria = [
         CriterionSpec(name="non_empty", gate=True),
-        CriterionSpec(name="references_tags", weight=1.0),
         CriterionSpec(name="min_length", params={"min_chars": 50 * n_tags}, weight=1.0),
     ]
 

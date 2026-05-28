@@ -17,10 +17,6 @@ class TestBuildAdaptiveSpec:
         gates = [c for c in spec.criteria if c.gate]
         assert any(c.name == "non_empty" for c in gates)
 
-    def test_always_has_references_tags(self):
-        spec = build_adaptive_spec(task_with({"python": 50}))
-        assert any(c.name == "references_tags" for c in spec.criteria)
-
     def test_min_length_scaled_by_tag_count(self):
         spec = build_adaptive_spec(task_with({"python": 50, "testing": 40, "docker": 30}))
         ml = next(c for c in spec.criteria if c.name == "min_length")

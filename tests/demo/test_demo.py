@@ -197,8 +197,8 @@ class TestDemoEndToEnd:
 
 
 def _fake_run_judge(task, output, spec, client, reference=None):
-    from aaosa.qa.judge import JudgeResult
-    return JudgeResult(dimension_scores={"overall": 1.0}, overall=1.0, reason="mocked judge")
+    from aaosa.qa.judge import DimensionScore, JudgeResult
+    return JudgeResult(dimension_scores=[], overall=1.0, reason="mocked judge")
 
 
 class TestDemoV2:

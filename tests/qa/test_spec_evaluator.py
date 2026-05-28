@@ -81,7 +81,7 @@ class TestJudgeCombination:
         monkeypatch.setattr(
             se_module, "run_judge",
             lambda task, output, spec, client, reference=None: JudgeResult(
-                dimension_scores={"correctness": 0.0}, overall=0.0, reason="bad"),
+                dimension_scores=[], overall=0.0, reason="bad"),
         )
         spec = EvaluatorSpec(
             criteria=[CriterionSpec(name="min_length", weight=1.0)],
@@ -96,7 +96,7 @@ class TestJudgeCombination:
         called = {"n": 0}
         def _spy(*a, **k):
             called["n"] += 1
-            return JudgeResult(dimension_scores={}, overall=1.0, reason="")
+            return JudgeResult(dimension_scores=[], overall=1.0, reason="")
         monkeypatch.setattr(se_module, "run_judge", _spy)
         spec = EvaluatorSpec(
             criteria=[CriterionSpec(name="non_empty", gate=True)],
@@ -109,7 +109,7 @@ class TestJudgeCombination:
         seen = {}
         def _capture(task, output, spec, client, reference=None):
             seen["reference"] = reference
-            return JudgeResult(dimension_scores={}, overall=1.0, reason="")
+            return JudgeResult(dimension_scores=[], overall=1.0, reason="")
         monkeypatch.setattr(se_module, "run_judge", _capture)
         spec = EvaluatorSpec(
             criteria=[CriterionSpec(name="non_empty", gate=True)],
