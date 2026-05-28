@@ -196,6 +196,11 @@ class TestDemoEndToEnd:
         assert UnassignedEvent in event_types
 
 
+def _fake_run_judge(task, output, spec, client, reference=None):
+    from aaosa.qa.judge import JudgeResult
+    return JudgeResult(dimension_scores={"overall": 1.0}, overall=1.0, reason="mocked judge")
+
+
 class TestDemoV2:
     def test_demo_runs_without_error(self, tmp_path, monkeypatch):
         """La demo V2 complete ne crash pas."""
@@ -213,6 +218,7 @@ class TestDemoV2:
 
         monkeypatch.setattr(Agent, "claim", fake_claim)
         monkeypatch.setattr(Agent, "execute", fake_execute)
+        monkeypatch.setattr("aaosa.qa.spec_evaluator.run_judge", _fake_run_judge)
         monkeypatch.setenv("OPENAI_API_KEY", "fake")
         monkeypatch.chdir(tmp_path)
         (tmp_path / "elo_snapshots").mkdir()
@@ -234,6 +240,7 @@ class TestDemoV2:
 
         monkeypatch.setattr(Agent, "claim", fake_claim)
         monkeypatch.setattr(Agent, "execute", fake_execute)
+        monkeypatch.setattr("aaosa.qa.spec_evaluator.run_judge", _fake_run_judge)
         monkeypatch.setenv("OPENAI_API_KEY", "fake")
         monkeypatch.chdir(tmp_path)
         (tmp_path / "elo_snapshots").mkdir()
@@ -258,6 +265,7 @@ class TestDemoV2:
 
         monkeypatch.setattr(Agent, "claim", fake_claim)
         monkeypatch.setattr(Agent, "execute", fake_execute)
+        monkeypatch.setattr("aaosa.qa.spec_evaluator.run_judge", _fake_run_judge)
         monkeypatch.setenv("OPENAI_API_KEY", "fake")
         monkeypatch.chdir(tmp_path)
         snapshot_dir = tmp_path / "elo_snapshots"

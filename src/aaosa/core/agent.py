@@ -72,12 +72,14 @@ class Agent(BaseModel):
             raise ValueError(f"Failed to parse claim from LLM response: {e!r}. Raw: {raw!r}") from e
 
     def execute(self, task: Task, client: OpenAI) -> Output:
+        context = task.metadata.get("context", "")
+        user_content = f"{task.description}\n\n{context}".strip() if context else task.description
         start = time.monotonic()
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": task.description},
+                {"role": "user", "content": user_content},
             ],
         )
         latency_ms = (time.monotonic() - start) * 1000
