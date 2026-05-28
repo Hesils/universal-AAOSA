@@ -1,265 +1,141 @@
-from unittest.mock import MagicMock, patch
-from datetime import datetime, timezone
-
-import pytest
-
-from aaosa.qa.health_check import run_health_check, HealthCheckReport, TestCase
-from aaosa.qa.protocol import QAResult, QAFailure
-from aaosa.core.agent import Agent
-from aaosa.schemas.task import Task
-from aaosa.schemas.claim import Claim
+import aaosa.qa.health_check as hc_module
+from aaosa.qa.health_check import CaseResult, HealthCheckReport, run_health_check
+from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
+from aaosa.qa.test_set import TestCase, TestSet
 from aaosa.schemas.output import Output, LLMMetadata
-from aaosa.tracing.tracer import Tracer
+from aaosa.schemas.task import Task
 
 
-def make_agent(name: str = "A", elo: int = 80) -> Agent:
-    return Agent(name=name, tags_with_elo={"python": elo}, system_prompt="test")
+def make_task(desc="do x") -> Task:
+    return Task(description=desc, required_tags={"python": 80})
 
 
-def make_task(required: dict[str, int] | None = None) -> Task:
-    return Task(description="Test", required_tags=required or {"python": 50})
-
-
-def make_claim(agent, task, decision="claim"):
-    return Claim(agent_id=agent.id, task_id=task.id, decision=decision, justification="ok")
-
-
-def make_output(agent, task, content="x" * 60 + " python"):
+def passing_output(task) -> Output:
     return Output(
-        task_id=task.id,
-        agent_id=agent.id,
-        content=content,
-        llm_metadata=LLMMetadata(model_name="gpt-4o-mini", tokens_in=10, tokens_out=5, latency_ms=100.0),
+        task_id=task.id, agent_id="a1", content="x" * 80,   # min_length pass
+        llm_metadata=LLMMetadata(model_name="m", tokens_in=1, tokens_out=1, latency_ms=1.0),
     )
 
 
-class AlwaysPassEvaluator:
-    def evaluate(self, task, output):
-        return QAResult(
-            task_id=task.id,
-            agent_id=output.agent_id,
-            success=True,
-            score=1.0,
-            reason="ok",
-            criteria_results={},
-        )
+def failing_output(task) -> Output:
+    return Output(
+        task_id=task.id, agent_id="a1", content="",           # non_empty gate fail
+        llm_metadata=LLMMetadata(model_name="m", tokens_in=1, tokens_out=1, latency_ms=1.0),
+    )
 
 
-class AlwaysFailEvaluator:
-    def evaluate(self, task, output):
-        return QAResult(
-            task_id=task.id,
-            agent_id=output.agent_id,
-            success=False,
-            score=0.0,
-            reason="bad",
-            criteria_results={},
-        )
+# Spec déterministe : gate non_empty + min_length scoré, seuil bas
+def det_spec() -> EvaluatorSpec:
+    return EvaluatorSpec(
+        criteria=[CriterionSpec(name="non_empty", gate=True),
+                  CriterionSpec(name="min_length", weight=1.0)],
+        success_threshold=0.5,
+    )
 
 
-class TestHealthCheckReport:
-    def test_valid_report(self):
-        r = HealthCheckReport(
-            timestamp=datetime.now(timezone.utc),
-            total_tasks=3,
-            passed=2,
-            failed=1,
-            skipped=0,
-            qa_results=[],
-            qa_failures=[],
-        )
-        assert r.total_tasks == 3
+def guard_case(task, spec=None) -> TestCase:
+    return TestCase(task=task, evaluator_spec=spec or det_spec(),
+                    origin="curated", role="regression_guard")
 
-    def test_extra_fields_forbidden(self):
-        with pytest.raises(Exception):
-            HealthCheckReport(
-                timestamp=datetime.now(timezone.utc),
-                total_tasks=0,
-                passed=0,
-                failed=0,
-                skipped=0,
-                qa_results=[],
-                qa_failures=[],
-                extra="bad",
-            )
+
+class _Dispatch:
+    status = "unassigned"
+
+
+def patch_run_task(monkeypatch, fn):
+    monkeypatch.setattr(hc_module, "run_task", fn)
+
+
+class TestCaseResultSchema:
+    def test_fields(self):
+        cr = CaseResult(task_id="t", role="regression_guard", n_runs=5,
+                        pass_count=3, pass_rate=0.6, unstable=False,
+                        qa_results=[], qa_failures=[])
+        assert cr.pass_rate == 0.6
 
 
 class TestRunHealthCheck:
-    def test_all_pass(self):
-        """Toutes les taches passent leur QA respectif."""
-        agent = make_agent("A", 80)
+    def test_all_pass(self, monkeypatch):
         task = make_task()
-        test_suite: list[TestCase] = [(task, AlwaysPassEvaluator())]
-        claim = make_claim(agent, task)
-        output = make_output(agent, task)
-        with patch.object(Agent, "claim", return_value=claim):
-            with patch.object(Agent, "execute", return_value=output):
-                report = run_health_check(
-                    agents=[agent],
-                    test_suite=test_suite,
-                    client=MagicMock(),
-                )
-        assert report.passed == 1
-        assert report.failed == 0
-        assert report.total_tasks == 1
-        assert len(report.qa_results) == 1
-        assert report.qa_results[0].success is True
+        patch_run_task(monkeypatch, lambda *a, **k: passing_output(task))
+        report = run_health_check([], TestSet(cases=[guard_case(task)]), client=object(), n_runs=3)
+        assert report.total_cases == 1
+        assert report.case_results[0].pass_rate == 1.0
+        assert report.regression_guard_pass_rate == 1.0
 
-    def test_all_fail(self):
-        """Toutes les taches echouent leur QA."""
-        agent = make_agent("A", 80)
+    def test_all_fail(self, monkeypatch):
         task = make_task()
-        test_suite: list[TestCase] = [(task, AlwaysFailEvaluator())]
-        claim = make_claim(agent, task)
-        output = make_output(agent, task)
-        with patch.object(Agent, "claim", return_value=claim):
-            with patch.object(Agent, "execute", return_value=output):
-                report = run_health_check(
-                    agents=[agent],
-                    test_suite=test_suite,
-                    client=MagicMock(),
-                )
-        assert report.passed == 0
-        assert report.failed == 1
-        assert len(report.qa_failures) == 1
-        assert report.qa_failures[0].qa_result.success is False
+        patch_run_task(monkeypatch, lambda *a, **k: failing_output(task))
+        report = run_health_check([], TestSet(cases=[guard_case(task)]), client=object(), n_runs=3)
+        assert report.case_results[0].pass_rate == 0.0
+        assert len(report.case_results[0].qa_failures) == 3
 
-    def test_different_evaluator_per_task(self):
-        """Chaque tache utilise son propre evaluateur."""
-        agent = make_agent("A", 80)
-        t1 = make_task()
-        t2 = make_task()
-        test_suite: list[TestCase] = [
-            (t1, AlwaysPassEvaluator()),
-            (t2, AlwaysFailEvaluator()),
-        ]
-        claim1 = make_claim(agent, t1)
-        claim2 = make_claim(agent, t2)
-        output1 = make_output(agent, t1)
-        output2 = make_output(agent, t2)
-        with patch.object(Agent, "claim", side_effect=[claim1, claim2]):
-            with patch.object(Agent, "execute", side_effect=[output1, output2]):
-                report = run_health_check(
-                    agents=[agent],
-                    test_suite=test_suite,
-                    client=MagicMock(),
-                )
-        assert report.passed == 1
-        assert report.failed == 1
-        assert report.total_tasks == 2
-
-    def test_unassigned_task_skipped(self):
-        """Tache unassigned -> skipped, pas de QA."""
-        agent = make_agent("A", 10)
-        task = make_task({"python": 50})
-        test_suite: list[TestCase] = [(task, AlwaysPassEvaluator())]
-        report = run_health_check(
-            agents=[agent],
-            test_suite=test_suite,
-            client=MagicMock(),
-        )
-        assert report.skipped == 1
-        assert report.passed == 0
-        assert report.failed == 0
-        assert len(report.qa_results) == 0
-
-    def test_no_elo_mutation(self):
-        """Le health check ne mute PAS l'ELO des agents (succes)."""
-        agent = make_agent("A", 80)
+    def test_pass_rate_over_n_runs(self, monkeypatch):
         task = make_task()
-        elo_before = dict(agent.tags_with_elo)
-        test_suite: list[TestCase] = [(task, AlwaysPassEvaluator())]
-        claim = make_claim(agent, task)
-        output = make_output(agent, task)
-        with patch.object(Agent, "claim", return_value=claim):
-            with patch.object(Agent, "execute", return_value=output):
-                run_health_check(
-                    agents=[agent],
-                    test_suite=test_suite,
-                    client=MagicMock(),
-                )
-        assert agent.tags_with_elo == elo_before
+        seq = [passing_output(task), failing_output(task), passing_output(task),
+               failing_output(task), passing_output(task)]
+        it = iter(seq)
+        patch_run_task(monkeypatch, lambda *a, **k: next(it))
+        report = run_health_check([], TestSet(cases=[guard_case(task)]), client=object(), n_runs=5)
+        cr = report.case_results[0]
+        assert cr.pass_count == 3 and cr.n_runs == 5
+        assert cr.pass_rate == 0.6
 
-    def test_no_elo_mutation_on_failure(self):
-        """Le health check ne mute PAS l'ELO meme sur echec QA."""
-        agent = make_agent("A", 80)
+    def test_unstable_flag(self, monkeypatch):
         task = make_task()
-        elo_before = dict(agent.tags_with_elo)
-        test_suite: list[TestCase] = [(task, AlwaysFailEvaluator())]
-        claim = make_claim(agent, task)
-        output = make_output(agent, task)
-        with patch.object(Agent, "claim", return_value=claim):
-            with patch.object(Agent, "execute", return_value=output):
-                run_health_check(
-                    agents=[agent],
-                    test_suite=test_suite,
-                    client=MagicMock(),
-                )
-        assert agent.tags_with_elo == elo_before
+        seq = [passing_output(task), failing_output(task)]   # 1/2 = 0.5 → unstable
+        it = iter(seq)
+        patch_run_task(monkeypatch, lambda *a, **k: next(it))
+        report = run_health_check([], TestSet(cases=[guard_case(task)]), client=object(), n_runs=2)
+        assert report.case_results[0].unstable is True
+        assert task.id in report.unstable_cases
 
-    def test_empty_test_suite(self):
-        """Test suite vide -> rapport vide."""
-        agent = make_agent("A", 80)
-        report = run_health_check(
-            agents=[agent],
-            test_suite=[],
-            client=MagicMock(),
-        )
-        assert report.total_tasks == 0
-        assert report.passed == 0
-        assert report.qa_results == []
-
-    def test_tracer_optional(self):
-        """tracer=None ne cause pas d'erreur."""
-        agent = make_agent("A", 80)
+    def test_dispatch_result_counts_as_fail_run(self, monkeypatch):
         task = make_task()
-        test_suite: list[TestCase] = [(task, AlwaysPassEvaluator())]
-        claim = make_claim(agent, task)
-        output = make_output(agent, task)
-        with patch.object(Agent, "claim", return_value=claim):
-            with patch.object(Agent, "execute", return_value=output):
-                report = run_health_check(
-                    agents=[agent],
-                    test_suite=test_suite,
-                    client=MagicMock(),
-                    tracer=None,
-                )
-        assert isinstance(report, HealthCheckReport)
+        patch_run_task(monkeypatch, lambda *a, **k: _Dispatch())
+        report = run_health_check([], TestSet(cases=[guard_case(task)]), client=object(), n_runs=2)
+        assert report.case_results[0].pass_rate == 0.0
 
-    def test_qa_failure_preserves_output(self):
-        """QAFailure dans le rapport contient l'output rejete complet."""
-        agent = make_agent("A", 80)
+    def test_only_active_cases_evaluated(self, monkeypatch):
         task = make_task()
-        test_suite: list[TestCase] = [(task, AlwaysFailEvaluator())]
-        claim = make_claim(agent, task)
-        output = make_output(agent, task, content="specific content for debugging")
-        with patch.object(Agent, "claim", return_value=claim):
-            with patch.object(Agent, "execute", return_value=output):
-                report = run_health_check(
-                    agents=[agent],
-                    test_suite=test_suite,
-                    client=MagicMock(),
-                )
-        assert report.qa_failures[0].output.content == "specific content for debugging"
+        patch_run_task(monkeypatch, lambda *a, **k: passing_output(task))
+        ts = TestSet(cases=[
+            guard_case(task),
+            TestCase(task=make_task("quarantined"), evaluator_spec=det_spec(),
+                     origin="runtime_failure", role="fix_target", attribution="task_spec"),
+        ])
+        report = run_health_check([], ts, client=object(), n_runs=1)
+        assert report.total_cases == 1   # quarantine exclue
 
-    def test_tracer_receives_qa_events(self):
-        """Le tracer recoit les QAEvaluatedEvent du health check."""
-        from aaosa.tracing.events import QAEvaluatedEvent
-
-        agent = make_agent("A", 80)
+    def test_unattributed_listed(self, monkeypatch):
         task = make_task()
-        test_suite: list[TestCase] = [(task, AlwaysPassEvaluator())]
-        claim = make_claim(agent, task)
-        output = make_output(agent, task)
-        tracer = Tracer(session_id="hc")
-        with patch.object(Agent, "claim", return_value=claim):
-            with patch.object(Agent, "execute", return_value=output):
-                run_health_check(
-                    agents=[agent],
-                    test_suite=test_suite,
-                    client=MagicMock(),
-                    tracer=tracer,
-                )
-        qa_events = [e for e in tracer.events if isinstance(e, QAEvaluatedEvent)]
-        assert len(qa_events) == 1
-        assert qa_events[0].success is True
+        unattr_task = make_task("needs triage")
+        patch_run_task(monkeypatch, lambda *a, **k: passing_output(task))
+        ts = TestSet(cases=[
+            guard_case(task),
+            TestCase(task=unattr_task, evaluator_spec=det_spec(),
+                     origin="runtime_failure", role="fix_target", attribution="unattributed"),
+        ])
+        report = run_health_check([], ts, client=object(), n_runs=1)
+        assert unattr_task.id in report.unattributed
+
+    def test_pass_rates_split_by_role(self, monkeypatch):
+        guard_t = make_task("guard")
+        fix_t = make_task("fix")
+        def fake(task, *a, **k):
+            return passing_output(task) if task.description == "guard" else failing_output(task)
+        patch_run_task(monkeypatch, fake)
+        ts = TestSet(cases=[
+            guard_case(guard_t),
+            TestCase(task=fix_t, evaluator_spec=det_spec(),
+                     origin="runtime_failure", role="fix_target", attribution="agent"),
+        ])
+        report = run_health_check([], ts, client=object(), n_runs=2)
+        assert report.regression_guard_pass_rate == 1.0
+        assert report.fix_target_pass_rate == 0.0
+
+    def test_tracer_optional(self, monkeypatch):
+        task = make_task()
+        patch_run_task(monkeypatch, lambda *a, **k: passing_output(task))
+        # ne doit pas lever sans tracer
+        run_health_check([], TestSet(cases=[guard_case(task)]), client=object(), n_runs=1)
