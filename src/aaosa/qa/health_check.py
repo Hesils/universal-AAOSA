@@ -36,6 +36,8 @@ class HealthCheckReport(BaseModel):
     regression_guard_pass_rate: float
     unstable_cases: list[str]
     unattributed: list[str]
+    task_spec_quarantined: list[str]
+    evaluator_quarantined: list[str]
 
 
 def _mean(values: list[float]) -> float:
@@ -98,4 +100,6 @@ def run_health_check(
         regression_guard_pass_rate=_mean(guard_rates),
         unstable_cases=[c.task_id for c in case_results if c.unstable],
         unattributed=[c.task.id for c in test_set.cases if c.attribution == "unattributed"],
+        task_spec_quarantined=[c.task.id for c in test_set.cases if c.attribution == "task_spec"],
+        evaluator_quarantined=[c.task.id for c in test_set.cases if c.attribution == "evaluator"],
     )

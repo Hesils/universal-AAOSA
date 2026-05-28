@@ -139,3 +139,29 @@ class TestRunHealthCheck:
         patch_run_task(monkeypatch, lambda *a, **k: passing_output(task))
         # ne doit pas lever sans tracer
         run_health_check([], TestSet(cases=[guard_case(task)]), client=object(), n_runs=1)
+
+    def test_task_spec_quarantine_listed(self, monkeypatch):
+        task = make_task()
+        qs_task = make_task("bad spec")
+        patch_run_task(monkeypatch, lambda *a, **k: passing_output(task))
+        ts = TestSet(cases=[
+            guard_case(task),
+            TestCase(task=qs_task, evaluator_spec=det_spec(),
+                     origin="runtime_failure", role="fix_target", attribution="task_spec"),
+        ])
+        report = run_health_check([], ts, client=object(), n_runs=1)
+        assert qs_task.id in report.task_spec_quarantined
+        assert qs_task.id not in report.unattributed
+
+    def test_evaluator_quarantine_listed(self, monkeypatch):
+        task = make_task()
+        qe_task = make_task("bad evaluator")
+        patch_run_task(monkeypatch, lambda *a, **k: passing_output(task))
+        ts = TestSet(cases=[
+            guard_case(task),
+            TestCase(task=qe_task, evaluator_spec=det_spec(),
+                     origin="runtime_failure", role="fix_target", attribution="evaluator"),
+        ])
+        report = run_health_check([], ts, client=object(), n_runs=1)
+        assert qe_task.id in report.evaluator_quarantined
+        assert qe_task.id not in report.unattributed

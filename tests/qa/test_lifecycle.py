@@ -29,6 +29,7 @@ def report_with(case_results) -> HealthCheckReport:
         timestamp=datetime.now(timezone.utc), n_runs=5, total_cases=len(case_results),
         case_results=case_results, fix_target_pass_rate=0.0, regression_guard_pass_rate=0.0,
         unstable_cases=[], unattributed=[],
+        task_spec_quarantined=[], evaluator_quarantined=[],
     )
 
 
