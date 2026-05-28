@@ -15,14 +15,16 @@ Les skills `/prime` et `/save` viennent du master `.claude/` — disponibles san
 
 ## État courant
 
-**V1 complète — 252 tests verts** (commits `2fca11c` + `3ca1e0c`, 2026-05-26).
+**V1 complète — 252 tests** (commits `2fca11c` + `3ca1e0c`, 2026-05-26).
+**V2a complète — 377 tests total** (commits `5265e3e` → `826d889`, 2026-05-27). Demo V2 validée LLM réel.
+**V2b complète — 471 tests total** (commits `04f12cd` → `f4f01b3`, 2026-05-28). Demo V2b validée LLM réel (judge déclenché, ELO mis à jour), health check demo validé (4 attributions, graduate lifecycle).
 
-**V2a design spec validée** (commit `bd5078e`, 2026-05-27). Prochaine étape : plan d'implémentation V2a.
+**V2c — spec validée + 6 épiques écrites** (spec `39d46ce`, épiques `ffd2459`, 2026-05-28). **Implémentation non démarrée.** Workflow par épique : session de deep-dive → plan d'implémentation → session d'exécution. Prochaine étape : deep-dive Épique 01 (couche data & persistance).
 
 V2 découpée en 3 sous-parties :
-- **V2a** (spec validée) : ELO mechanics + dual QA protocol
-- **V2b** (scaffoldé) : QA complet (test sets, injection échecs, train/test split)
-- **V2c** (scaffoldé) : Trace viewer complet (HTML/JS, stats)
+- **V2a** (complète) : ELO mechanics + dual QA protocol
+- **V2b** (complète) : QA complet (evaluator composable + boucle auto-amélioration)
+- **V2c** (spec + 6 épiques) : Dashboard d'observabilité (couche data `src/aaosa/` + app Flask `dashboard/`, 4 tabs)
 
 ## Architecture
 
@@ -34,13 +36,19 @@ src/aaosa/
 ├── runtime/        llm_client.py · runner.py
 ├── tracing/        events.py · tracer.py · analysis.py · formatter.py
 ├── demo/           agents.py · tasks.py · run_demo.py
-├── elo/            formula.py · updater.py · persistence.py          # V2a (non implémenté)
-└── qa/             protocol.py · rule_based.py · health_check.py     # V2a (non implémenté)
+├── elo/            formula.py · updater.py · persistence.py          # V2a (implémenté)
+└── qa/             protocol.py · rule_based.py · health_check.py     # V2a (implémenté)
+                    criteria.py · spec.py · judge.py · spec_evaluator.py · test_set.py · lifecycle.py · adaptive.py  # V2b (implémenté)
 
 tests/              miroir de src/aaosa/ + conftest.py
 traces/             JSONL par session (gitignored)
 elo_snapshots/      JSON snapshots ELO (gitignored)                   # V2a
-docs/superpowers/specs/  design specs
+test_sets/          JSON test sets (gitignored)                       # V2b
+docs/superpowers/specs/  design specs · plans/  plans d'implémentation · epics/  épiques V2c
+
+# V2c (spec + épiques, non implémenté) — couche data dans src/aaosa/ (store.py, ExecutedEvent.llm_metadata,
+# save_session, save_health_check) + app Flask dans dashboard/ (create_app, collectors, graph_model, API)
+# runs_root/  store unifié (agents/registry · sessions/<id>/{trace.jsonl,meta.json} · health_checks/<ts>/...)
 ```
 
 **Pipeline V1** : `Task in → filter_candidates → run_phase2 → dispatch → agent.execute → Output | DispatchResult`
@@ -103,3 +111,44 @@ Spec complète : `docs/superpowers/specs/2026-05-27-v2a-elo-dynamic-design.md`
 - **Return type V2** : `Output | DispatchResult | QAFailure`
 - **Tag acquisition** : succès + tag absent → ajout au level requis, puis update normal
 - **Persistence** : in-memory + snapshot JSON (`save_snapshot`, `load_snapshot`, `apply_snapshot`)
+
+## Design V2b — Résumé rapide
+
+Spec complète : `docs/superpowers/specs/2026-05-28-v2b-qa-complet-design.md`. Plans : `docs/superpowers/plans/v2b-01..09.md`.
+
+- **Evaluator-as-spec** : `EvaluatorSpec` Pydantic déclaratif (sérialisable JSON → pont V3). Interprété par `SpecEvaluator` (satisfait `QAEvaluator` Protocol). Critères = fonctions dans un registry, retournant `CriterionOutcome` granulaire.
+- **Hybride** : gates déterministes (rejet gratuit, judge sauté si échec) + critères scorés + LLM-judge pondéré. `final = (1-w)*det + w*judge.overall`, `success = final >= success_threshold`.
+- **LLM-judge** : 2 modes (`rubric` runtime / `reference_based` health check). Jamais signal primaire, poids 0.3, température 0. Référence portée par construction du `SpecEvaluator`, pas par le Protocol.
+- **Boucle fermée** : échec runtime → `failure_to_test_case` → `TestSet` (persisté `test_sets/`) → `run_health_check` de régression.
+- **Lifecycle** : `fix_target` → `regression_guard` via `graduate` (par taux). `active_cases` filtre regression_guard + fix_target attribués `agent`.
+- **Health check N runs** : `run_health_check(..., n_runs=5)`, taux par cas, flag `unstable` (0.4-0.6). Read-only ELO (mode V1).
+- **Attribution** : champ sur `TestCase` (`agent`/`task_spec`/`evaluator`/`unattributed`), quarantaine `task_spec`.
+- **Stretch** : `build_adaptive_spec(task) -> EvaluatorSpec` déterministe — seam V3.
+
+### Séparations strictes V2b à ne pas briser
+
+- L'evaluator est une **donnée** (`EvaluatorSpec`), pas du code — c'est ce qui rend V3 (agent émet la spec) faisable sans réécriture
+- Le LLM-judge n'est **jamais** le signal primaire — les gates déterministes portent le poids
+- Le judge ne tourne **jamais** si un gate échoue (coût maîtrisé)
+- Health check **read-only sur l'ELO** (mode V1, comme V2a) — pas de mutation
+- Un échec n'est `regression_guard` que **quand il est corrigé** — jamais avant
+- `TestCase`/`TestSet` portent `__test__ = False` (sinon collecte pytest)
+
+## Design V2c — Résumé rapide
+
+Spec complète : `docs/superpowers/specs/2026-05-28-v2c-dashboard-design.md`. Épiques : `docs/superpowers/epics/v2c-01..05.md`. **Non implémenté.**
+
+Dashboard web d'observabilité remplaçant `print_timeline`. Constat : la donnée n'est pas persistée → V2c = couche data (`src/aaosa/`) + app Flask (`dashboard/`).
+
+- **Couche data** (Épique 01, prérequis) : `ExecutedEvent.llm_metadata: LLMMetadata | None = None` (optionnel → rétrocompat 471 tests), `store.py` (`AgentRegistryEntry`/`save_agent_registry`, `SessionMeta`, `save_session`), `save_health_check`, demos qui flushent dans `runs_root/`.
+- **`graph_model.build_graph`** (Épique 02, fonction pure) : `list[ClaimEvent] + session_meta -> GraphModel` (nodes/edges/steps, 3 couches TOP/CENTER/BOTTOM). Tab 4 = un step/task ordonné ; Tab 3 = un run/cas + pass_rate agrégé.
+- **Backend Flask** (Épiques 03a/03b) : `create_app(config)` factory, cache in-memory on-demand, 4 collectors (infra/agents/health_checks/sessions), API REST (`Cache-Control: no-store`).
+- **Frontend** (Épiques 04/05) : vanilla JS + SVG, composant graphe auto-fit + overlay modal par type de nœud + scrubber, 4 tabs.
+
+### Séparations strictes V2c à ne pas briser
+
+- `ExecutedEvent.llm_metadata` reste **optionnel** (`None` par défaut) — ne pas casser les fixtures `ExecutedEvent` existantes
+- Couche data dans `src/aaosa/` (concern runtime), app Flask dans `dashboard/` (racine) — ne pas mélanger
+- `build_graph` = **fonction pure** sans effet de bord (cœur testable, frontend hors TDD auto)
+- Graphe = **pipeline réel uniquement** — aucun nœud V3 (TaskDivider, Aggregateur, tools) produit
+- **Pas de live mode** en V1 (review statique sur runs persistés)
