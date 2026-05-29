@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from aaosa.schemas.output import LLMMetadata
 from aaosa.qa.judge import JudgeBreakdown, DimensionScore
@@ -302,3 +302,48 @@ class TestBuildStepVariants:
         assert step.detail.testset.from_task_id == "t1"
         assert step.detail.evaluator.success is False
         assert step.detail.output.produced is True  # output produit puis rejeté
+
+
+class TestMultiTask:
+    def test_steps_ordered_by_meta(self):
+        events = (
+            _single_pass_run(tid="t2", winner="a", others=("b",))
+            + _single_pass_run(tid="t1", winner="b", others=("a",))
+        )
+        sm = _meta([
+            SessionTaskRecord(id="t1", description="first", winner_agent_id="b", outcome="qa_pass", required_tags={"x": 1}),
+            SessionTaskRecord(id="t2", description="second", winner_agent_id="a", outcome="qa_pass", required_tags={"y": 1}),
+        ])
+        steps = build_graph(events, sm).steps
+        assert [s.task_id for s in steps] == ["t1", "t2"]
+        assert [s.label for s in steps] == ["first", "second"]
+
+    def test_steps_ordered_by_timestamp_when_no_meta(self):
+        base = datetime(2026, 5, 29, 10, 0, 0, tzinfo=timezone.utc)
+        e_early = p1("t1", "a", True, 0.9)
+        e_early.timestamp = base
+        e_late = p1("t2", "a", True, 0.9)
+        e_late.timestamp = base + timedelta(seconds=10)
+        # t2 appears before t1 in the list, but t1 is earlier
+        steps = build_graph([e_late, e_early]).steps
+        assert [s.task_id for s in steps] == ["t1", "t2"]
+
+    def test_meta_label_fallback_to_task_id_when_no_meta(self):
+        step = build_graph(_single_pass_run(tid="abc", winner="a", others=())).steps[0]
+        assert step.label == "abc"
+        assert step.detail.input.required_tags == {}
+
+    def test_multi_claim_winner_from_dispatch(self):
+        events = [
+            p1("t1", "a", True, 0.8), p1("t1", "b", True, 0.7),
+            p2("t1", "a", "claim", "a wants it"),
+            p2("t1", "b", "claim", "b wants it"),
+            disp("t1", "b", "b had higher score"),
+            ex("t1", "b", content="b output"),
+            qa("t1", "b", success=True),
+        ]
+        step = build_graph(events).steps[0]
+        assert step.winner_agent_id == "b"
+        assert len(step.detail.dispatch.claims) == 2
+        assert step.detail.agents["a"].role == "candidate"
+        assert step.detail.agents["b"].role == "winner"
