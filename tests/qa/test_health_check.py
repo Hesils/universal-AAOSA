@@ -1,9 +1,16 @@
+from datetime import datetime, timezone
+from pathlib import Path
+
 import aaosa.qa.health_check as hc_module
-from aaosa.qa.health_check import CaseResult, HealthCheckReport, run_health_check
+from pydantic import TypeAdapter
+
+from aaosa.qa.health_check import CaseResult, HealthCheckReport, run_health_check, save_health_check
 from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
 from aaosa.qa.test_set import TestCase, TestSet
 from aaosa.schemas.output import Output, LLMMetadata
 from aaosa.schemas.task import Task
+from aaosa.tracing.events import ClaimEvent, QAEvaluatedEvent
+from aaosa.tracing.tracer import Tracer
 
 
 def make_task(desc="do x") -> Task:
@@ -165,3 +172,65 @@ class TestRunHealthCheck:
         report = run_health_check([], ts, client=object(), n_runs=1)
         assert qe_task.id in report.evaluator_quarantined
         assert qe_task.id not in report.unattributed
+
+
+def _empty_report() -> HealthCheckReport:
+    return HealthCheckReport(
+        timestamp=datetime(2026, 5, 29, 10, 0, 0, tzinfo=timezone.utc),
+        n_runs=3, total_cases=0, case_results=[],
+        fix_target_pass_rate=0.0, regression_guard_pass_rate=0.0,
+        unstable_cases=[], unattributed=[],
+        task_spec_quarantined=[], evaluator_quarantined=[],
+    )
+
+
+def _demo_test_set() -> TestSet:
+    task = Task(description="t", required_tags={"python": 50})
+    spec = EvaluatorSpec(criteria=[CriterionSpec(name="non_empty", gate=True)])
+    return TestSet(cases=[TestCase(
+        task=task, evaluator_spec=spec, origin="curated",
+        role="regression_guard", attribution="agent",
+    )])
+
+
+class TestSaveHealthCheck:
+    def test_writes_three_files(self, tmp_path):
+        tracer = Tracer(session_id="hc-1")
+        target = save_health_check(_empty_report(), _demo_test_set(), tracer, tmp_path)
+        assert (target / "report.json").exists()
+        assert (target / "test_set.json").exists()
+        assert (target / "trace.jsonl").exists()
+
+    def test_dir_named_from_report_timestamp(self, tmp_path):
+        tracer = Tracer(session_id="hc-1")
+        target = save_health_check(_empty_report(), _demo_test_set(), tracer, tmp_path)
+        assert target == tmp_path / "2026-05-29T10-00-00"
+
+    def test_report_roundtrip(self, tmp_path):
+        tracer = Tracer(session_id="hc-1")
+        target = save_health_check(_empty_report(), _demo_test_set(), tracer, tmp_path)
+        loaded = HealthCheckReport.model_validate_json(
+            (target / "report.json").read_text(encoding="utf-8")
+        )
+        assert loaded.n_runs == 3
+
+    def test_test_set_roundtrip(self, tmp_path):
+        tracer = Tracer(session_id="hc-1")
+        target = save_health_check(_empty_report(), _demo_test_set(), tracer, tmp_path)
+        loaded = TestSet.model_validate_json(
+            (target / "test_set.json").read_text(encoding="utf-8")
+        )
+        assert len(loaded.cases) == 1
+
+    def test_trace_roundtrip(self, tmp_path):
+        tracer = Tracer(session_id="hc-1")
+        tracer.emit(QAEvaluatedEvent(
+            session_id="hc-1", task_id="t1", agent_id="a1",
+            success=True, score=1.0, reason="ok",
+        ))
+        target = save_health_check(_empty_report(), _demo_test_set(), tracer, tmp_path)
+        adapter = TypeAdapter(ClaimEvent)
+        lines = (target / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        events = [adapter.validate_json(line) for line in lines if line.strip()]
+        assert len(events) == 1
+        assert isinstance(events[0], QAEvaluatedEvent)

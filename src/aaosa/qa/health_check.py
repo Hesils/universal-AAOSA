@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Literal
 
 from openai import OpenAI
@@ -103,3 +104,18 @@ def run_health_check(
         task_spec_quarantined=[c.task.id for c in test_set.cases if c.attribution == "task_spec"],
         evaluator_quarantined=[c.task.id for c in test_set.cases if c.attribution == "evaluator"],
     )
+
+
+def save_health_check(
+    report: HealthCheckReport,
+    test_set: TestSet,
+    tracer: Tracer,
+    directory: Path,
+) -> Path:
+    ts = report.timestamp.strftime("%Y-%m-%dT%H-%M-%S")
+    target = directory / ts
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "report.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    (target / "test_set.json").write_text(test_set.model_dump_json(indent=2), encoding="utf-8")
+    tracer.flush(target / "trace.jsonl")
+    return target
