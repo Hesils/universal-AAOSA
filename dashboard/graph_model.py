@@ -140,5 +140,23 @@ class GraphModel(BaseModel):
     steps: list[GraphStep]
 
 
+def _segment_runs(task_events: list[ClaimEvent]) -> list[ClaimEvent]:
+    """Keeps only the last run for a given task_id.
+
+    A new run starts when a Phase1FilteredEvent appears after a non-Phase1FilteredEvent.
+    No-op in session (1 run), keeps last of N runs in health check.
+    """
+    runs: list[list[ClaimEvent]] = []
+    current: list[ClaimEvent] = []
+    for e in task_events:
+        if isinstance(e, Phase1FilteredEvent) and current and not isinstance(current[-1], Phase1FilteredEvent):
+            runs.append(current)
+            current = []
+        current.append(e)
+    if current:
+        runs.append(current)
+    return runs[-1] if runs else []
+
+
 def build_graph(events: list[ClaimEvent], session_meta: SessionMeta | None = None) -> GraphModel:
     raise NotImplementedError

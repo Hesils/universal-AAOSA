@@ -1,5 +1,15 @@
 from aaosa.schemas.output import LLMMetadata
 from aaosa.qa.judge import JudgeBreakdown, DimensionScore
+from aaosa.tracing.events import (
+    DispatchedEvent,
+    EloUpdatedEvent,
+    ExecutedEvent,
+    Phase1FilteredEvent,
+    Phase2ClaimedEvent,
+    QAEvaluatedEvent,
+    TagAcquiredEvent,
+    UnassignedEvent,
+)
 from dashboard.graph_model import (
     AgentDetail,
     CandidateInfo,
@@ -15,7 +25,43 @@ from dashboard.graph_model import (
     StepDetail,
     TagAcquiredInfo,
     TestSetDetail,
+    _segment_runs,
+    build_graph,
 )
+
+SID = "sess-1"
+
+
+def p1(tid, aid, passed=True, fit=0.8):
+    return Phase1FilteredEvent(session_id=SID, task_id=tid, agent_id=aid, passed=passed, fit_score=fit)
+
+
+def p2(tid, aid, decision="claim", just="mine"):
+    return Phase2ClaimedEvent(session_id=SID, task_id=tid, agent_id=aid, decision=decision, justification=just)
+
+
+def disp(tid, aid, reason="best fit"):
+    return DispatchedEvent(session_id=SID, task_id=tid, agent_id=aid, reason=reason)
+
+
+def ex(tid, aid, summary="out", content="full output", meta=None):
+    return ExecutedEvent(session_id=SID, task_id=tid, agent_id=aid, output_summary=summary, output_content=content, llm_metadata=meta)
+
+
+def unassigned(tid, reason="no agent"):
+    return UnassignedEvent(session_id=SID, task_id=tid, reason=reason)
+
+
+def qa(tid, aid, success=True, score=1.0, reason="ok", criteria=None, judge=None):
+    return QAEvaluatedEvent(session_id=SID, task_id=tid, agent_id=aid, success=success, score=score, reason=reason, criteria_results=criteria or {}, judge=judge)
+
+
+def elo(tid, aid, deltas):
+    return EloUpdatedEvent(session_id=SID, task_id=tid, agent_id=aid, deltas=deltas)
+
+
+def tag(tid, aid, t, initial):
+    return TagAcquiredEvent(session_id=SID, task_id=tid, agent_id=aid, tag=t, initial_elo=initial)
 
 
 class TestGraphEdgeAlias:
@@ -62,3 +108,35 @@ class TestGraphModelConstruction:
         )
         assert step.outcome == "unassigned"
         assert step.detail.input.task_id == "t1"
+
+
+class TestSegmentRuns:
+    def test_single_run_returns_all(self):
+        run = [p1("t1", "a"), p2("t1", "a"), disp("t1", "a"), ex("t1", "a"), qa("t1", "a")]
+        assert _segment_runs(run) == run
+
+    def test_session_run_keeps_trailing_elo(self):
+        run = [p1("t1", "a"), disp("t1", "a"), ex("t1", "a"), qa("t1", "a"),
+               elo("t1", "a", {"python": 5}), tag("t1", "a", "css", 50)]
+        assert _segment_runs(run) == run
+
+    def test_two_runs_keeps_last(self):
+        run1 = [p1("t1", "a"), p1("t1", "b"), disp("t1", "a"), ex("t1", "a"), qa("t1", "a", success=False)]
+        run2 = [p1("t1", "a"), p1("t1", "b"), disp("t1", "b"), ex("t1", "b"), qa("t1", "b", success=True)]
+        last = _segment_runs(run1 + run2)
+        assert last == run2
+
+    def test_three_runs_keeps_last(self):
+        def mk(winner):
+            return [p1("t1", "a"), p1("t1", "b"), disp("t1", winner), ex("t1", winner), qa("t1", winner)]
+        run_a = mk("a")
+        run_b = mk("b")
+        run_a_again = mk("a")
+        runs = run_a + run_b + run_a_again
+        last = _segment_runs(runs)
+        assert last == run_a_again
+
+    def test_unassigned_run_segments(self):
+        run1 = [p1("t1", "a"), unassigned("t1")]
+        run2 = [p1("t1", "a"), disp("t1", "a"), ex("t1", "a"), qa("t1", "a")]
+        assert _segment_runs(run1 + run2) == run2
