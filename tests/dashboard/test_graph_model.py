@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from aaosa.schemas.output import LLMMetadata
 from aaosa.qa.judge import JudgeBreakdown, DimensionScore
 from aaosa.tracing.events import (
@@ -10,6 +12,7 @@ from aaosa.tracing.events import (
     TagAcquiredEvent,
     UnassignedEvent,
 )
+from aaosa.tracing.store import SessionMeta, SessionTaskRecord
 from dashboard.graph_model import (
     AgentDetail,
     CandidateInfo,
@@ -178,3 +181,86 @@ class TestBuildNodesEdges:
         assert ("a", "output") in pairs and ("b", "output") in pairs
         assert ("evaluator", "output") in pairs
         assert ("evaluator", "testset") in pairs
+
+
+def _meta(records):
+    now = datetime.now(timezone.utc)
+    return SessionMeta(
+        session_id=SID, started_at=now, ended_at=now,
+        tasks=records, agent_ids=["a", "b"],
+    )
+
+
+class TestBuildStepPass:
+    def test_one_step_pass(self):
+        meta = LLMMetadata(model_name="gpt-4o-mini", tokens_in=10, tokens_out=5, latency_ms=42.0)
+        events = [
+            p1("t1", "a", True, 0.9), p1("t1", "b", False, 0.2),
+            p2("t1", "a", "claim", "css is mine"),
+            disp("t1", "a", "highest fit"),
+            ex("t1", "a", summary="fixed it", content="the full fix", meta=meta),
+            qa("t1", "a", success=True, score=0.85, reason="good", criteria={"non_empty": True}),
+            elo("t1", "a", {"css": 5}),
+            tag("t1", "a", "hover", 50),
+        ]
+        sm = _meta([SessionTaskRecord(
+            id="t1", description="Fix CSS hover", winner_agent_id="a",
+            outcome="qa_pass", required_tags={"css": 60},
+        )])
+        model = build_graph(events, sm)
+
+        assert len(model.steps) == 1
+        step = model.steps[0]
+        assert step.task_id == "t1"
+        assert step.label == "Fix CSS hover"
+        assert step.winner_agent_id == "a"
+        assert step.outcome == "qa_pass"
+        assert step.active_nodes == ["input", "dispatch", "a", "evaluator", "output"]
+        active_pairs = [(e.from_node, e.to) for e in step.active_edges]
+        assert active_pairs == [("input", "dispatch"), ("dispatch", "a"), ("a", "evaluator"), ("evaluator", "output")]
+
+    def test_step_detail_pass(self):
+        meta = LLMMetadata(model_name="gpt-4o-mini", tokens_in=10, tokens_out=5, latency_ms=42.0)
+        events = [
+            p1("t1", "a", True, 0.9), p1("t1", "b", False, 0.2),
+            p2("t1", "a", "claim", "css is mine"),
+            disp("t1", "a", "highest fit"),
+            ex("t1", "a", summary="fixed", content="the full fix", meta=meta),
+            qa("t1", "a", success=True, score=0.85, reason="good", criteria={"non_empty": True}),
+            elo("t1", "a", {"css": 5}),
+            tag("t1", "a", "hover", 50),
+        ]
+        sm = _meta([SessionTaskRecord(
+            id="t1", description="Fix CSS hover", winner_agent_id="a",
+            outcome="qa_pass", required_tags={"css": 60},
+        )])
+        d = build_graph(events, sm).steps[0].detail
+
+        assert d.input.required_tags == {"css": 60}
+        assert d.input.description == "Fix CSS hover"
+        assert {c.agent_id for c in d.dispatch.candidates} == {"a", "b"}
+        assert d.dispatch.winner_agent_id == "a"
+        assert d.dispatch.dispatch_reason == "highest fit"
+        assert len(d.dispatch.claims) == 1 and d.dispatch.claims[0].agent_id == "a"
+
+        wa = d.agents["a"]
+        assert wa.role == "winner"
+        assert wa.fit_score == 0.9
+        assert wa.claim_decision == "claim"
+        assert wa.output_content == "the full fix"
+        assert wa.llm_metadata.tokens_in == 10
+        assert wa.elo_deltas == {"css": 5}
+        assert wa.tags_acquired[0].tag == "hover"
+
+        ca = d.agents["b"]
+        assert ca.role == "candidate"
+        assert ca.passed is False
+        assert ca.output_content is None
+        assert ca.elo_deltas == {}
+
+        assert d.evaluator.ran is True
+        assert d.evaluator.success is True
+        assert d.evaluator.criteria_results == {"non_empty": True}
+        assert d.output.produced is True
+        assert d.output.output_content == "the full fix"
+        assert d.testset.forked is False
