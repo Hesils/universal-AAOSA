@@ -221,7 +221,6 @@ class TestDemoV2:
         monkeypatch.setattr("aaosa.qa.spec_evaluator.run_judge", _fake_run_judge)
         monkeypatch.setenv("OPENAI_API_KEY", "fake")
         monkeypatch.chdir(tmp_path)
-        (tmp_path / "elo_snapshots").mkdir()
 
         run_demo()  # should not raise
 
@@ -243,7 +242,6 @@ class TestDemoV2:
         monkeypatch.setattr("aaosa.qa.spec_evaluator.run_judge", _fake_run_judge)
         monkeypatch.setenv("OPENAI_API_KEY", "fake")
         monkeypatch.chdir(tmp_path)
-        (tmp_path / "elo_snapshots").mkdir()
 
         run_demo()  # should not raise even with QA failures
         captured = capsys.readouterr()
@@ -268,12 +266,10 @@ class TestDemoV2:
         monkeypatch.setattr("aaosa.qa.spec_evaluator.run_judge", _fake_run_judge)
         monkeypatch.setenv("OPENAI_API_KEY", "fake")
         monkeypatch.chdir(tmp_path)
-        snapshot_dir = tmp_path / "elo_snapshots"
-        snapshot_dir.mkdir()
 
         run_demo()
 
-        assert (snapshot_dir / "latest.json").exists()
+        assert (tmp_path / "runs" / "elo_snapshots" / "latest.json").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +319,8 @@ class TestDemoV2b:
             demo_module, "run_task", lambda task, *a, **k: _output_for_v2b(task, a_id)
         )
         monkeypatch.setattr(demo_module, "save_snapshot", lambda agents, d: tmp_path / "latest.json")
+        monkeypatch.setattr(demo_module, "save_agent_registry", lambda *a, **k: None)
+        monkeypatch.setattr(demo_module, "save_session", lambda *a, **k: tmp_path / "sessions")
         run_demo()
 
     def test_handles_qa_failure(self, monkeypatch, tmp_path):
@@ -337,4 +335,6 @@ class TestDemoV2b:
             demo_module, "run_task", lambda task, *a, **k: _qa_failure_for(task, a_id)
         )
         monkeypatch.setattr(demo_module, "save_snapshot", lambda agents, d: tmp_path / "latest.json")
+        monkeypatch.setattr(demo_module, "save_agent_registry", lambda *a, **k: None)
+        monkeypatch.setattr(demo_module, "save_session", lambda *a, **k: tmp_path / "sessions")
         run_demo()

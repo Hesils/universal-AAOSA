@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from dotenv import load_dotenv
 
 from aaosa.demo.agents import DEMO_AGENTS
@@ -9,7 +11,9 @@ from aaosa.demo.tasks import (
     TASK_SECURITY_AUDIT,
     TASK_WRITE_PYTHON_TESTS,
 )
-from aaosa.qa.health_check import run_health_check
+from aaosa.qa.health_check import run_health_check, save_health_check
+from aaosa.tracing.store import new_session_id
+from aaosa.tracing.tracer import Tracer
 from aaosa.qa.lifecycle import graduate
 from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
 from aaosa.qa.test_set import TestCase, TestSet, active_cases
@@ -105,8 +109,9 @@ def run_demo_health_check() -> None:
         print(f"    [{c.role}/{c.attribution}] {c.task.description[:60]}")
     print()
 
+    tracer = Tracer(session_id=new_session_id())
     print(f"Lancement health check (n_runs=3)...\n")
-    report = run_health_check(DEMO_AGENTS, test_set, client, n_runs=3)
+    report = run_health_check(DEMO_AGENTS, test_set, client, n_runs=3, tracer=tracer)
 
     print("=== Rapport ===")
     print(f"  Cas actifs            : {report.total_cases}")
@@ -146,6 +151,9 @@ def run_demo_health_check() -> None:
             print(f"  PROMU -> regression_guard : {c.task.description[:60]}")
     else:
         print("  Aucune graduation (pass_rate < 0.8 sur tous les fix_target actifs)")
+
+    target = save_health_check(report, test_set, tracer, Path("runs") / "health_checks")
+    print(f"\nHealth check saved to {target}")
 
 
 if __name__ == "__main__":

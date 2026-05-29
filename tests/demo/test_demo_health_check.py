@@ -50,6 +50,7 @@ class TestRunDemoHealthCheck:
 
         monkeypatch.setattr(hc_demo_module, "create_client", lambda: object())
         monkeypatch.setattr(hc_demo_module, "run_task", fake_run_task)
+        monkeypatch.setattr(hc_demo_module, "save_health_check", lambda *a, **k: None)
         run_demo_health_check()
 
     def test_report_shows_all_quarantine_buckets(self, monkeypatch, capsys):
@@ -58,6 +59,7 @@ class TestRunDemoHealthCheck:
 
         monkeypatch.setattr(hc_demo_module, "create_client", lambda: object())
         monkeypatch.setattr(hc_demo_module, "run_task", fake_run_task)
+        monkeypatch.setattr(hc_demo_module, "save_health_check", lambda *a, **k: None)
         run_demo_health_check()
 
         out = capsys.readouterr().out
