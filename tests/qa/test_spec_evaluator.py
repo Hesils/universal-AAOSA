@@ -1,7 +1,7 @@
 import pytest
 
 import aaosa.qa.spec_evaluator as se_module
-from aaosa.qa.judge import JudgeResult
+from aaosa.qa.judge import DimensionScore, JudgeResult
 from aaosa.qa.protocol import QAEvaluator, QAResult
 from aaosa.qa.spec import CriterionSpec, EvaluatorSpec, JudgeSpec
 from aaosa.qa.spec_evaluator import SpecEvaluator, from_spec
@@ -132,3 +132,39 @@ class TestConstruction:
     def test_from_spec_returns_evaluator(self):
         ev = from_spec(EvaluatorSpec(criteria=[CriterionSpec(name="non_empty", gate=True)]))
         assert isinstance(ev, SpecEvaluator)
+
+
+class TestQAResultJudgeBreakdown:
+    def test_judge_breakdown_populated_when_judge_runs(self, monkeypatch):
+        spec = EvaluatorSpec(
+            criteria=[CriterionSpec(name="non_empty", gate=True)],
+            judge=JudgeSpec(rubric=["clarity"], weight=0.3, mode="rubric"),
+            success_threshold=0.5,
+        )
+        judge_result = JudgeResult(
+            dimension_scores=[DimensionScore(name="clarity", score=0.8)],
+            overall=0.8, reason="clear",
+        )
+        monkeypatch.setattr(
+            se_module, "run_judge",
+            lambda task, output, spec, client, reference=None: judge_result,
+        )
+        evaluator = from_spec(spec, client=object())
+
+        task = make_task()
+        output = make_output("a sufficiently long answer about python " * 3)
+        result = evaluator.evaluate(task, output)
+
+        assert result.judge is not None
+        assert result.judge.mode == "rubric"
+        assert result.judge.overall == 0.8
+        assert result.judge.reason == "clear"
+        assert result.judge.dimension_scores[0].name == "clarity"
+
+    def test_judge_none_when_no_judge(self):
+        spec = EvaluatorSpec(criteria=[CriterionSpec(name="non_empty", gate=True)])
+        evaluator = from_spec(spec)
+        task = make_task()
+        output = make_output("non empty")
+        result = evaluator.evaluate(task, output)
+        assert result.judge is None

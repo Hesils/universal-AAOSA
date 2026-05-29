@@ -1,7 +1,7 @@
 from openai import OpenAI
 
 from aaosa.qa.criteria import get_criterion
-from aaosa.qa.judge import run_judge
+from aaosa.qa.judge import JudgeBreakdown, run_judge
 from aaosa.qa.protocol import QAResult
 from aaosa.qa.spec import EvaluatorSpec
 from aaosa.schemas.output import Output
@@ -53,6 +53,7 @@ class SpecEvaluator:
 
         # 3. Judge
         reason = "deterministic criteria evaluated"
+        judge_breakdown: JudgeBreakdown | None = None
         if self.spec.judge is not None:
             judge_result = run_judge(
                 task, output, self.spec.judge, self.client, self.reference
@@ -60,6 +61,12 @@ class SpecEvaluator:
             w = self.spec.judge.weight
             final = (1.0 - w) * det_score + w * judge_result.overall
             reason = f"det={det_score:.2f} judge={judge_result.overall:.2f} ({judge_result.reason})"
+            judge_breakdown = JudgeBreakdown(
+                mode=self.spec.judge.mode,
+                overall=judge_result.overall,
+                dimension_scores=judge_result.dimension_scores,
+                reason=judge_result.reason,
+            )
         else:
             final = det_score
 
@@ -68,6 +75,7 @@ class SpecEvaluator:
             task_id=task.id, agent_id=output.agent_id,
             success=final >= self.spec.success_threshold,
             score=final, reason=reason, criteria_results=criteria_results,
+            judge=judge_breakdown,
         )
 
 

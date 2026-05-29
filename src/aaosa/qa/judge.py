@@ -1,3 +1,5 @@
+from typing import Literal
+
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict
 
@@ -16,6 +18,14 @@ class JudgeResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
     dimension_scores: list[DimensionScore]
     overall: float
+    reason: str
+
+
+class JudgeBreakdown(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["rubric", "reference_based"]
+    overall: float
+    dimension_scores: list[DimensionScore]
     reason: str
 
 
