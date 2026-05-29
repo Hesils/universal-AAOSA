@@ -56,6 +56,7 @@ def run_demo() -> None:
         task_records.append(SessionTaskRecord(
             id=task.id, description=task.description,
             winner_agent_id=winner_id, outcome=outcome,
+            required_tags=task.required_tags,
         ))
         print()
 

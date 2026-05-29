@@ -53,6 +53,7 @@ class SessionTaskRecord(BaseModel):
     description: str
     winner_agent_id: str | None
     outcome: TaskOutcome
+    required_tags: dict[str, int]
 
 
 class SessionMeta(BaseModel):

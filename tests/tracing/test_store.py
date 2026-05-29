@@ -77,10 +77,12 @@ def make_meta(session_id: str) -> SessionMeta:
             SessionTaskRecord(
                 id="t1", description="do a thing",
                 winner_agent_id="a1", outcome="qa_pass",
+                required_tags={"python": 50},
             ),
             SessionTaskRecord(
                 id="t2", description="impossible",
                 winner_agent_id=None, outcome="unassigned",
+                required_tags={"rust": 90},
             ),
         ],
         agent_ids=["a1", "a2"],
@@ -98,8 +100,22 @@ class TestSessionTaskRecord:
     def test_unassigned_allows_none_winner(self):
         rec = SessionTaskRecord(
             id="t1", description="x", winner_agent_id=None, outcome="unassigned",
+            required_tags={"python": 50},
         )
         assert rec.winner_agent_id is None
+
+    def test_required_tags_stored(self):
+        rec = SessionTaskRecord(
+            id="t1", description="x", winner_agent_id="a1",
+            outcome="qa_pass", required_tags={"python": 50, "sql": 30},
+        )
+        assert rec.required_tags == {"python": 50, "sql": 30}
+
+    def test_required_tags_is_required(self):
+        with pytest.raises(Exception):
+            SessionTaskRecord(
+                id="t1", description="x", winner_agent_id="a1", outcome="qa_pass",
+            )
 
 
 class TestSaveSession:
@@ -131,6 +147,7 @@ class TestSaveSession:
         assert len(loaded.tasks) == 2
         assert loaded.tasks[1].outcome == "unassigned"
         assert loaded.agent_ids == ["a1", "a2"]
+        assert loaded.tasks[0].required_tags == {"python": 50}
 
     def test_trace_roundtrip(self, tmp_path):
         tracer = Tracer(session_id="2026-05-29T10-00-00-ab12")
