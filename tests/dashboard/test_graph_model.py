@@ -140,3 +140,41 @@ class TestSegmentRuns:
         run1 = [p1("t1", "a"), unassigned("t1")]
         run2 = [p1("t1", "a"), disp("t1", "a"), ex("t1", "a"), qa("t1", "a")]
         assert _segment_runs(run1 + run2) == run2
+
+
+def _single_pass_run(tid="t1", winner="a", others=("b",)):
+    events = [p1(tid, winner, True, 0.9)]
+    for o in others:
+        events.append(p1(tid, o, True, 0.4))
+    events.append(p2(tid, winner, "claim", "mine"))
+    events += [disp(tid, winner), ex(tid, winner), qa(tid, winner, success=True),
+               elo(tid, winner, {"python": 5})]
+    return events
+
+
+class TestBuildNodesEdges:
+    def test_fixed_nodes_present(self):
+        model = build_graph(_single_pass_run())
+        by_id = {n.id: n for n in model.nodes}
+        assert by_id["input"].layer == "top"
+        assert by_id["dispatch"].layer == "center"
+        assert by_id["evaluator"].layer == "center"
+        assert by_id["output"].layer == "top"
+        assert by_id["testset"].layer == "top"
+
+    def test_agent_nodes_bottom(self):
+        model = build_graph(_single_pass_run(winner="a", others=("b",)))
+        agents = [n for n in model.nodes if n.type == "agent"]
+        assert {n.id for n in agents} == {"a", "b"}
+        assert all(n.layer == "bottom" for n in agents)
+        assert all(n.label == n.id for n in agents)  # label = agent_id (D3)
+
+    def test_static_edges(self):
+        model = build_graph(_single_pass_run(winner="a", others=("b",)))
+        pairs = {(e.from_node, e.to) for e in model.edges}
+        assert ("input", "dispatch") in pairs
+        assert ("dispatch", "a") in pairs and ("dispatch", "b") in pairs
+        assert ("a", "evaluator") in pairs and ("b", "evaluator") in pairs
+        assert ("a", "output") in pairs and ("b", "output") in pairs
+        assert ("evaluator", "output") in pairs
+        assert ("evaluator", "testset") in pairs

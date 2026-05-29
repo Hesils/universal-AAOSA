@@ -158,5 +158,42 @@ def _segment_runs(task_events: list[ClaimEvent]) -> list[ClaimEvent]:
     return runs[-1] if runs else []
 
 
+def _agent_ids(events: list[ClaimEvent]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for e in events:
+        aid = getattr(e, "agent_id", None)
+        if aid is not None and aid not in seen:
+            seen.add(aid)
+            ordered.append(aid)
+    return ordered
+
+
+def _build_nodes(events: list[ClaimEvent]) -> list[GraphNode]:
+    nodes = [
+        GraphNode(id="input", layer="top", type="input", label="Input"),
+        GraphNode(id="dispatch", layer="center", type="dispatch", label="Dispatch"),
+        GraphNode(id="evaluator", layer="center", type="evaluator", label="Evaluator"),
+        GraphNode(id="output", layer="top", type="output", label="Output"),
+        GraphNode(id="testset", layer="top", type="testset", label="TestSet"),
+    ]
+    for aid in _agent_ids(events):
+        nodes.append(GraphNode(id=aid, layer="bottom", type="agent", label=aid))
+    return nodes
+
+
+def _build_edges(nodes: list[GraphNode]) -> list[GraphEdge]:
+    agent_ids = [n.id for n in nodes if n.type == "agent"]
+    edges = [GraphEdge(from_node="input", to="dispatch")]
+    edges += [GraphEdge(from_node="dispatch", to=aid) for aid in agent_ids]
+    edges += [GraphEdge(from_node=aid, to="evaluator") for aid in agent_ids]
+    edges += [GraphEdge(from_node=aid, to="output") for aid in agent_ids]
+    edges.append(GraphEdge(from_node="evaluator", to="output"))
+    edges.append(GraphEdge(from_node="evaluator", to="testset"))
+    return edges
+
+
 def build_graph(events: list[ClaimEvent], session_meta: SessionMeta | None = None) -> GraphModel:
-    raise NotImplementedError
+    nodes = _build_nodes(events)
+    edges = _build_edges(nodes)
+    return GraphModel(nodes=nodes, edges=edges, steps=[])
