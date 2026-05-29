@@ -18,7 +18,6 @@ from aaosa.qa.lifecycle import graduate
 from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
 from aaosa.qa.test_set import TestCase, TestSet, active_cases
 from aaosa.runtime.llm_client import create_client
-from aaosa.runtime.runner import run_task
 
 
 def _lenient_spec() -> EvaluatorSpec:

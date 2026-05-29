@@ -1,4 +1,5 @@
 import aaosa.demo.run_health_check as hc_demo_module
+import aaosa.qa.health_check as health_check_module
 from aaosa.demo.run_health_check import build_demo_test_set, run_demo_health_check
 from aaosa.qa.test_set import active_cases
 from aaosa.schemas.output import LLMMetadata, Output
@@ -49,7 +50,7 @@ class TestRunDemoHealthCheck:
             return _output_for(task)
 
         monkeypatch.setattr(hc_demo_module, "create_client", lambda: object())
-        monkeypatch.setattr(hc_demo_module, "run_task", fake_run_task)
+        monkeypatch.setattr(health_check_module, "run_task", fake_run_task)
         monkeypatch.setattr(hc_demo_module, "save_health_check", lambda *a, **k: None)
         run_demo_health_check()
 
@@ -58,7 +59,7 @@ class TestRunDemoHealthCheck:
             return _output_for(task)
 
         monkeypatch.setattr(hc_demo_module, "create_client", lambda: object())
-        monkeypatch.setattr(hc_demo_module, "run_task", fake_run_task)
+        monkeypatch.setattr(health_check_module, "run_task", fake_run_task)
         monkeypatch.setattr(hc_demo_module, "save_health_check", lambda *a, **k: None)
         run_demo_health_check()
 
