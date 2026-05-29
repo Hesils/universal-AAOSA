@@ -391,6 +391,24 @@ def test_run_task_executed_event_carries_llm_metadata():
     assert executed[0].llm_metadata == output.llm_metadata
 
 
+def test_run_task_executed_event_carries_output_content():
+    """L'ExecutedEvent émis porte le contenu complet de l'Output."""
+    task = make_task()
+    agent = make_agent("AgentA", 80)
+    claim = make_claim(agent, task, "claim")
+    output = make_output(agent, task)
+    tracer = Tracer(session_id="s1")
+
+    with patch.object(Agent, "claim", return_value=claim):
+        with patch.object(Agent, "execute", return_value=output):
+            run_task(task, [agent], MagicMock(), tracer=tracer)
+
+    executed = [e for e in tracer.events if isinstance(e, ExecutedEvent)]
+    assert len(executed) == 1
+    assert executed[0].output_content == output.content
+    assert executed[0].output_summary == output.content[:100]
+
+
 class TestRunTaskV2Unassigned:
     def test_unassigned_with_evaluator_returns_dispatch_result(self):
         """Unassigned task with evaluator -> DispatchResult (no QA, no ELO)."""

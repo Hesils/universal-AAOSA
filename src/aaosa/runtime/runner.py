@@ -39,6 +39,7 @@ def run_task(
             task_id=task.id,
             agent_id=winner.id,
             output_summary=output.content[:100],
+            output_content=output.content,
             llm_metadata=output.llm_metadata,
         ))
 

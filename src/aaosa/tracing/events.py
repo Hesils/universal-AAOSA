@@ -37,6 +37,7 @@ class ExecutedEvent(_BaseEvent):
     type: Literal["executed"] = "executed"
     agent_id: str
     output_summary: str
+    output_content: str | None = None
     llm_metadata: LLMMetadata | None = None
 
 

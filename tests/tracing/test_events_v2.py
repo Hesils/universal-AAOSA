@@ -173,3 +173,30 @@ class TestExecutedEventLLMMetadata:
         assert e2.llm_metadata is not None
         assert e2.llm_metadata.model_name == "gpt-4o-mini"
         assert e2.llm_metadata.latency_ms == 42.0
+
+
+class TestExecutedEventOutputContent:
+    def test_defaults_to_none(self):
+        """Rétrocompat : output_content optionnel, défaut None."""
+        e = ExecutedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", output_summary="done",
+        )
+        assert e.output_content is None
+
+    def test_carries_full_content(self):
+        e = ExecutedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", output_summary="done"[:100],
+            output_content="the full multi-line output content",
+        )
+        assert e.output_content == "the full multi-line output content"
+
+    def test_json_roundtrip_with_content(self):
+        e = ExecutedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", output_summary="done",
+            output_content="full body",
+        )
+        e2 = ExecutedEvent.model_validate_json(e.model_dump_json())
+        assert e2.output_content == "full body"
