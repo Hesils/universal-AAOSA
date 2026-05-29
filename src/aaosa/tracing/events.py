@@ -3,6 +3,8 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from aaosa.schemas.output import LLMMetadata
+
 
 class _BaseEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -35,6 +37,7 @@ class ExecutedEvent(_BaseEvent):
     type: Literal["executed"] = "executed"
     agent_id: str
     output_summary: str
+    llm_metadata: LLMMetadata | None = None
 
 
 class UnassignedEvent(_BaseEvent):

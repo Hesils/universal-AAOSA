@@ -1,9 +1,11 @@
 import pytest
 from pydantic import TypeAdapter
 
+from aaosa.schemas.output import LLMMetadata
 from aaosa.tracing.events import (
     ClaimEvent,
     EloUpdatedEvent,
+    ExecutedEvent,
     Phase1FilteredEvent,
     QAEvaluatedEvent,
     TagAcquiredEvent,
@@ -137,3 +139,37 @@ class TestClaimEventUnionV2:
         }
         event = adapter.validate_python(data)
         assert isinstance(event, Phase1FilteredEvent)
+
+
+class TestExecutedEventLLMMetadata:
+    def test_defaults_to_none(self):
+        """Rétrocompat : ExecutedEvent sans llm_metadata reste valide, défaut None."""
+        e = ExecutedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", output_summary="done",
+        )
+        assert e.llm_metadata is None
+
+    def test_carries_llm_metadata(self):
+        meta = LLMMetadata(
+            model_name="gpt-4o-mini", tokens_in=10, tokens_out=5, latency_ms=42.0,
+        )
+        e = ExecutedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", output_summary="done", llm_metadata=meta,
+        )
+        assert e.llm_metadata is not None
+        assert e.llm_metadata.tokens_in == 10
+
+    def test_json_roundtrip_with_metadata(self):
+        meta = LLMMetadata(
+            model_name="gpt-4o-mini", tokens_in=10, tokens_out=5, latency_ms=42.0,
+        )
+        e = ExecutedEvent(
+            session_id="s1", task_id="t1",
+            agent_id="a1", output_summary="done", llm_metadata=meta,
+        )
+        e2 = ExecutedEvent.model_validate_json(e.model_dump_json())
+        assert e2.llm_metadata is not None
+        assert e2.llm_metadata.model_name == "gpt-4o-mini"
+        assert e2.llm_metadata.latency_ms == 42.0

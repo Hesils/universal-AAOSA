@@ -39,6 +39,7 @@ def run_task(
             task_id=task.id,
             agent_id=winner.id,
             output_summary=output.content[:100],
+            llm_metadata=output.llm_metadata,
         ))
 
     if evaluator is None:
