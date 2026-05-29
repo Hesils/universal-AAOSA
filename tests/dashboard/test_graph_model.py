@@ -264,3 +264,41 @@ class TestBuildStepPass:
         assert d.output.produced is True
         assert d.output.output_content == "the full fix"
         assert d.testset.forked is False
+
+
+class TestBuildStepVariants:
+    def test_unassigned(self):
+        events = [p1("t1", "a", False, 0.1), p1("t1", "b", False, 0.1), unassigned("t1", "no candidate claimed")]
+        step = build_graph(events).steps[0]
+        assert step.outcome == "unassigned"
+        assert step.winner_agent_id is None
+        assert step.active_nodes == ["input", "dispatch"]
+        assert [(e.from_node, e.to) for e in step.active_edges] == [("input", "dispatch")]
+        assert step.detail.dispatch.unassigned_reason == "no candidate claimed"
+        assert step.detail.evaluator.ran is False
+        assert step.detail.output.produced is False
+
+    def test_no_qa(self):
+        events = [p1("t1", "a", True, 0.9), p2("t1", "a", "claim", "mine"),
+                  disp("t1", "a"), ex("t1", "a", content="done")]
+        step = build_graph(events).steps[0]
+        assert step.outcome == "no_qa"
+        assert step.winner_agent_id == "a"
+        assert step.active_nodes == ["input", "dispatch", "a", "output"]
+        assert [(e.from_node, e.to) for e in step.active_edges] == [("input", "dispatch"), ("dispatch", "a"), ("a", "output")]
+        assert step.detail.evaluator.ran is False
+        assert step.detail.output.produced is True
+
+    def test_qa_fail_forks_to_testset(self):
+        events = [p1("t1", "a", True, 0.9), p2("t1", "a", "claim", "mine"),
+                  disp("t1", "a"), ex("t1", "a", content="weak"),
+                  qa("t1", "a", success=False, score=0.3, reason="too short", criteria={"min_length": False})]
+        step = build_graph(events).steps[0]
+        assert step.outcome == "qa_fail"
+        assert step.winner_agent_id == "a"
+        assert step.active_nodes == ["input", "dispatch", "a", "evaluator", "testset"]
+        assert [(e.from_node, e.to) for e in step.active_edges] == [("input", "dispatch"), ("dispatch", "a"), ("a", "evaluator"), ("evaluator", "testset")]
+        assert step.detail.testset.forked is True
+        assert step.detail.testset.from_task_id == "t1"
+        assert step.detail.evaluator.success is False
+        assert step.detail.output.produced is True  # output produit puis rejeté
