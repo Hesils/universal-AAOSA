@@ -14,11 +14,12 @@ import pytest
 
 from aaosa.runtime.runner import run_task
 from aaosa.core.agent import Agent
+from aaosa.qa.judge import JudgeBreakdown, DimensionScore
+from aaosa.qa.protocol import QAResult, QAFailure
 from aaosa.schemas.claim import Claim
 from aaosa.schemas.output import Output, LLMMetadata
 from aaosa.schemas.task import Task
 from aaosa.claiming.dispatch import DispatchResult
-from aaosa.qa.protocol import QAResult, QAFailure
 from aaosa.tracing.events import ExecutedEvent, QAEvaluatedEvent, EloUpdatedEvent, TagAcquiredEvent
 from aaosa.tracing.tracer import Tracer
 
@@ -418,3 +419,36 @@ class TestRunTaskV2Unassigned:
         result = run_task(task, [agent], MagicMock(), evaluator=evaluator)
         assert isinstance(result, DispatchResult)
         assert result.status == "unassigned"
+
+
+def test_run_task_qa_event_carries_criteria_and_judge():
+    """L'event QA émis porte criteria_results et judge du QAResult."""
+    task = make_task()
+    agent = make_agent("AgentA", 80)
+    claim = make_claim(agent, task, "claim")
+    output = make_output(agent, task)
+    tracer = Tracer(session_id="s1")
+
+    qa = QAResult(
+        task_id=task.id, agent_id=agent.id, success=True, score=0.9,
+        reason="ok", criteria_results={"non_empty": True},
+        judge=JudgeBreakdown(
+            mode="rubric", overall=0.9,
+            dimension_scores=[DimensionScore(name="clarity", score=0.9)],
+            reason="clear",
+        ),
+    )
+
+    class _FakeEvaluator:
+        def evaluate(self, t, o):
+            return qa
+
+    with patch.object(Agent, "claim", return_value=claim):
+        with patch.object(Agent, "execute", return_value=output):
+            run_task(task, [agent], MagicMock(), tracer=tracer, evaluator=_FakeEvaluator())
+
+    qa_events = [e for e in tracer.events if isinstance(e, QAEvaluatedEvent)]
+    assert len(qa_events) == 1
+    assert qa_events[0].criteria_results == {"non_empty": True}
+    assert qa_events[0].judge is not None
+    assert qa_events[0].judge.overall == 0.9

@@ -1,0 +1,87 @@
+<style>
+  #gl { --em:#10b981; --em2:#34d399; --dim:#1f2937; --txt:#e5e7eb; --mut:#6b7280; --bg:#0a0f0d; color:var(--txt); font-family:'JetBrains Mono',ui-monospace,monospace; }
+  #gl h2{color:#fff}
+  #gl .gbox { background:var(--bg); border:1px solid var(--dim); border-radius:12px; padding:0; overflow:hidden; }
+  #gl text { font-family:'JetBrains Mono',ui-monospace,monospace; fill:var(--txt); }
+  #gl .band-io { fill:#0b1518; }
+  #gl .band-logic { fill:#0c1a14; }
+  #gl .band-agents { fill:#0c1118; }
+  #gl .bandlbl { font-size:10px; letter-spacing:.12em; fill:#3f5249; }
+  #gl .v3lbl { font-size:9px; letter-spacing:.05em; fill:#2f4038; }
+  #gl .stage-on { fill:#0e2a20; stroke:var(--em); stroke-width:1.6; }
+  #gl .claim { fill:#0c241b; stroke:var(--em2); stroke-width:2; }
+  #gl .io { fill:#0d1c20; stroke:#2b4a4f; stroke-width:1.3; }
+  #gl .io-dim { fill:#0d161a; stroke:#26343a; stroke-width:1.1; }
+  #gl .agent { fill:#10171f; stroke:#2b3a33; stroke-width:1; }
+  #gl .agent-pass { fill:#10221c; stroke:#1f6f57; stroke-width:1.3; }
+  #gl .agent-win { fill:#0e3326; stroke:var(--em2); stroke-width:2.2; }
+  #gl .lbl { font-size:12px; } #gl .lblsm{font-size:11px} #gl .lblmut { font-size:9.5px; fill:var(--mut); }
+  #gl .edge { stroke:#2b3a33; stroke-width:1.4; fill:none; }
+  #gl .edge-on { stroke:url(#eg3); stroke-width:2.4; fill:none; }
+  #gl .edge-dim { stroke:#243029; stroke-width:1.4; fill:none; stroke-dasharray:4 4; }
+  #gl .tag { font-size:8.5px; fill:var(--em2); }
+  #gl .legend { font-size:10px; color:var(--mut); margin-top:8px; display:flex; gap:16px; flex-wrap:wrap; }
+  #gl .legend b{color:#cbd5d1;font-weight:500}
+</style>
+
+<div id="gl">
+  <h2>Graphe en 3 couches — V2c (réel) dans le cadre extensible V3</h2>
+  <p class="subtitle">Nœuds pleins = rendus en V2c. Annotations grisées dans la bande CENTER/BOTTOM = emplacements V3 (TaskDivider, Aggregateur, tools), non rendus aujourd'hui. Scénario OPTIMIZE_API : BACKEND gagne, QA pass.</p>
+
+  <div class="gbox">
+    <svg viewBox="0 0 700 560" width="100%" style="max-height:78vh;display:block">
+      <defs>
+        <linearGradient id="eg3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1f6f57"/><stop offset="1" stop-color="#34d399"/></linearGradient>
+      </defs>
+
+      <!-- bands -->
+      <rect class="band-io" x="0" y="0" width="700" height="150"/>
+      <rect class="band-logic" x="0" y="150" width="700" height="190"/>
+      <rect class="band-agents" x="0" y="340" width="700" height="220"/>
+      <text class="bandlbl" x="12" y="20">TOP · I/O SYSTÈME</text>
+      <text class="bandlbl" x="12" y="170">CENTER · LOGIQUE INTERNE</text>
+      <text class="bandlbl" x="12" y="360">BOTTOM · AGENTS</text>
+      <text class="v3lbl" x="300" y="170">V3 ↳ TaskDivider · Aggregateur</text>
+      <text class="v3lbl" x="500" y="360">V3 ↳ tools · chaînage A→B</text>
+
+      <!-- edges -->
+      <path class="edge-on" d="M120,98 C150,140 150,150 152,196"/>            <!-- input -> dispatch -->
+      <path class="edge-on"  d="M150,266 C170,330 250,340 252,408"/>          <!-- dispatch -> BE winner -->
+      <path class="edge-dim" d="M120,266 C95,330 95,340 95,408"/>            <!-- dispatch -> FE filtered -->
+      <path class="edge"     d="M185,266 C300,330 410,340 410,408"/>          <!-- dispatch -> DE -->
+      <path class="edge"     d="M190,250 C400,300 560,330 565,408"/>          <!-- dispatch -> FS -->
+      <path class="edge-on"  d="M300,408 C420,350 470,300 478,272"/>          <!-- BE winner -> evaluator -->
+      <path class="edge-on"  d="M478,196 C470,150 460,120 445,98"/>           <!-- evaluator -> output (pass) -->
+      <path class="edge-dim" d="M548,210 C600,160 600,140 600,118"/>          <!-- evaluator -> testset (fail) -->
+
+      <!-- TOP nodes -->
+      <g><rect class="io" x="40" y="56" width="150" height="42" rx="8"/><text class="lbl" x="115" y="74" text-anchor="middle">Input · session</text><text class="lblmut" x="115" y="88" text-anchor="middle">tasks 1 par 1 · scrubber</text></g>
+      <g><rect class="io" x="370" y="56" width="150" height="42" rx="8"/><text class="lbl" x="445" y="74" text-anchor="middle">↩ retour user</text><text class="lblmut" x="445" y="88" text-anchor="middle">output (QA pass)</text></g>
+      <g><rect class="io-dim" x="535" y="74" width="140" height="42" rx="8"/><text class="lbl" x="605" y="92" text-anchor="middle" style="fill:#9aa6a0">TestSet</text><text class="lblmut" x="605" y="106" text-anchor="middle">boucle / healthcheck</text></g>
+
+      <!-- CENTER nodes -->
+      <g><rect class="claim" x="80" y="198" width="150" height="68" rx="10"/><text class="lbl" x="155" y="226" text-anchor="middle" style="fill:#fff">DISPATCH</text><text class="lblmut" x="155" y="242" text-anchor="middle">claiming P1·P2·dispatch</text><text class="tag" x="155" y="257" text-anchor="middle">clic → détail</text></g>
+      <g><rect class="stage-on" x="408" y="200" width="150" height="64" rx="10"/><text class="lbl" x="483" y="226" text-anchor="middle">Evaluator</text><text class="lblmut" x="483" y="242" text-anchor="middle">QA spec · gates+judge</text><text class="tag" x="483" y="256" text-anchor="middle">pass↑user · fail→TestSet</text></g>
+
+      <!-- BOTTOM agents -->
+      <g><rect class="agent" x="35" y="410" width="120" height="54" rx="9"/><text class="lblsm" x="95" y="432" text-anchor="middle" style="fill:#6b7280">FRONTEND</text><text class="lblmut" x="95" y="448" text-anchor="middle">filtré P1</text></g>
+      <g><rect class="agent-win" x="192" y="410" width="120" height="54" rx="9"/><text class="lblsm" x="252" y="432" text-anchor="middle" style="fill:#fff">BACKEND</text><text class="tag" x="252" y="448" text-anchor="middle">★ gagnant</text></g>
+      <g><rect class="agent" x="350" y="410" width="120" height="54" rx="9"/><text class="lblsm" x="410" y="432" text-anchor="middle" style="fill:#9aa6a0">DEVOPS</text><text class="lblmut" x="410" y="448" text-anchor="middle">no_claim</text></g>
+      <g><rect class="agent-pass" x="505" y="410" width="120" height="54" rx="9"/><text class="lblsm" x="565" y="432" text-anchor="middle">FULLSTACK</text><text class="lblmut" x="565" y="448" text-anchor="middle">claim, perdu</text></g>
+    </svg>
+  </div>
+  <div class="legend">
+    <span><b style="color:#34d399">━</b> sollicité</span>
+    <span><b style="color:#243029">┄</b> branche non prise</span>
+    <span><b style="color:#34d399">▢</b> gagnant</span>
+    <span><b style="color:#1f6f57">▢</b> passé P1</span>
+    <span><b style="color:#6b7280">▢</b> filtré</span>
+    <span style="color:#3f5249">— bandes = couches · annotations grises = V3 (non rendu)</span>
+  </div>
+
+  <div class="options" style="margin-top:18px">
+    <div class="option" data-choice="ok" onclick="toggleSelect(this)"><div class="letter">✓</div><div class="content"><h3>Oui — 3 couches, réel only</h3><p>Topologie de référence validée.</p></div></div>
+    <div class="option" data-choice="v3nodes" onclick="toggleSelect(this)"><div class="letter">V3</div><div class="content"><h3>Je veux voir les nœuds V3 grisés</h3><p>Afficher TaskDivider/Aggregateur comme nœuds 'coming soon' (revient sur la décision réel-only).</p></div></div>
+    <div class="option" data-choice="tweak" onclick="toggleSelect(this)"><div class="letter">~</div><div class="content"><h3>Ajustements</h3><p>Je précise dans le terminal.</p></div></div>
+  </div>
+</div>

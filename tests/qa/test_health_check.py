@@ -173,6 +173,18 @@ class TestRunHealthCheck:
         assert qe_task.id in report.evaluator_quarantined
         assert qe_task.id not in report.unattributed
 
+    def test_tracer_receives_qa_events_with_criteria_and_judge(self, monkeypatch):
+        """Tracer reçoit des QAEvaluatedEvents portant criteria_results et judge."""
+        task = make_task()
+        patch_run_task(monkeypatch, lambda *a, **k: passing_output(task))
+        tracer = Tracer(session_id="hc-1")
+        run_health_check([], TestSet(cases=[guard_case(task)]), client=object(), n_runs=2, tracer=tracer)
+        qa_events = [e for e in tracer.events if isinstance(e, QAEvaluatedEvent)]
+        assert len(qa_events) >= 2
+        for event in qa_events:
+            assert isinstance(event.criteria_results, dict)
+            # judge peut être None ou JudgeBreakdown
+
 
 def _empty_report() -> HealthCheckReport:
     return HealthCheckReport(

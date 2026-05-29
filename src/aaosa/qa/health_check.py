@@ -72,6 +72,7 @@ def run_health_check(
                     session_id=tracer.session_id, task_id=case.task.id,
                     agent_id=result.agent_id, success=qa.success,
                     score=qa.score, reason=qa.reason,
+                    criteria_results=qa.criteria_results, judge=qa.judge,
                 ))
             if qa.success:
                 pass_count += 1

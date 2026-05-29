@@ -1,0 +1,118 @@
+<style>
+  #t4 { --em:#10b981; --em2:#34d399; --dim:#1f2937; --txt:#e5e7eb; --mut:#6b7280; --bg:#0a0f0d; --pan:#0c1410; color:var(--txt); font-family:'JetBrains Mono',ui-monospace,monospace; }
+  #t4 h2{color:#fff}
+  #t4 .app { border:1px solid var(--dim); border-radius:12px; overflow:hidden; background:var(--bg); }
+  #t4 .toolbar { display:flex; align-items:center; gap:14px; padding:10px 14px; background:#0c1712; border-bottom:1px solid var(--dim); font-size:11px; }
+  #t4 .sel { background:#0e2a20; border:1px solid var(--em); color:#fff; border-radius:7px; padding:5px 12px; }
+  #t4 .chip { background:#10171f; border:1px solid #243029; border-radius:20px; padding:4px 10px; color:#9aa6a0; }
+  #t4 .chip b{color:var(--em2)}
+  #t4 .main { display:grid; grid-template-columns:1fr 240px; min-height:380px; }
+  #t4 .graphpane { position:relative; border-right:1px solid var(--dim); }
+  #t4 .todo { padding:12px; }
+  #t4 .todo .h { font-size:10px; letter-spacing:.1em; color:#3f5249; margin-bottom:10px; }
+  #t4 .titem { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:7px; font-size:11px; margin-bottom:4px; }
+  #t4 .titem.done { color:#9aa6a0; } #t4 .titem.done .b{color:var(--em2)}
+  #t4 .titem.cur { background:#0e2a20; border:1px solid var(--em); color:#fff; }
+  #t4 .titem.pend { color:var(--mut); } #t4 .titem .b{font-size:12px;width:14px}
+  #t4 .scrub { display:flex; align-items:center; gap:14px; padding:10px 16px; background:#0c1712; border-top:1px solid var(--dim); font-size:12px; }
+  #t4 .btns{display:flex;gap:6px} #t4 .pb{background:#10171f;border:1px solid #243029;border-radius:6px;color:#cbd5d1;padding:3px 9px}
+  #t4 .pb.play{background:#0e2a20;border-color:var(--em);color:#fff}
+  #t4 .track{flex:1;height:5px;border-radius:3px;background:linear-gradient(90deg,#1f6f57 0 33%,#243029 33%);position:relative}
+  #t4 .track .dot{position:absolute;left:33%;top:50%;transform:translate(-50%,-50%);width:13px;height:13px;border-radius:50%;background:var(--em2);box-shadow:0 0 8px var(--em)}
+  #t4 .overlay{position:absolute;right:14px;top:14px;width:262px;background:rgba(8,14,11,.96);border:1px solid var(--em);border-radius:10px;padding:13px;font-size:11px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  #t4 .overlay .ot{color:#fff;font-size:12px;margin-bottom:2px} #t4 .overlay .om{color:var(--mut);font-size:9.5px;margin-bottom:9px}
+  #t4 .row{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #18221d}
+  #t4 .row .k{color:#9aa6a0} #t4 .row .v{color:var(--em2)}
+  #t4 .row .v.no{color:#6b7280} #t4 .row .v.win{color:#fff}
+  #t4 text{font-family:'JetBrains Mono',monospace;fill:var(--txt)}
+  #t4 .lbl{font-size:10px} #t4 .lblmut{font-size:8px;fill:var(--mut)} #t4 .tag{font-size:7.5px;fill:var(--em2)}
+  #t4 .band{opacity:.5}
+  #t4 .legend{font-size:10px;color:var(--mut);margin-top:8px}
+</style>
+
+<div id="t4">
+  <h2>Tab 4 · Session run — composition</h2>
+  <p class="subtitle">Graphe 3 couches + panneau todo (tasks de la session) + scrubber de stepping + overlay au clic. Ici step 2/6, task OPTIMIZE_API, overlay ouvert sur le nœud DISPATCH.</p>
+
+  <div class="app">
+    <div class="toolbar">
+      <span class="sel">SESSION ▾ demo</span>
+      <span class="chip">tasks <b>6</b></span>
+      <span class="chip">agents <b>4</b></span>
+      <span class="chip">pass <b>83%</b></span>
+      <span class="chip">latence <b>12.4s</b></span>
+      <span class="chip">tokens <b>18.2k</b></span>
+    </div>
+
+    <div class="main">
+      <div class="graphpane">
+        <svg viewBox="0 0 470 380" width="100%" style="display:block">
+          <defs><linearGradient id="t4e" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1f6f57"/><stop offset="1" stop-color="#34d399"/></linearGradient></defs>
+          <!-- bands -->
+          <rect class="band" x="0" y="0" width="470" height="100" fill="#0b1518"/>
+          <rect class="band" x="0" y="100" width="470" height="150" fill="#0c1a14"/>
+          <rect class="band" x="0" y="250" width="470" height="130" fill="#0c1118"/>
+          <text class="lblmut" x="8" y="14" style="fill:#3f5249">TOP I/O</text>
+          <text class="lblmut" x="8" y="114" style="fill:#3f5249">CENTER LOGIQUE</text>
+          <text class="lblmut" x="8" y="264" style="fill:#3f5249">BOTTOM AGENTS</text>
+          <!-- edges -->
+          <path d="M85,66 C100,90 100,100 100,134" stroke="url(#t4e)" stroke-width="2.2" fill="none"/>
+          <path d="M100,176 C120,220 175,250 178,288" stroke="url(#t4e)" stroke-width="2.2" fill="none"/>
+          <path d="M78,176 C60,220 60,250 62,288" stroke="#243029" stroke-width="1.3" stroke-dasharray="4 4" fill="none"/>
+          <path d="M195,288 C300,240 330,210 332,182" stroke="url(#t4e)" stroke-width="2.2" fill="none"/>
+          <path d="M332,134 C320,100 300,80 285,66" stroke="url(#t4e)" stroke-width="2.2" fill="none"/>
+          <!-- TOP -->
+          <g><rect x="28" y="46" width="115" height="34" rx="7" fill="#0d1c20" stroke="#2b4a4f"/><text class="lbl" x="85" y="62" text-anchor="middle">Input·session</text><text class="lblmut" x="85" y="74" text-anchor="middle">OPTIMIZE_API</text></g>
+          <g><rect x="228" y="46" width="115" height="34" rx="7" fill="#0d1c20" stroke="#2b4a4f"/><text class="lbl" x="285" y="62" text-anchor="middle">↩ retour user</text></g>
+          <!-- CENTER -->
+          <g><rect x="48" y="134" width="104" height="44" rx="9" fill="#0c241b" stroke="#34d399" stroke-width="2"/><text class="lbl" x="100" y="156" text-anchor="middle" style="fill:#fff">DISPATCH</text><text class="tag" x="100" y="170" text-anchor="middle">◀ ouvert</text></g>
+          <g><rect x="288" y="136" width="104" height="42" rx="9" fill="#0e2a20" stroke="#10b981" stroke-width="1.6"/><text class="lbl" x="340" y="158" text-anchor="middle">Evaluator</text><text class="lblmut" x="340" y="170" text-anchor="middle">QA pass</text></g>
+          <!-- BOTTOM -->
+          <g><rect x="20" y="290" width="84" height="40" rx="8" fill="#10171f" stroke="#2b3a33"/><text class="lbl" x="62" y="312" text-anchor="middle" style="fill:#6b7280">FRONTEND</text><text class="lblmut" x="62" y="324" text-anchor="middle">filtré</text></g>
+          <g><rect x="136" y="290" width="84" height="40" rx="8" fill="#0e3326" stroke="#34d399" stroke-width="2.2"/><text class="lbl" x="178" y="312" text-anchor="middle" style="fill:#fff">BACKEND</text><text class="tag" x="178" y="324" text-anchor="middle">★ gagnant</text></g>
+          <g><rect x="252" y="290" width="84" height="40" rx="8" fill="#10171f" stroke="#2b3a33"/><text class="lbl" x="294" y="312" text-anchor="middle" style="fill:#9aa6a0">DEVOPS</text></g>
+          <g><rect x="368" y="290" width="84" height="40" rx="8" fill="#10221c" stroke="#1f6f57"/><text class="lbl" x="410" y="312" text-anchor="middle">FULLSTACK</text></g>
+        </svg>
+
+        <!-- node-click overlay -->
+        <div class="overlay">
+          <div class="ot">DISPATCH · détail</div>
+          <div class="om">collapse Phase 1 · Phase 2 · résolution</div>
+          <div class="row"><span class="k">Phase 1 — fit_score</span><span class="v"></span></div>
+          <div class="row"><span class="k">BACKEND</span><span class="v win">1.18 ✓</span></div>
+          <div class="row"><span class="k">FULLSTACK</span><span class="v">0.94 ✓</span></div>
+          <div class="row"><span class="k">DEVOPS</span><span class="v">0.81 ✓</span></div>
+          <div class="row"><span class="k">FRONTEND</span><span class="v no">— filtré</span></div>
+          <div class="row" style="margin-top:6px"><span class="k">Phase 2 — claim</span><span class="v"></span></div>
+          <div class="row"><span class="k">BACKEND</span><span class="v win">claim</span></div>
+          <div class="row"><span class="k">FULLSTACK</span><span class="v">claim</span></div>
+          <div class="row"><span class="k">DEVOPS</span><span class="v no">no_claim</span></div>
+          <div class="row" style="border:0"><span class="k">→ winner</span><span class="v win">BACKEND (fit)</span></div>
+        </div>
+      </div>
+
+      <div class="todo">
+        <div class="h">TASKS · SESSION</div>
+        <div class="titem done"><span class="b">✓</span> FIX_CSS_HOVER</div>
+        <div class="titem cur"><span class="b">�,</span> OPTIMIZE_API</div>
+        <div class="titem pend"><span class="b">○</span> SECURITY_AUDIT</div>
+        <div class="titem pend"><span class="b">○</span> WRITE_TESTS</div>
+        <div class="titem pend"><span class="b">○</span> REFACTOR_API</div>
+        <div class="titem pend"><span class="b">○</span> BUILD_DASHBOARD</div>
+      </div>
+    </div>
+
+    <div class="scrub">
+      <div class="btns"><span class="pb">◀◀</span><span class="pb">◀</span><span class="pb play">▶</span><span class="pb">▶</span><span class="pb">▶▶</span></div>
+      <div class="track"><div class="dot"></div></div>
+      <span style="color:#9aa6a0">step <b style="color:#fff">2 / 6</b></span>
+    </div>
+  </div>
+
+  <div class="legend">Clic sur un nœud → overlay contextuel. Agent → ELO/tags, prompt (tronqué), input, output. Evaluator → critères/gates/judge + score. Le scrubber avance task par task, le panneau todo se coche.</div>
+
+  <div class="options" style="margin-top:16px">
+    <div class="option" data-choice="ok" onclick="toggleSelect(this)"><div class="letter">✓</div><div class="content"><h3>Cette composition me va</h3><p>Graphe + todo + scrubber + overlay.</p></div></div>
+    <div class="option" data-choice="tweak" onclick="toggleSelect(this)"><div class="letter">~</div><div class="content"><h3>Ajustements</h3><p>Placement panneau, contenu overlay, scrubber… je précise.</p></div></div>
+  </div>
+</div>

@@ -1,0 +1,90 @@
+<style>
+  #gv { --em:#10b981; --em2:#34d399; --dim:#1f2937; --txt:#e5e7eb; --mut:#6b7280; --bg:#0a0f0d; color:var(--txt); font-family:'JetBrains Mono',ui-monospace,monospace; }
+  #gv h2{color:#fff}
+  #gv .gbox { background:radial-gradient(circle at 1px 1px, #14201b 1px, transparent 0); background-size:18px 18px; background-color:var(--bg); border:1px solid var(--dim); border-radius:12px; padding:14px; }
+  #gv text { font-family:'JetBrains Mono',ui-monospace,monospace; fill:var(--txt); }
+  #gv .stage { fill:#0f1714; stroke:#2b3a33; stroke-width:1; }
+  #gv .stage-on { fill:#0e2a20; stroke:var(--em); stroke-width:1.6; }
+  #gv .claim { fill:#0c241b; stroke:var(--em2); stroke-width:2; }
+  #gv .agent { fill:#10171f; stroke:#2b3a33; stroke-width:1; }
+  #gv .agent-pass { fill:#10221c; stroke:#1f6f57; stroke-width:1.3; }
+  #gv .agent-win { fill:#0e3326; stroke:var(--em2); stroke-width:2.2; }
+  #gv .lbl { font-size:12px; }
+  #gv .lblsm { font-size:11px; }
+  #gv .lblmut { font-size:9.5px; fill:var(--mut); }
+  #gv .edge { stroke:#2b3a33; stroke-width:1.4; fill:none; }
+  #gv .edge-on { stroke:url(#eg2); stroke-width:2.4; fill:none; }
+  #gv .edge-dim { stroke:#243029; stroke-width:1.4; fill:none; stroke-dasharray:4 4; }
+  #gv .tag { font-size:8.5px; fill:var(--em2); }
+  #gv .legend { font-size:10px; color:var(--mut); margin-top:8px; display:flex; gap:16px; flex-wrap:wrap; }
+  #gv .legend b{color:#cbd5d1;font-weight:500}
+</style>
+
+<div id="gv">
+  <h2>Graphe vertical — topologie révisée</h2>
+  <p class="subtitle">Scénario : session "demo", task <b>OPTIMIZE_API</b>. Claiming central collapse Phase1/Phase2/Dispatch (clic → overlay détaillé). Le gagnant (BACKEND) envoie son output à l'Evaluator, qui route ici vers Integrator (QA pass). La branche TestSet (fail) reste en pointillé.</p>
+
+  <div class="gbox">
+    <svg viewBox="0 0 640 720" width="100%" style="max-height:78vh">
+      <defs>
+        <linearGradient id="eg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1f6f57"/><stop offset="1" stop-color="#34d399"/></linearGradient>
+      </defs>
+
+      <!-- edges input->claiming -->
+      <path class="edge-on" d="M320,74 V104"/>
+      <!-- claiming -> agents -->
+      <path class="edge-dim" d="M270,196 C150,210 95,220 95,250"/>
+      <path class="edge-on"  d="M310,200 C250,230 235,235 235,250"/>
+      <path class="edge"     d="M345,200 C400,230 405,235 405,250"/>
+      <path class="edge"     d="M370,196 C500,210 545,220 545,250"/>
+      <!-- winner -> evaluator -->
+      <path class="edge-on" d="M235,304 C235,360 320,350 320,392"/>
+      <!-- evaluator fork -->
+      <path class="edge-on"  d="M285,448 C230,480 200,485 200,512"/>
+      <path class="edge-dim" d="M355,448 C440,480 470,485 470,512"/>
+      <!-- integrator -> user -->
+      <path class="edge-on" d="M200,566 V606"/>
+
+      <!-- Input -->
+      <g><rect class="stage-on" x="240" y="34" width="160" height="40" rx="8"/><text class="lbl" x="320" y="52" text-anchor="middle">Input · session</text><text class="lblmut" x="320" y="66" text-anchor="middle">tasks 1 par 1 (scrubber)</text></g>
+
+      <!-- Claiming central -->
+      <g><rect class="claim" x="250" y="106" width="140" height="90" rx="10"/>
+         <text class="lbl" x="320" y="138" text-anchor="middle" style="fill:#fff">CLAIMING</text>
+         <text class="lblmut" x="320" y="156" text-anchor="middle">Phase1 · Phase2</text>
+         <text class="lblmut" x="320" y="170" text-anchor="middle">· Dispatch</text>
+         <text class="tag" x="320" y="186" text-anchor="middle">clic → détail</text></g>
+
+      <!-- Agents row (N outputs of claiming) -->
+      <g><rect class="agent" x="45" y="252" width="100" height="50" rx="9"/><text class="lblsm" x="95" y="274" text-anchor="middle" style="fill:#6b7280">FRONTEND</text><text class="lblmut" x="95" y="290" text-anchor="middle">filtré P1</text></g>
+      <g><rect class="agent-win" x="185" y="252" width="100" height="50" rx="9"/><text class="lblsm" x="235" y="274" text-anchor="middle" style="fill:#fff">BACKEND</text><text class="tag" x="235" y="290" text-anchor="middle">★ gagnant</text></g>
+      <g><rect class="agent-pass" x="355" y="252" width="100" height="50" rx="9"/><text class="lblsm" x="405" y="274" text-anchor="middle">DEVOPS</text><text class="lblmut" x="405" y="290" text-anchor="middle">no_claim</text></g>
+      <g><rect class="agent-pass" x="495" y="252" width="100" height="50" rx="9"/><text class="lblsm" x="545" y="274" text-anchor="middle">FULLSTACK</text><text class="lblmut" x="545" y="290" text-anchor="middle">claim, perdu</text></g>
+
+      <!-- Evaluator -->
+      <g><rect class="stage-on" x="250" y="394" width="140" height="56" rx="9"/><text class="lbl" x="320" y="420" text-anchor="middle">Evaluator</text><text class="lblmut" x="320" y="436" text-anchor="middle">QA spec · gates+judge</text></g>
+      <text class="lblmut" x="218" y="478" text-anchor="middle" style="fill:#34d399">pass</text>
+      <text class="lblmut" x="438" y="478" text-anchor="middle">fail</text>
+
+      <!-- Integrator -->
+      <g><rect class="stage-on" x="130" y="514" width="140" height="52" rx="9"/><text class="lbl" x="200" y="538" text-anchor="middle">Integrator</text><text class="lblmut" x="200" y="554" text-anchor="middle">collecteur outputs</text></g>
+      <!-- TestSet -->
+      <g><rect class="stage" x="400" y="514" width="140" height="52" rx="9"/><text class="lbl" x="470" y="538" text-anchor="middle" style="fill:#9aa6a0">TestSet</text><text class="lblmut" x="470" y="554" text-anchor="middle">boucle / healthcheck</text></g>
+
+      <!-- User return -->
+      <g><rect class="stage-on" x="130" y="608" width="140" height="44" rx="9"/><text class="lbl" x="200" y="635" text-anchor="middle">↩ retour user</text></g>
+    </svg>
+  </div>
+  <div class="legend">
+    <span><b style="color:#34d399">━</b> sollicité ce run</span>
+    <span><b style="color:#243029">┄</b> branche non prise</span>
+    <span><b style="color:#34d399">▢</b> gagnant</span>
+    <span><b style="color:#1f6f57">▢</b> passé P1</span>
+    <span><b style="color:#6b7280">▢</b> filtré</span>
+  </div>
+
+  <div class="options" style="margin-top:18px">
+    <div class="option" data-choice="ok" onclick="toggleSelect(this)"><div class="letter">✓</div><div class="content"><h3>Oui, c'est ma vision</h3><p>On part là-dessus comme topologie de référence.</p></div></div>
+    <div class="option" data-choice="tweak" onclick="toggleSelect(this)"><div class="letter">~</div><div class="content"><h3>Presque — ajustements</h3><p>Je te dis quoi changer dans le terminal.</p></div></div>
+  </div>
+</div>

@@ -1,6 +1,7 @@
 import pytest
 from pydantic import TypeAdapter
 
+from aaosa.qa.judge import JudgeBreakdown, DimensionScore
 from aaosa.schemas.output import LLMMetadata
 from aaosa.tracing.events import (
     ClaimEvent,
@@ -200,3 +201,43 @@ class TestExecutedEventOutputContent:
         )
         e2 = ExecutedEvent.model_validate_json(e.model_dump_json())
         assert e2.output_content == "full body"
+
+
+class TestQAEvaluatedEventEnrichment:
+    def test_criteria_results_defaults_empty(self):
+        e = QAEvaluatedEvent(
+            session_id="s1", task_id="t1", agent_id="a1",
+            success=True, score=1.0, reason="ok",
+        )
+        assert e.criteria_results == {}
+        assert e.judge is None
+
+    def test_carries_criteria_and_judge(self):
+        jb = JudgeBreakdown(
+            mode="rubric", overall=0.8,
+            dimension_scores=[DimensionScore(name="clarity", score=0.8)],
+            reason="clear",
+        )
+        e = QAEvaluatedEvent(
+            session_id="s1", task_id="t1", agent_id="a1",
+            success=True, score=0.9, reason="ok",
+            criteria_results={"non_empty": True, "min_length": True},
+            judge=jb,
+        )
+        assert e.criteria_results["non_empty"] is True
+        assert e.judge is not None
+        assert e.judge.mode == "rubric"
+
+    def test_json_roundtrip(self):
+        jb = JudgeBreakdown(
+            mode="reference_based", overall=0.5,
+            dimension_scores=[], reason="meh",
+        )
+        e = QAEvaluatedEvent(
+            session_id="s1", task_id="t1", agent_id="a1",
+            success=False, score=0.5, reason="x",
+            criteria_results={"gate": False}, judge=jb,
+        )
+        e2 = QAEvaluatedEvent.model_validate_json(e.model_dump_json())
+        assert e2.criteria_results == {"gate": False}
+        assert e2.judge.mode == "reference_based"

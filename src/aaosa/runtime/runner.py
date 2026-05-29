@@ -56,6 +56,8 @@ def run_task(
             success=qa_result.success,
             score=qa_result.score,
             reason=qa_result.reason,
+            criteria_results=qa_result.criteria_results,
+            judge=qa_result.judge,
         ))
 
     elo_result = update_agent_elo(winner, task, success=qa_result.success)

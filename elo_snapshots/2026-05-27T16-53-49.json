@@ -1,0 +1,46 @@
+{
+  "timestamp": "2026-05-27T16:53:49.507488Z",
+  "agents": [
+    {
+      "agent_name": "Frontend",
+      "agent_id": "a68a90db-27a6-4911-8042-1fcc57a37b4d",
+      "tags_with_elo": {
+        "frontend": 78,
+        "css": 94,
+        "javascript": 72,
+        "testing": 40
+      }
+    },
+    {
+      "agent_name": "Backend",
+      "agent_id": "039bfb8a-5a46-43c5-837f-a523e4e335ec",
+      "tags_with_elo": {
+        "backend": 84,
+        "database": 87,
+        "python": 76,
+        "testing": 53
+      }
+    },
+    {
+      "agent_name": "DevOps",
+      "agent_id": "f8f10e9a-c824-4efb-87c6-ef716619fc2e",
+      "tags_with_elo": {
+        "infrastructure": 90,
+        "docker": 85,
+        "ci_cd": 80,
+        "backend": 30
+      }
+    },
+    {
+      "agent_name": "Fullstack",
+      "agent_id": "6e9bedbb-2d76-4127-a472-7499533702d5",
+      "tags_with_elo": {
+        "frontend": 50,
+        "backend": 55,
+        "javascript": 60,
+        "python": 50,
+        "database": 40
+      }
+    }
+  ]
+}
