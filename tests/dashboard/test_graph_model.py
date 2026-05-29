@@ -347,3 +347,38 @@ class TestMultiTask:
         assert len(step.detail.dispatch.claims) == 2
         assert step.detail.agents["a"].role == "candidate"
         assert step.detail.agents["b"].role == "winner"
+
+
+class TestHealthCheckMode:
+    def test_n_runs_keeps_last_run(self):
+        # 3 runs of the same case, no meta, no ELO (V1 mode)
+        def run(winner, success):
+            return [p1("c1", "a", True, 0.8), p1("c1", "b", True, 0.6),
+                    p2("c1", winner, "claim", "mine"),
+                    disp("c1", winner), ex("c1", winner, content=f"{winner} out"),
+                    qa("c1", winner, success=success)]
+        events = run("a", False) + run("a", True) + run("b", True)
+        model = build_graph(events)
+        assert len(model.steps) == 1
+        step = model.steps[0]
+        assert step.winner_agent_id == "b"      # last run
+        assert step.outcome == "qa_pass"
+        assert step.detail.agents["b"].output_content == "b out"
+        assert step.detail.agents["b"].elo_deltas == {}  # no ELO in health check
+
+    def test_health_check_unassigned_last_run(self):
+        def ok_run():
+            return [p1("c1", "a", True, 0.8), p2("c1", "a", "claim", "mine"),
+                    disp("c1", "a"), ex("c1", "a", content="out"), qa("c1", "a", success=True)]
+        def fail_run():
+            return [p1("c1", "a", False, 0.1), unassigned("c1", "nobody claimed")]
+        events = ok_run() + fail_run()
+        step = build_graph(events).steps[0]
+        assert step.outcome == "unassigned"
+        assert step.winner_agent_id is None
+
+    def test_label_is_task_id_without_meta(self):
+        events = [p1("c1", "a", True, 0.9), p2("c1", "a", "claim", "x"),
+                  disp("c1", "a"), ex("c1", "a", content="o"), qa("c1", "a", success=True)]
+        step = build_graph(events).steps[0]
+        assert step.label == "c1"
