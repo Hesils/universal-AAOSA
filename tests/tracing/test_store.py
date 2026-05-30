@@ -168,3 +168,35 @@ class TestSaveSession:
         meta = make_meta("sid-B")
         with pytest.raises(ValueError, match="session_id"):
             save_session(tracer, meta, tmp_path)
+
+
+class TestLoadTrace:
+    def test_roundtrip(self, tmp_path):
+        from aaosa.tracing.events import ExecutedEvent, Phase1FilteredEvent
+        from aaosa.tracing.store import load_trace
+        from aaosa.tracing.tracer import Tracer
+
+        tracer = Tracer(session_id="s1")
+        tracer.emit(Phase1FilteredEvent(session_id="s1", task_id="t1", agent_id="a1", passed=True, fit_score=0.9))
+        tracer.emit(ExecutedEvent(session_id="s1", task_id="t1", agent_id="a1", output_summary="done", output_content="full"))
+        path = tmp_path / "trace.jsonl"
+        tracer.flush(path)
+
+        events = load_trace(path)
+        assert len(events) == 2
+        assert events[0].type == "phase1_filtered"
+        assert events[1].type == "executed"
+        assert events[1].output_content == "full"
+
+    def test_skips_blank_lines(self, tmp_path):
+        from aaosa.tracing.store import load_trace
+
+        path = tmp_path / "trace.jsonl"
+        path.write_text(
+            '{"type":"unassigned","session_id":"s1","task_id":"t1","reason":"x",'
+            '"timestamp":"2026-05-30T10:00:00+00:00"}\n\n',
+            encoding="utf-8",
+        )
+        events = load_trace(path)
+        assert len(events) == 1
+        assert events[0].reason == "x"

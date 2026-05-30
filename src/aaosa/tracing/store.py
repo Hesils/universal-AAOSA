@@ -3,10 +3,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from aaosa.core.agent import Agent
+from aaosa.tracing.events import ClaimEvent
 from aaosa.tracing.tracer import Tracer
+
+_event_adapter = TypeAdapter(ClaimEvent)
 
 
 def new_session_id() -> str:
@@ -75,3 +78,12 @@ def save_session(tracer: Tracer, meta: SessionMeta, runs_root: Path) -> Path:
     tracer.flush(session_dir / "trace.jsonl")
     (session_dir / "meta.json").write_text(meta.model_dump_json(indent=2), encoding="utf-8")
     return session_dir
+
+
+def load_trace(path: Path) -> list[ClaimEvent]:
+    """Lit un trace.jsonl en liste d'events. Inverse de Tracer.flush."""
+    return [
+        _event_adapter.validate_json(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
