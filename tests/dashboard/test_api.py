@@ -70,3 +70,49 @@ def test_session_graph_404(runs_root):
     r = _client(runs_root).get("/api/sessions/nope/graph")
     assert r.status_code == 404
     assert "error" in r.get_json()
+
+
+def test_health_checks_list(runs_root):
+    r = _client(runs_root).get("/api/health-checks")
+    assert r.status_code == 200
+    assert len(r.get_json()["runs"]) == 1
+
+
+def test_health_check_detail_has_agents(runs_root):
+    c = _client(runs_root)
+    rid = c.get("/api/health-checks").get_json()["runs"][0]["id"]
+    body = c.get(f"/api/health-checks/{rid}").get_json()
+    assert len(body["cases"]) == 2
+    assert len(body["agents"]) == len(DEMO_AGENTS)
+
+
+def test_health_check_graph_default_first_graphable(runs_root):
+    c = _client(runs_root)
+    rid = c.get("/api/health-checks").get_json()["runs"][0]["id"]
+    r = c.get(f"/api/health-checks/{rid}/graph")  # sans task_id -> 1er cas graphable (S4-B)
+    assert r.status_code == 200
+    assert len(r.get_json()["steps"]) == 1
+
+
+def test_health_check_graph_explicit_task(runs_root):
+    c = _client(runs_root)
+    rid = c.get("/api/health-checks").get_json()["runs"][0]["id"]
+    detail = c.get(f"/api/health-checks/{rid}").get_json()
+    graphable_tid = [cc["task_id"] for cc in detail["cases"] if cc["graphable"]][0]
+    r = c.get(f"/api/health-checks/{rid}/graph?task_id={graphable_tid}")
+    assert r.status_code == 200
+
+
+def test_health_check_graph_quarantined_404(runs_root):
+    c = _client(runs_root)
+    rid = c.get("/api/health-checks").get_json()["runs"][0]["id"]
+    detail = c.get(f"/api/health-checks/{rid}").get_json()
+    quarantined_tid = [cc["task_id"] for cc in detail["cases"] if not cc["graphable"]][0]
+    r = c.get(f"/api/health-checks/{rid}/graph?task_id={quarantined_tid}")
+    assert r.status_code == 404
+
+
+def test_health_check_detail_404(runs_root):
+    r = _client(runs_root).get("/api/health-checks/nope")
+    assert r.status_code == 404
+    assert "error" in r.get_json()
