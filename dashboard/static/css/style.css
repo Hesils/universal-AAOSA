@@ -19,3 +19,13 @@ svg.graph { width: 100%; height: auto; display: block; }
 .node--active .node-label { fill: #cbd5e1; }
 .node--winner rect { stroke: #10b981; stroke-width: 2; fill: #10221c; }
 .node--winner .node-label { fill: #6ee7b7; }
+
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.modal-card { width: min(560px, 92vw); max-height: 86vh; overflow: auto; background: #141b24; border: 1px solid #2b3340; border-radius: 14px; }
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #222b36; }
+.modal-title { font-weight: 600; color: #e6edf3; }
+.modal-close { cursor: pointer; color: #475569; font-size: 20px; }
+.modal-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+.field-label { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: #64748b; margin-bottom: 5px; }
+.field-value { font-size: 13px; line-height: 1.5; color: #cbd5e1; background: #0f151d; border: 1px solid #222b36; border-radius: 8px; padding: 9px 11px; }
+.expand { color: #3b82f6; cursor: pointer; margin-left: 4px; }
