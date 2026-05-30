@@ -29,3 +29,16 @@ svg.graph { width: 100%; height: auto; display: block; }
 .field-label { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: #64748b; margin-bottom: 5px; }
 .field-value { font-size: 13px; line-height: 1.5; color: #cbd5e1; background: #0f151d; border: 1px solid #222b36; border-radius: 8px; padding: 9px 11px; }
 .expand { color: #3b82f6; cursor: pointer; margin-left: 4px; }
+
+.toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.session-select { background: #1a2230; color: #cbd5e1; border: 1px solid #2b3340; border-radius: 8px; padding: 6px 10px; }
+.chips { color: #64748b; font-size: 13px; }
+.session-body { display: flex; gap: 16px; }
+.graph-wrap { flex: 1; min-width: 0; }
+.todo { width: 240px; flex-shrink: 0; }
+.todo-item { padding: 6px 0; font-size: 13px; color: #94a3b8; }
+.todo--done { color: #6ee7b7; }
+.todo--current { color: #e6edf3; }
+.scrubber { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
+.scrubber button { background: #1a2230; color: #cbd5e1; border: 1px solid #2b3340; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+.scrub-label { color: #94a3b8; font-size: 13px; }
