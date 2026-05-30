@@ -304,6 +304,26 @@ class TestBuildStepVariants:
         assert step.detail.output.produced is True  # output produit puis rejeté
 
 
+class TestInputDetailContext:
+    def test_input_detail_carries_context(self):
+        events = [p1("t1", "a", True, 0.9), disp("t1", "a", "fit"), ex("t1", "a", summary="s", content="c")]
+        sm = _meta([SessionTaskRecord(
+            id="t1", description="Fix CSS", winner_agent_id="a",
+            outcome="no_qa", required_tags={"css": 60}, context="Fichier source: style.css ...",
+        )])
+        d = build_graph(events, sm).steps[0].detail
+        assert d.input.context == "Fichier source: style.css ..."
+
+    def test_input_detail_context_none_when_absent(self):
+        events = [p1("t1", "a", True, 0.9), disp("t1", "a", "fit"), ex("t1", "a", summary="s", content="c")]
+        sm = _meta([SessionTaskRecord(
+            id="t1", description="Fix CSS", winner_agent_id="a",
+            outcome="no_qa", required_tags={"css": 60},
+        )])
+        d = build_graph(events, sm).steps[0].detail
+        assert d.input.context is None
+
+
 class TestMultiTask:
     def test_steps_ordered_by_meta(self):
         events = (

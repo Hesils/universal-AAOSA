@@ -95,6 +95,7 @@ class InputDetail(BaseModel):
     task_id: str
     description: str
     required_tags: dict[str, int]
+    context: str | None = None
 
 
 class OutputDetail(BaseModel):
@@ -313,7 +314,8 @@ def _build_step(task_id: str, run: list[ClaimEvent], meta_record: SessionTaskRec
 
     description = meta_record.description if meta_record is not None else task_id
     required_tags = dict(meta_record.required_tags) if meta_record is not None else {}
-    input_detail = InputDetail(task_id=task_id, description=description, required_tags=required_tags)
+    context = meta_record.context if meta_record is not None else None
+    input_detail = InputDetail(task_id=task_id, description=description, required_tags=required_tags, context=context)
 
     active_nodes, active_edges = _active_path(outcome, winner_id)
 

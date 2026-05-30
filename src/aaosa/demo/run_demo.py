@@ -57,6 +57,7 @@ def run_demo() -> None:
             id=task.id, description=task.description,
             winner_agent_id=winner_id, outcome=outcome,
             required_tags=task.required_tags,
+            context=task.metadata.get("context") or None,
         ))
         print()
 

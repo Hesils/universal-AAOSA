@@ -60,6 +60,7 @@ class SessionTaskRecord(BaseModel):
     winner_agent_id: str | None
     outcome: TaskOutcome
     required_tags: dict[str, int]
+    context: str | None = None
 
 
 class SessionMeta(BaseModel):
