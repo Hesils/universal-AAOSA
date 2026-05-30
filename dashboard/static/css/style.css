@@ -8,3 +8,14 @@ main { padding: 16px; }
 .placeholder { color: #475569; }
 .tab-panel { min-height: 60vh; }
 svg.graph { width: 100%; height: auto; display: block; }
+.edge { stroke-width: 1.5; }
+.edge--idle { stroke: #2b3340; opacity: 0.35; }
+.edge--active { stroke: #10b981; stroke-width: 3; opacity: 1; }
+.edge--fail { stroke-dasharray: 6 5; }
+.node rect { fill: #1a2230; stroke: #3a4658; }
+.node-label { fill: #94a3b8; font-size: 13px; font-family: system-ui; pointer-events: none; }
+.node { cursor: pointer; }
+.node--active rect { stroke: #10b981; }
+.node--active .node-label { fill: #cbd5e1; }
+.node--winner rect { stroke: #10b981; stroke-width: 2; fill: #10221c; }
+.node--winner .node-label { fill: #6ee7b7; }
