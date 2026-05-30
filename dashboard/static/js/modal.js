@@ -81,8 +81,8 @@ function renderAgent(agentId, step, runAgents) {
   const f = document.createDocumentFragment();
   f.append(field("Rôle", a.role + (a.passed ? " · passed" : " · filtré") + ` · fit ${a.fit_score.toFixed(2)}`));
   if (reg) {
-    const bars = Object.entries(reg.tags_with_elo).map(([t, e]) => `${t} : ${e}`).join("<br>");
-    f.append(field("Tags · ELO courant", bars || "—"));
+    const barLines = Object.entries(reg.tags_with_elo).map(([t, e]) => `${t} : ${e}`);
+    f.append(fieldLines("Tags · ELO courant", barLines.length ? barLines : ["—"]));
     f.append(longField("System prompt", reg.system_prompt));
   }
   if (a.claim_decision) f.append(field("Claim", a.claim_decision));
