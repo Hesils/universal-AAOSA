@@ -35,16 +35,38 @@ function longField(label, value, max = 220) {
 function field(label, value) {
   const wrap = document.createElement("div");
   wrap.className = "field";
-  wrap.innerHTML = `<div class="field-label">${label}</div><div class="field-value">${value}</div>`;
+  const lbl = document.createElement("div");
+  lbl.className = "field-label";
+  lbl.textContent = label;
+  const val = document.createElement("div");
+  val.className = "field-value";
+  val.textContent = value;
+  wrap.append(lbl, val);
+  return wrap;
+}
+
+function fieldLines(label, lines) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const lbl = document.createElement("div");
+  lbl.className = "field-label";
+  lbl.textContent = label;
+  const val = document.createElement("div");
+  val.className = "field-value";
+  lines.forEach((line, i) => {
+    val.appendChild(document.createTextNode(line));
+    if (i < lines.length - 1) val.appendChild(document.createElement("br"));
+  });
+  wrap.append(lbl, val);
   return wrap;
 }
 
 function renderDispatch(d) {
   const f = document.createDocumentFragment();
-  const cand = d.candidates.map(c => `${c.agent_id} — fit ${c.fit_score.toFixed(2)} ${c.passed ? "✓" : "✗"}`).join("<br>");
-  f.append(field("Candidats (Phase 1)", cand || "—"));
-  const claims = d.claims.map(c => `${c.agent_id} — ${c.decision}`).join("<br>");
-  f.append(field("Claims (Phase 2)", claims || "—"));
+  const candLines = d.candidates.map(c => `${c.agent_id} — fit ${c.fit_score.toFixed(2)} ${c.passed ? "✓" : "✗"}`);
+  f.append(fieldLines("Candidats (Phase 1)", candLines.length ? candLines : ["—"]));
+  const claimLines = d.claims.map(c => `${c.agent_id} — ${c.decision}`);
+  f.append(fieldLines("Claims (Phase 2)", claimLines.length ? claimLines : ["—"]));
   for (const c of d.claims) if (c.justification) f.append(longField(`Justification — ${c.agent_id}`, c.justification));
   f.append(field("Winner", d.winner_agent_id || "—"));
   if (d.dispatch_reason) f.append(field("Raison dispatch", d.dispatch_reason));
@@ -54,6 +76,7 @@ function renderDispatch(d) {
 
 function renderAgent(agentId, step, runAgents) {
   const a = step.detail.agents[agentId];
+  if (!a) { return field("Agent", "non actif à cette étape"); }
   const reg = (runAgents || []).find(x => x.agent_id === agentId); // join B1 : prompt + ELO courant
   const f = document.createDocumentFragment();
   f.append(field("Rôle", a.role + (a.passed ? " · passed" : " · filtré") + ` · fit ${a.fit_score.toFixed(2)}`));
@@ -79,8 +102,8 @@ function renderEvaluator(e) {
   const f = document.createDocumentFragment();
   if (!e.ran) { f.append(field("Evaluator", "non exécuté")); return f; }
   f.append(field("Résultat", (e.success ? "succès" : "échec") + (e.score != null ? ` · score ${e.score.toFixed(2)}` : "")));
-  const crit = Object.entries(e.criteria_results).map(([k, v]) => `${k} : ${v ? "✓" : "✗"}`).join("<br>");
-  if (crit) f.append(field("Critères / gates", crit));
+  const critLines = Object.entries(e.criteria_results || {}).map(([k, v]) => `${k} : ${v ? "✓" : "✗"}`);
+  if (critLines.length) f.append(fieldLines("Critères / gates", critLines));
   if (e.judge) f.append(field("Judge", `${e.judge.mode} · ${e.judge.overall != null ? e.judge.overall.toFixed(2) : "—"}`));
   if (e.reason) f.append(longField("Raison", e.reason));
   return f;
@@ -137,8 +160,14 @@ export function openNodeModal(node, step, runAgents) {
   card.className = "modal-card";
   const head = document.createElement("div");
   head.className = "modal-head";
-  head.innerHTML = `<span class="modal-title">${title}</span><span class="modal-close">×</span>`;
-  head.querySelector(".modal-close").addEventListener("click", closeModal);
+  const titleSpan = document.createElement("span");
+  titleSpan.className = "modal-title";
+  titleSpan.textContent = title;
+  const closeBtn = document.createElement("span");
+  closeBtn.className = "modal-close";
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", closeModal);
+  head.append(titleSpan, closeBtn);
   const content = document.createElement("div");
   content.className = "modal-body";
   content.appendChild(body);
