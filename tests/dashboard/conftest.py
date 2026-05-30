@@ -84,7 +84,7 @@ def runs_root(tmp_path) -> Path:
         ],
         agent_ids=[a.id for a in DEMO_AGENTS],
     )
-    save_session(tracer, meta, root)
+    save_session(tracer, meta, root, agents=DEMO_AGENTS)
 
     # --- health check : 1 cas actif (regression_guard/agent) + 1 quarantaine (fix_target/task_spec) ---
     hc_ts = datetime(2026, 5, 30, 12, 0, 0, tzinfo=timezone.utc)
@@ -108,6 +108,6 @@ def runs_root(tmp_path) -> Path:
     hc_tracer.emit(DispatchedEvent(session_id=hc_tracer.session_id, task_id=t0.id, agent_id=a0.id, reason="best fit"))
     hc_tracer.emit(ExecutedEvent(session_id=hc_tracer.session_id, task_id=t0.id, agent_id=a0.id, output_summary="done", output_content="hc body", llm_metadata=lm))
     hc_tracer.emit(QAEvaluatedEvent(session_id=hc_tracer.session_id, task_id=t0.id, agent_id=a0.id, success=True, score=0.9, reason="ok", criteria_results={"non_empty": True}))
-    save_health_check(report, test_set, hc_tracer, root / "health_checks")
+    save_health_check(report, test_set, hc_tracer, root / "health_checks", agents=DEMO_AGENTS)
 
     return root
