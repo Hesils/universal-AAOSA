@@ -151,7 +151,7 @@ def run_demo_health_check() -> None:
     else:
         print("  Aucune graduation (pass_rate < 0.8 sur tous les fix_target actifs)")
 
-    target = save_health_check(report, test_set, tracer, Path("runs") / "health_checks")
+    target = save_health_check(report, test_set, tracer, Path("runs") / "health_checks", agents=DEMO_AGENTS)
     print(f"\nHealth check saved to {target}")
 
 

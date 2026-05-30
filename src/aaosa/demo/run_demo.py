@@ -73,7 +73,7 @@ def run_demo() -> None:
         tasks=task_records,
         agent_ids=[a.id for a in DEMO_AGENTS],
     )
-    session_dir = save_session(tracer, meta, runs_root)
+    session_dir = save_session(tracer, meta, runs_root, agents=DEMO_AGENTS)
     print(f"Session saved to {session_dir}")
 
     snapshot_dir = runs_root / "elo_snapshots"
