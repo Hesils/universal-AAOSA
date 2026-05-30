@@ -1,7 +1,10 @@
 from flask import Blueprint, current_app
+from pydantic import BaseModel, ConfigDict
 
+from aaosa.tracing.store import AgentRegistryEntry, SessionMeta
 from dashboard.collectors import agents as agents_collector
 from dashboard.collectors import infra as infra_collector
+from dashboard.collectors import sessions as sessions_collector
 from dashboard.serialization import error_response, json_response
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -33,3 +36,37 @@ def get_agent(agent_id):
     if view is None:
         return error_response(f"agent {agent_id} not found")
     return json_response(view)
+
+
+class SessionDetailResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    meta: SessionMeta
+    agents: list[AgentRegistryEntry]
+
+
+def _session_view(session_id):
+    return _cache().get_or_compute(
+        f"session_view:{session_id}",
+        lambda: sessions_collector.session_detail(_runs_root(), session_id),
+    )
+
+
+@api.get("/sessions")
+def get_sessions():
+    return json_response(sessions_collector.list_sessions(_runs_root()))
+
+
+@api.get("/sessions/<session_id>")
+def get_session(session_id):
+    view = _session_view(session_id)
+    if view is None:
+        return error_response(f"session {session_id} not found")
+    return json_response(SessionDetailResponse(meta=view.meta, agents=view.agents))
+
+
+@api.get("/sessions/<session_id>/graph")
+def get_session_graph(session_id):
+    view = _session_view(session_id)
+    if view is None:
+        return error_response(f"session {session_id} not found")
+    return json_response(view.graph)
