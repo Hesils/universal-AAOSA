@@ -8,3 +8,4 @@ dist/
 *.iml
 .env
 runs/
+.superpowers/

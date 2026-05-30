@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Exposer les 4 collectors (03a) et `build_graph` (02) en JSON via une couche HTTP Flask testée par `test_client`, après avoir figé l'identité des agents par run (B1) pour rendre le join overlay robuste.
+**Goal:** Exposer les 4 collectors (03a) et `build_graph` (02) en JSON via une couche HTTP Flask testée par `test_client`, après avoir figé l'identité des agents par run (B1) et capturé le `context` du task (addendum Épique 04) pour rendre les overlays fidèles au run réel.
 
 **Architecture:** Un addendum **additif** à la couche data (`save_session`/`save_health_check` écrivent un `agents.json` par run, param optionnel — backward compat). Puis un helper de sérialisation unique (`model_dump(by_alias=True, mode="json")` + `Cache-Control: no-store`), et un `Blueprint("api")` de routes minces lisant `runs_root`/cache depuis `app.config`. Les collectors `sessions`/`health_checks` exposent en plus les agents du run.
 
@@ -14,6 +14,7 @@
 - **S3-A** — `/sessions/<id>` = meta + agents (**pas le graphe**) ; `/sessions/<id>/graph` = `GraphModel` nu. Symétrie avec `/health-checks/<id>/graph`.
 - **S4-B** — `/health-checks/<id>/graph` sans `task_id` → premier cas graphable ; 404 si run absent / aucun cas graphable.
 - **S5/B1** — `agent_id` régénéré à chaque instanciation → snapshot `agents.json` par run (modèle `AgentRegistry` réutilisé). Param `agents` **optionnel** (`None` = comportement 03a). Overlays joignent contre ce snapshot ; `/api/agents` reste le roster courant (Tab 2).
+- **Addendum Épique 04 (Task 1B)** — `task.metadata["context"]` (input réel de l'agent, cf. `core/agent.py`) non capturé → `SessionTaskRecord.context` + `InputDetail.context` (optionnels, frères de B1), renseignés au constructeur dans `run_demo.py`. Overlay affiche le bloc Context si non vide.
 - **S6** — 404 → corps JSON `{"error": ...}` + no-store, jamais nu.
 - **Cache** — immuables-par-id mémorisés (détails, graphes) ; listes/infra recalculées (reflètent les nouveaux runs). Cohérent avec 03a.
 
@@ -32,8 +33,11 @@
 src/aaosa/tracing/store.py
   _build_registry(agents) -> AgentRegistry        # factorisé depuis save_agent_registry
   save_session(tracer, meta, runs_root, agents=None)        # += agents.json si agents fourni
+  SessionTaskRecord.context: str | None = None    # NOUVEAU (addendum Épique 04)
 src/aaosa/qa/health_check.py
   save_health_check(report, test_set, tracer, directory, agents=None)   # += agents.json
+dashboard/graph_model.py
+  InputDetail.context: str | None = None          # NOUVEAU (addendum Épique 04)
 
 runs_root/sessions/<id>/agents.json          # NOUVEAU
 runs_root/health_checks/<ts>/agents.json     # NOUVEAU
@@ -53,8 +57,10 @@ tests/dashboard/
 
 | Fichier | Responsabilité | Action |
 |---|---|---|
-| `src/aaosa/tracing/store.py` | `_build_registry` + `save_session(..., agents)` | Modifier |
+| `src/aaosa/tracing/store.py` | `_build_registry` + `save_session(..., agents)` + `SessionTaskRecord.context` | Modifier |
 | `tests/tracing/test_store.py` | tests agents.json session | Modifier |
+| `dashboard/graph_model.py` | `InputDetail.context` + `_build_step` (Task 1B) | Modifier |
+| `tests/dashboard/test_graph_model.py` | test propagation context | Modifier |
 | `src/aaosa/qa/health_check.py` | `save_health_check(..., agents)` | Modifier |
 | `tests/qa/test_health_check.py` | tests agents.json HC | Modifier |
 | `tests/dashboard/conftest.py` | fixture écrit les `agents.json` | Modifier |
@@ -62,7 +68,7 @@ tests/dashboard/
 | `tests/dashboard/test_collectors_sessions.py` | test agents | Modifier |
 | `dashboard/collectors/health_checks.py` | `HealthCheckView += agents` | Modifier |
 | `tests/dashboard/test_collectors_health_checks.py` | test agents | Modifier |
-| `src/aaosa/demo/run_demo.py` · `run_health_check.py` | passent les agents | Modifier |
+| `src/aaosa/demo/run_demo.py` · `run_health_check.py` | passent les agents (Task 6) ; `run_demo` renseigne aussi `context` (Task 1B) | Modifier |
 | `dashboard/serialization.py` | helpers JSON | Créer |
 | `tests/dashboard/test_serialization.py` | tests helpers | Créer |
 | `dashboard/api.py` | blueprint + routes | Créer |
@@ -185,6 +191,109 @@ Expected: PASS (nouveaux + anciens, dont `save_agent_registry` inchangé fonctio
 git add src/aaosa/tracing/store.py tests/tracing/test_store.py
 git commit -m "feat(v2c): save_session ecrit agents.json par run (B1, param optionnel)"
 ```
+
+---
+
+## Task 1B: Capture du `context` du task (addendum data — découverte deep-dive Épique 04)
+
+> **Provenance :** deep-dive Épique 04 (spec `docs/superpowers/specs/2026-05-30-v2c-04-frontend-graph-design.md`). L'input réel de l'agent = `task.description + task.metadata["context"]` (`src/aaosa/core/agent.py::execute`), mais `SessionTaskRecord` ne persiste que `description` + `required_tags` → l'overlay Input/Agent masquerait une partie de ce que l'agent a reçu. **Frère de B1** : additif, optionnel, backward compat. La capture se fait dans le **constructeur de `SessionTaskRecord`** (`run_demo.py`), pas dans `save_session` (qui reçoit le `meta` déjà construit).
+
+**Files:**
+- Modify: `src/aaosa/tracing/store.py` (`SessionTaskRecord.context`)
+- Modify: `dashboard/graph_model.py` (`InputDetail.context` + `_build_step`)
+- Modify: `src/aaosa/demo/run_demo.py` (renseigne `context` depuis `task.metadata`)
+- Test: `tests/dashboard/test_graph_model.py`
+
+- [ ] **Step 1: Écrire les tests**
+
+Ajouter à la classe de tests `StepDetail` de `tests/dashboard/test_graph_model.py` (mêmes helpers `p1`/`disp`/`ex`/`_meta`) :
+
+```python
+    def test_input_detail_carries_context(self):
+        events = [p1("t1", "a", True, 0.9), disp("t1", "a", "fit"), ex("t1", "a", summary="s", content="c")]
+        sm = _meta([SessionTaskRecord(
+            id="t1", description="Fix CSS", winner_agent_id="a",
+            outcome="no_qa", required_tags={"css": 60}, context="Fichier source: style.css ...",
+        )])
+        d = build_graph(events, sm).steps[0].detail
+        assert d.input.context == "Fichier source: style.css ..."
+
+    def test_input_detail_context_none_when_absent(self):
+        events = [p1("t1", "a", True, 0.9), disp("t1", "a", "fit"), ex("t1", "a", summary="s", content="c")]
+        sm = _meta([SessionTaskRecord(
+            id="t1", description="Fix CSS", winner_agent_id="a",
+            outcome="no_qa", required_tags={"css": 60},
+        )])
+        d = build_graph(events, sm).steps[0].detail
+        assert d.input.context is None
+```
+
+- [ ] **Step 2: Lancer les tests, vérifier l'échec**
+
+Run: `.venv\Scripts\python -m pytest tests/dashboard/test_graph_model.py -k context -v`
+Expected: FAIL — `SessionTaskRecord` rejette `context` (`extra="forbid"`) / `InputDetail` n'a pas d'attribut `context`.
+
+- [ ] **Step 3: Ajouter le champ `context` (additif, optionnel)**
+
+Dans `src/aaosa/tracing/store.py`, étendre `SessionTaskRecord` :
+
+```python
+class SessionTaskRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    description: str
+    winner_agent_id: str | None
+    outcome: TaskOutcome
+    required_tags: dict[str, int]
+    context: str | None = None
+```
+
+Dans `dashboard/graph_model.py`, étendre `InputDetail` :
+
+```python
+class InputDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str
+    description: str
+    required_tags: dict[str, int]
+    context: str | None = None
+```
+
+Toujours dans `dashboard/graph_model.py`, dans `_build_step`, renseigner `context` depuis le `meta_record` :
+
+```python
+    description = meta_record.description if meta_record is not None else task_id
+    required_tags = dict(meta_record.required_tags) if meta_record is not None else {}
+    context = meta_record.context if meta_record is not None else None
+    input_detail = InputDetail(task_id=task_id, description=description, required_tags=required_tags, context=context)
+```
+
+Dans `src/aaosa/demo/run_demo.py`, renseigner `context` à la construction du `SessionTaskRecord` (≈ lignes 56-59) :
+
+```python
+        task_records.append(SessionTaskRecord(
+            id=task.id, description=task.description,
+            winner_agent_id=winner_id, outcome=outcome,
+            required_tags=task.required_tags,
+            context=task.metadata.get("context") or None,
+        ))
+```
+
+> `or None` normalise la chaîne vide (`metadata["context"] == ""`) en `None` → l'overlay masque le bloc Context comme attendu.
+
+- [ ] **Step 4: Lancer les tests, vérifier le succès**
+
+Run: `.venv\Scripts\python -m pytest tests/dashboard/test_graph_model.py -v`
+Expected: PASS (nouveaux + anciens — `InputDetail.context` optionnel ne casse aucune fixture existante).
+
+- [ ] **Step 5: Commit (après spec-review + quality-review)**
+
+```bash
+git add src/aaosa/tracing/store.py dashboard/graph_model.py src/aaosa/demo/run_demo.py tests/dashboard/test_graph_model.py
+git commit -m "feat(v2c): capture task context dans SessionTaskRecord/InputDetail (addendum Epique 04)"
+```
+
+> Note : `run_demo.py` est aussi modifié en Task 6 (param `agents`). Si les deux tasks sont exécutées d'affilée, regrouper les deux changements `run_demo.py` en un seul passage est acceptable (au choix de l'implémenteur) — sinon committer séparément comme indiqué.
 
 ---
 
@@ -1047,7 +1156,8 @@ git commit -m "chore(v2c): non-regression epique 03b (API REST + addendum data B
 
 ## Self-review (effectuée à l'écriture)
 
-**Couverture spec (`2026-05-30-v2c-03b-rest-api-design.md`) :**
+**Couverture spec (`2026-05-30-v2c-03b-rest-api-design.md` + addendum Épique 04) :**
+- Addendum Épique 04 (context) : `SessionTaskRecord.context` + `InputDetail.context` + `_build_step` + `run_demo` → Task 1B ✓ (optionnels, backward compat vérifiée par `test_input_detail_context_none_when_absent`).
 - Addendum B1 : `save_session(..., agents)` → Task 1 ✓ ; `save_health_check(..., agents)` → Task 2 ✓ ; helper `_build_registry` factorisé → Task 1 ✓ ; démos → Task 6 ✓ ; fixture `agents.json` → Task 3 ✓ ; collectors exposent `agents` → Tasks 4-5 ✓ (backward compat : param optionnel `None`, vérifié Task 1/2 `test_no_agents_json_when_omitted`).
 - S1 sérialisation (`by_alias`, datetime, no-store, `error_response`) → Task 7 ✓.
 - S2 blueprint + enregistrement → Task 8 ✓.
