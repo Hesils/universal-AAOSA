@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict
 from aaosa.qa.health_check import HealthCheckReport
 from aaosa.qa.spec import EvaluatorSpec
 from aaosa.qa.test_set import TestSet
-from aaosa.tracing.store import SessionMeta, SessionTaskRecord, load_trace
+from aaosa.tracing.store import AgentRegistry, AgentRegistryEntry, SessionMeta, SessionTaskRecord, load_trace
 from dashboard.graph_model import GraphModel, build_graph
 
 
@@ -62,6 +62,7 @@ class HealthCheckView(BaseModel):
     evaluator_quarantined: list[str]
     unattributed: list[str]
     cases: list[HealthCheckCaseView]
+    agents: list[AgentRegistryEntry]
 
 
 def _hc_dir(runs_root: Path) -> Path:
@@ -97,6 +98,13 @@ def list_runs(runs_root: Path) -> HealthCheckList:
 
 def _load_test_set(run_dir: Path) -> TestSet:
     return TestSet.model_validate_json((run_dir / "test_set.json").read_text(encoding="utf-8"))
+
+
+def _load_agents(run_dir: Path) -> list[AgentRegistryEntry]:
+    path = run_dir / "agents.json"
+    if not path.exists():
+        return []
+    return AgentRegistry.model_validate_json(path.read_text(encoding="utf-8")).agents
 
 
 def run_detail(runs_root: Path, run_id: str) -> HealthCheckView | None:
@@ -138,6 +146,7 @@ def run_detail(runs_root: Path, run_id: str) -> HealthCheckView | None:
         evaluator_quarantined=report.evaluator_quarantined,
         unattributed=report.unattributed,
         cases=cases,
+        agents=_load_agents(d),
     )
 
 

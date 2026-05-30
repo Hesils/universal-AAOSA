@@ -1,3 +1,4 @@
+from aaosa.demo.agents import DEMO_AGENTS
 from dashboard.collectors.health_checks import case_graph, list_runs, run_detail
 
 
@@ -55,3 +56,11 @@ def test_case_graph_quarantined_returns_none(runs_root):
     rid = list_runs(runs_root).runs[0].id
     quarantined = [c for c in run_detail(runs_root, rid).cases if not c.graphable][0]
     assert case_graph(runs_root, rid, quarantined.task_id) is None
+
+
+def test_run_detail_has_agents(runs_root):
+    rid = list_runs(runs_root).runs[0].id
+    view = run_detail(runs_root, rid)
+    assert view is not None
+    assert len(view.agents) == len(DEMO_AGENTS)
+    assert all(a.system_prompt for a in view.agents)
