@@ -25,3 +25,13 @@ def test_session_detail_graph(runs_root):
 
 def test_session_detail_not_found(runs_root):
     assert session_detail(runs_root, "nope") is None
+
+
+def test_session_detail_has_agents(runs_root):
+    from aaosa.demo.agents import DEMO_AGENTS
+    sid = list_sessions(runs_root).sessions[0].session_id
+    view = session_detail(runs_root, sid)
+    assert view is not None
+    assert len(view.agents) == len(DEMO_AGENTS)
+    assert all(a.system_prompt for a in view.agents)
+    assert {a.agent_id for a in view.agents} == {a.id for a in DEMO_AGENTS}

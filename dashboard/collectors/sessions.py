@@ -3,7 +3,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from aaosa.tracing.store import SessionMeta, load_trace
+from aaosa.tracing.store import AgentRegistry, AgentRegistryEntry, SessionMeta, load_trace
 from dashboard.graph_model import GraphModel, build_graph
 
 
@@ -24,6 +24,7 @@ class SessionList(BaseModel):
 class SessionView(BaseModel):
     model_config = ConfigDict(extra="forbid")
     meta: SessionMeta
+    agents: list[AgentRegistryEntry]
     graph: GraphModel
 
 
@@ -33,6 +34,13 @@ def _sessions_dir(runs_root: Path) -> Path:
 
 def _load_meta(session_dir: Path) -> SessionMeta:
     return SessionMeta.model_validate_json((session_dir / "meta.json").read_text(encoding="utf-8"))
+
+
+def _load_agents(session_dir: Path) -> list[AgentRegistryEntry]:
+    path = session_dir / "agents.json"
+    if not path.exists():
+        return []
+    return AgentRegistry.model_validate_json(path.read_text(encoding="utf-8")).agents
 
 
 def list_sessions(runs_root: Path) -> SessionList:
@@ -60,4 +68,4 @@ def session_detail(runs_root: Path, session_id: str) -> SessionView | None:
         return None
     meta = _load_meta(d)
     graph = build_graph(load_trace(d / "trace.jsonl"), meta)
-    return SessionView(meta=meta, graph=graph)
+    return SessionView(meta=meta, agents=_load_agents(d), graph=graph)
