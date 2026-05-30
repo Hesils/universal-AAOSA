@@ -1,4 +1,4 @@
-from dashboard.collectors.health_checks import list_runs, run_detail
+from dashboard.collectors.health_checks import case_graph, list_runs, run_detail
 
 
 def test_list_runs(runs_root):
@@ -36,3 +36,22 @@ def test_run_detail_join(runs_root):
 
 def test_run_detail_not_found(runs_root):
     assert run_detail(runs_root, "nope") is None
+
+
+def test_case_graph_active(runs_root):
+    rid = list_runs(runs_root).runs[0].id
+    active = [c for c in run_detail(runs_root, rid).cases if c.graphable][0]
+    graph = case_graph(runs_root, rid, active.task_id)
+    assert graph is not None
+    assert len(graph.steps) == 1
+    step = graph.steps[0]
+    assert step.outcome == "qa_pass"
+    # _synth_meta remplit l'overlay Input depuis le TestSet (sinon vide)
+    assert step.detail.input.description == active.description
+    assert step.detail.input.required_tags == active.required_tags
+
+
+def test_case_graph_quarantined_returns_none(runs_root):
+    rid = list_runs(runs_root).runs[0].id
+    quarantined = [c for c in run_detail(runs_root, rid).cases if not c.graphable][0]
+    assert case_graph(runs_root, rid, quarantined.task_id) is None

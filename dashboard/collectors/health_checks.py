@@ -139,3 +139,39 @@ def run_detail(runs_root: Path, run_id: str) -> HealthCheckView | None:
         unattributed=report.unattributed,
         cases=cases,
     )
+
+
+def _synth_meta(test_set: TestSet, report: HealthCheckReport, run_id: str) -> SessionMeta:
+    """Synthétise un SessionMeta depuis le TestSet pour nourrir build_graph.
+
+    winner_agent_id/outcome sont des placeholders ignorés par build_graph
+    (il dérive winner/outcome des events) ; seuls description/required_tags servent.
+    """
+    return SessionMeta(
+        session_id=run_id,
+        started_at=report.timestamp,
+        ended_at=report.timestamp,
+        tasks=[
+            SessionTaskRecord(
+                id=c.task.id,
+                description=c.task.description,
+                required_tags=c.task.required_tags,
+                winner_agent_id=None,
+                outcome="no_qa",
+            )
+            for c in test_set.cases
+        ],
+        agent_ids=[],
+    )
+
+
+def case_graph(runs_root: Path, run_id: str, task_id: str) -> GraphModel | None:
+    d = _hc_dir(runs_root) / run_id
+    if not all((d / f).exists() for f in ("report.json", "test_set.json", "trace.jsonl")):
+        return None
+    report = _load_report(d)
+    test_set = _load_test_set(d)
+    events = [e for e in load_trace(d / "trace.jsonl") if e.task_id == task_id]
+    if not events:
+        return None  # cas non graphable (quarantaine ou absent de la trace)
+    return build_graph(events, _synth_meta(test_set, report, run_id))
