@@ -12,6 +12,7 @@ from aaosa.qa.test_set import TestSet, active_cases
 from aaosa.runtime.runner import run_task
 from aaosa.schemas.output import Output
 from aaosa.tracing.events import QAEvaluatedEvent
+from aaosa.tracing.store import _build_registry
 from aaosa.tracing.tracer import Tracer
 
 
@@ -112,6 +113,7 @@ def save_health_check(
     test_set: TestSet,
     tracer: Tracer,
     directory: Path,
+    agents: list[Agent] | None = None,
 ) -> Path:
     ts = report.timestamp.strftime("%Y-%m-%dT%H-%M-%S")
     target = directory / ts
@@ -119,4 +121,8 @@ def save_health_check(
     (target / "report.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")
     (target / "test_set.json").write_text(test_set.model_dump_json(indent=2), encoding="utf-8")
     tracer.flush(target / "trace.jsonl")
+    if agents is not None:
+        (target / "agents.json").write_text(
+            _build_registry(agents).model_dump_json(indent=2), encoding="utf-8"
+        )
     return target

@@ -246,3 +246,41 @@ class TestSaveHealthCheck:
         events = [adapter.validate_json(line) for line in lines if line.strip()]
         assert len(events) == 1
         assert isinstance(events[0], QAEvaluatedEvent)
+
+
+class TestSaveHealthCheckAgents:
+    def _report(self):
+        from datetime import datetime, timezone
+        from aaosa.qa.health_check import HealthCheckReport
+        return HealthCheckReport(
+            timestamp=datetime(2026, 5, 30, 12, 0, 0, tzinfo=timezone.utc),
+            n_runs=1, total_cases=0, case_results=[],
+            fix_target_pass_rate=0.0, regression_guard_pass_rate=0.0,
+            unstable_cases=[], unattributed=[], task_spec_quarantined=[], evaluator_quarantined=[],
+        )
+
+    def test_writes_agents_json_when_provided(self, tmp_path):
+        from aaosa.demo.agents import DEMO_AGENTS
+        from aaosa.qa.health_check import save_health_check
+        from aaosa.qa.test_set import TestSet
+        from aaosa.tracing.store import AgentRegistry
+        from aaosa.tracing.tracer import Tracer
+
+        report = self._report()
+        tracer = Tracer(session_id="hc-agents")
+        target = save_health_check(report, TestSet(cases=[]), tracer, tmp_path / "hc", agents=DEMO_AGENTS)
+
+        path = target / "agents.json"
+        assert path.exists()
+        reg = AgentRegistry.model_validate_json(path.read_text(encoding="utf-8"))
+        assert {e.agent_id for e in reg.agents} == {a.id for a in DEMO_AGENTS}
+
+    def test_no_agents_json_when_omitted(self, tmp_path):
+        from aaosa.qa.health_check import save_health_check
+        from aaosa.qa.test_set import TestSet
+        from aaosa.tracing.tracer import Tracer
+
+        report = self._report()
+        tracer = Tracer(session_id="hc-noagents")
+        target = save_health_check(report, TestSet(cases=[]), tracer, tmp_path / "hc")
+        assert not (target / "agents.json").exists()
