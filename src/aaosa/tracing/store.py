@@ -30,8 +30,8 @@ class AgentRegistry(BaseModel):
     agents: list[AgentRegistryEntry]
 
 
-def save_agent_registry(agents: list[Agent], path: Path) -> Path:
-    registry = AgentRegistry(
+def _build_registry(agents: list[Agent]) -> AgentRegistry:
+    return AgentRegistry(
         agents=[
             AgentRegistryEntry(
                 agent_id=a.id,
@@ -42,8 +42,11 @@ def save_agent_registry(agents: list[Agent], path: Path) -> Path:
             for a in agents
         ]
     )
+
+
+def save_agent_registry(agents: list[Agent], path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(registry.model_dump_json(indent=2), encoding="utf-8")
+    path.write_text(_build_registry(agents).model_dump_json(indent=2), encoding="utf-8")
     return path
 
 
@@ -68,7 +71,12 @@ class SessionMeta(BaseModel):
     agent_ids: list[str]
 
 
-def save_session(tracer: Tracer, meta: SessionMeta, runs_root: Path) -> Path:
+def save_session(
+    tracer: Tracer,
+    meta: SessionMeta,
+    runs_root: Path,
+    agents: list[Agent] | None = None,
+) -> Path:
     if tracer.session_id != meta.session_id:
         raise ValueError(
             f"tracer.session_id ({tracer.session_id!r}) != meta.session_id ({meta.session_id!r})"
@@ -77,6 +85,10 @@ def save_session(tracer: Tracer, meta: SessionMeta, runs_root: Path) -> Path:
     session_dir.mkdir(parents=True, exist_ok=True)
     tracer.flush(session_dir / "trace.jsonl")
     (session_dir / "meta.json").write_text(meta.model_dump_json(indent=2), encoding="utf-8")
+    if agents is not None:
+        (session_dir / "agents.json").write_text(
+            _build_registry(agents).model_dump_json(indent=2), encoding="utf-8"
+        )
     return session_dir
 
 

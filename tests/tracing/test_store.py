@@ -200,3 +200,37 @@ class TestLoadTrace:
         events = load_trace(path)
         assert len(events) == 1
         assert events[0].reason == "x"
+
+
+class TestSaveSessionAgents:
+    def _meta(self, sid):
+        from datetime import datetime, timezone
+        from aaosa.tracing.store import SessionMeta
+        now = datetime(2026, 5, 30, 10, 0, 0, tzinfo=timezone.utc)
+        return SessionMeta(session_id=sid, started_at=now, ended_at=now, tasks=[], agent_ids=[])
+
+    def test_writes_agents_json_when_provided(self, tmp_path):
+        from aaosa.demo.agents import DEMO_AGENTS
+        from aaosa.tracing.store import AgentRegistry, save_session
+        from aaosa.tracing.tracer import Tracer
+
+        sid = "s-agents"
+        tracer = Tracer(session_id=sid)
+        save_session(tracer, self._meta(sid), tmp_path / "runs", agents=DEMO_AGENTS)
+
+        path = tmp_path / "runs" / "sessions" / sid / "agents.json"
+        assert path.exists()
+        reg = AgentRegistry.model_validate_json(path.read_text(encoding="utf-8"))
+        assert len(reg.agents) == len(DEMO_AGENTS)
+        assert {e.agent_id for e in reg.agents} == {a.id for a in DEMO_AGENTS}
+        assert all(e.system_prompt for e in reg.agents)
+
+    def test_no_agents_json_when_omitted(self, tmp_path):
+        from aaosa.tracing.store import save_session
+        from aaosa.tracing.tracer import Tracer
+
+        sid = "s-noagents"
+        tracer = Tracer(session_id=sid)
+        save_session(tracer, self._meta(sid), tmp_path / "runs")  # pas d'agents
+
+        assert not (tmp_path / "runs" / "sessions" / sid / "agents.json").exists()
