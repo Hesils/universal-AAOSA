@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AAOSA — Observability</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <nav class="tabnav">
+    <button class="tab-btn" data-tab="infra">Infra</button>
+    <button class="tab-btn" data-tab="agents">Agents</button>
+    <button class="tab-btn" data-tab="health">Health checks</button>
+    <button class="tab-btn is-active" data-tab="sessions">Sessions</button>
+  </nav>
+
+  <main>
+    <section class="tab-panel" data-tab="infra" hidden><p class="placeholder">Tab Infra — Épique 05</p></section>
+    <section class="tab-panel" data-tab="agents" hidden><p class="placeholder">Tab Agents — Épique 05</p></section>
+    <section class="tab-panel" data-tab="health" hidden><p class="placeholder">Tab Health checks — Épique 05</p></section>
+    <section class="tab-panel" data-tab="sessions"></section>
+  </main>
+
+  <div id="modal-root"></div>
+
+  <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

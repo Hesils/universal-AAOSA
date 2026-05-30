@@ -1,0 +1,10 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: #0f1419; color: #cbd5e1; }
+.tabnav { display: flex; gap: 4px; padding: 12px 16px; border-bottom: 1px solid #222b36; }
+.tab-btn { background: transparent; border: 1px solid #2b3340; color: #94a3b8; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+.tab-btn.is-active { color: #e6edf3; border-color: #3a4658; background: #1a2230; }
+main { padding: 16px; }
+.placeholder { color: #475569; }
+.tab-panel { min-height: 60vh; }
+svg.graph { width: 100%; height: auto; display: block; }

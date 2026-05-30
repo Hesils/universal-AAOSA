@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, render_template
 
 from dashboard.api import api
 from dashboard.cache import Cache
@@ -12,4 +12,9 @@ def create_app(config: DashboardConfig | None = None) -> Flask:
     app.config["AAOSA"] = config
     app.config["CACHE"] = Cache()
     app.register_blueprint(api)
+
+    @app.get("/")
+    def index():
+        return render_template("index.html")
+
     return app
