@@ -228,3 +228,9 @@ svg.graph { width: 100%; height: auto; display: block; }
 .scrubber button:hover { color: var(--text-0); background: var(--bg-3); }
 
 .scrub-label { color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* ─── Charts ─── */
+svg.chart { width: 100%; height: auto; display: block; background: var(--bg-1); border: 1px solid var(--border-0); border-radius: 8px; }
+.chart-axis { fill: var(--text-2); font-size: 9px; font-family: "SF Mono", ui-monospace, monospace; }
+.chart-empty { fill: var(--text-2); font-size: 11px; }
+.chart-bar { fill: var(--accent); }
