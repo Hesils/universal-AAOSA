@@ -19,12 +19,12 @@ Les skills `/prime` et `/save` viennent du master `.claude/` — disponibles san
 **V2a complète — 377 tests total** (commits `5265e3e` → `826d889`, 2026-05-27). Demo V2 validée LLM réel.
 **V2b complète — 471 tests total** (commits `04f12cd` → `f4f01b3`, 2026-05-28). Demo V2b validée LLM réel (judge déclenché, ELO mis à jour), health check demo validé (4 attributions, graduate lifecycle).
 
-**V2c — spec validée + 6 épiques écrites** (spec `39d46ce`, épiques `ffd2459`, 2026-05-28). **Implémentation non démarrée.** Workflow par épique : session de deep-dive → plan d'implémentation → session d'exécution. Prochaine étape : deep-dive Épique 01 (couche data & persistance).
+**V2c complète — 588 tests total** (commits `39d46ce` → `aa356d5`, 2026-06-01). 6 épiques (01, 02, 03a, 03b, 04, 05). Dashboard d'observabilité opérationnel : couche data persistée (`runs/`) + app Flask `dashboard/` (`create_app`, cache on-demand, 4 collectors, API REST) + `build_graph` pur + frontend vanilla JS/SVG (4 tabs). Contrat data validé end-to-end sur app live. **Reste : passe graphique `/impeccable` + validation visuelle navigateur**, puis V3.
 
 V2 découpée en 3 sous-parties :
 - **V2a** (complète) : ELO mechanics + dual QA protocol
 - **V2b** (complète) : QA complet (evaluator composable + boucle auto-amélioration)
-- **V2c** (spec + 6 épiques) : Dashboard d'observabilité (couche data `src/aaosa/` + app Flask `dashboard/`, 4 tabs)
+- **V2c** (complète) : Dashboard d'observabilité (couche data `src/aaosa/` + app Flask `dashboard/`, 4 tabs)
 
 ## Architecture
 
@@ -34,22 +34,28 @@ src/aaosa/
 ├── core/           agent.py (claim + execute)
 ├── claiming/       scoring.py · phase1.py · phase2.py · prompts.py · dispatch.py
 ├── runtime/        llm_client.py · runner.py
-├── tracing/        events.py · tracer.py · analysis.py · formatter.py
-├── demo/           agents.py · tasks.py · run_demo.py
+├── tracing/        events.py · tracer.py · analysis.py · formatter.py · store.py  # store.py = V2c (persistance)
+├── demo/           agents.py · tasks.py · run_demo.py · run_health_check.py
 ├── elo/            formula.py · updater.py · persistence.py          # V2a (implémenté)
 └── qa/             protocol.py · rule_based.py · health_check.py     # V2a (implémenté)
                     criteria.py · spec.py · judge.py · spec_evaluator.py · test_set.py · lifecycle.py · adaptive.py  # V2b (implémenté)
 
-tests/              miroir de src/aaosa/ + conftest.py
+dashboard/          # V2c (implémenté) — app web d'observabilité
+├── app.py · config.py · cache.py · graph_model.py (build_graph pur)
+├── collectors/     infra.py · agents.py · health_checks.py · sessions.py
+├── api/            blueprint REST (no-store, by_alias)
+├── static/         js/ (graph · modal · charts · tabs/*) + css/   ·   templates/  index.html
+
+tests/              miroir de src/aaosa/ + tests/dashboard/ + conftest.py
 traces/             JSONL par session (gitignored)
 elo_snapshots/      JSON snapshots ELO (gitignored)                   # V2a
 test_sets/          JSON test sets (gitignored)                       # V2b
+runs/               # V2c — store unifié persisté (gitignored) : agents/registry.json · elo_snapshots/
+                    # · sessions/<id>/{trace.jsonl,meta.json,agents.json} · health_checks/<ts>/{report,test_set,trace,agents}
 docs/superpowers/specs/  design specs · plans/  plans d'implémentation · epics/  épiques V2c
-
-# V2c (spec + épiques, non implémenté) — couche data dans src/aaosa/ (store.py, ExecutedEvent.llm_metadata,
-# save_session, save_health_check) + app Flask dans dashboard/ (create_app, collectors, graph_model, API)
-# runs_root/  store unifié (agents/registry · sessions/<id>/{trace.jsonl,meta.json} · health_checks/<ts>/...)
 ```
+
+**Lancer le dashboard** : `.venv\Scripts\python -m dashboard` → http://localhost:5000
 
 **Pipeline V1** : `Task in → filter_candidates → run_phase2 → dispatch → agent.execute → Output | DispatchResult`
 
@@ -136,7 +142,7 @@ Spec complète : `docs/superpowers/specs/2026-05-28-v2b-qa-complet-design.md`. P
 
 ## Design V2c — Résumé rapide
 
-Spec complète : `docs/superpowers/specs/2026-05-28-v2c-dashboard-design.md`. Épiques : `docs/superpowers/epics/v2c-01..05.md`. **Non implémenté.**
+Spec complète : `docs/superpowers/specs/2026-05-28-v2c-dashboard-design.md`. Épiques : `docs/superpowers/epics/v2c-01..05.md`. Plans : `docs/superpowers/plans/v2c-02..05.md`. **Complète (2026-06-01, 588 tests).** Reste : passe `/impeccable` + validation navigateur.
 
 Dashboard web d'observabilité remplaçant `print_timeline`. Constat : la donnée n'est pas persistée → V2c = couche data (`src/aaosa/`) + app Flask (`dashboard/`).
 
