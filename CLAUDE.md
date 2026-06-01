@@ -21,38 +21,44 @@ Les skills `/prime` et `/save` viennent du master `.claude/` — disponibles san
 
 **V2c complète — 588 tests total** (commits `39d46ce` → `aa356d5`, 2026-06-01). 6 épiques (01-05) + refonte graphique (06). Dashboard d'observabilité opérationnel : couche data persistée (`runs/`) + app Flask `dashboard/` (`create_app`, cache on-demand, 4 collectors, API REST) + `build_graph` pur + frontend vanilla JS/SVG (4 tabs). Contrat data validé end-to-end sur app live. **Refonte graphique « wireframe instrument » portée + validée navigateur** (`DESIGN.md`/`PRODUCT.md`, plan `v2c-06`) ; follow-ups XSS + `infra.agent_count` résorbés ; `design-lab/` supprimé. **V2c bouclée → V3.**
 
+**V3 — chemin critique A+B complet — 669 tests total** (commits `68cf426` → `4bd52d9`, 2026-06-02). A1, B1, A3, A4, B2, B3, A5 implémentés en TDD. Nature A (généricité) et nature B (auto-amélioration) terminées. Reste **C** (doc/présentation, non démarrée).
+
 V2 découpée en 3 sous-parties :
 - **V2a** (complète) : ELO mechanics + dual QA protocol
 - **V2b** (complète) : QA complet (evaluator composable + boucle auto-amélioration)
 - **V2c** (complète) : Dashboard d'observabilité (couche data `src/aaosa/` + app Flask `dashboard/`, 4 tabs)
 
-### V3 — en cours (deep-dives → implémentation)
+### V3 — chemin critique A+B implémenté (669 tests)
 
 V3 = runtime générique par config + boucle auto-améliorante (QA générée par agents) + présentation. **14 épiques** découpées (A1-A6, B1-B7, C1-C3), détail dans `roadmap.md` (AIOS), deep-dives par épique dans `docs/superpowers/epics/v3-*.md`.
 
-**Ordre d'implémentation (chemin critique)** : `A1 → B1 → A3 → A4 → B2 → B3 → A5 → C`. Aucune épique V3 n'est encore implémentée (toujours 588 tests). Cible après A+B : **656 tests** (A1+6, B1+10, A3+11, A4+16, B2+8, B3+7, A5+10).
+**Chemin critique `A1 → B1 → A3 → A4 → B2 → B3 → A5` : tous implémentés** (commits `68cf426` → `4bd52d9`). **669 tests** (588 V2c + 81 V3). Reste **C**.
 
-- **Nature A** (généricité) : A1 agents par config · A3 subdivision de tâches (schema+threading) · A4 TaskDivider + Aggregateur (pièce centrale « le graphe émerge ») · A5 tools par agent. A2 (2e domaine) hors chemin critique.
-- **Nature B** (auto-amélioration) : B1 evaluator émis par agent · B2 triage auto-attribution · B3 TaskSpecGenerator. **La nature B s'arrête à B3.**
-- **Nature C** (doc/présentation) : en dernier, reflète A+B réels.
+- **Nature A** (généricité) — chemin critique complet : A1 agents par config YAML (`config/loader.py`, `demo/agents.yaml`) ✓ · A3 subdivision (`Task` +4 champs, `run_chain` tri Kahn) ✓ · A4 TaskDivider + Aggregateur (« le graphe émerge », `runtime/divider.py`+`aggregator.py`, `run_divided_task`) ✓ · A5 tools par agent (`core/tool.py`, boucle tool-use dans `execute`) ✓. **A2 (2e domaine) hors chemin critique, non fait.**
+- **Nature B** (auto-amélioration) — **terminée** : B1 evaluator émis par LLM (`llm_check`, `build_llm_spec`) ✓ · B2 triage auto-attribution (`qa/triage.py`) ✓ · B3 TaskSpecGenerator (`qa/task_spec_generator.py`) ✓. Boucle complète : échec → triage → correction tâche → re-triage → health check (orchestration côté caller).
+- **Nature C** (doc/présentation) : en dernier, reflète A+B réels. **Non démarrée, pas encore deep-divée.**
 
-**Déferrés (2026-06-02, hors chemin critique)** : **B4 sidecar advisory + B5 canal bidirectionnel** — le `SystemAdvisory` chevauche largement l'ELO (déjà la boucle de feedback comportemental) ; B4 sans B5 = infra sans consommateur. Valeur non acquise → à réévaluer si le besoin émerge sur runs réels. Aussi hors chemin : B6 (spike ELO 3 signaux), B7 (live mode). Deep-dive `v3-b4-*.md` gardé sur disque ; **B5 n'a pas de fichier** (déferré pendant sa discussion de deep-dive). Cf. `decisions/log.md` 2026-06-02.
+**Dette ouverte (B1)** : `SpecEvaluator.evaluate` n'injecte pas le client dans les params des critères → une spec contenant `llm_check` lève en runtime réel. À câbler dans une épique d'intégration ultérieure (cf. daily 2026-06-02).
 
-**Prochain pas concret** : démarrer l'implémentation **A1** (zéro dépendance, débloque le multi-domaine) ou deep-dive d'une épique non encore creusée. A1, B1, A3, A4, A5, B2, B3, B4 sont deep-divés (fichiers `v3-*.md`) ; A2, B6, B7, C restent à creuser ; B5 déferré.
+**Déferrés (2026-06-02, hors chemin critique)** : **B4 sidecar advisory + B5 canal bidirectionnel** — le `SystemAdvisory` chevauche largement l'ELO (déjà la boucle de feedback comportemental) ; B4 sans B5 = infra sans consommateur. Valeur non acquise → à réévaluer si le besoin émerge sur runs réels. Aussi hors chemin : B6 (spike ELO 3 signaux), B7 (live mode). Deep-dive `v3-b4-*.md` gardé sur disque ; **B5 n'a pas de fichier**. Cf. `decisions/log.md` 2026-06-02.
+
+**Prochain pas concret** : deep-dive **C** (doc/présentation) — trancher l'audience (recruteur / technique) et quoi montrer en priorité (claiming émergent ? boucle auto-améliorante ? dashboard ?). A2 (2e domaine) reste disponible comme matériel pour C.
 
 ## Architecture
 
 ```
 src/aaosa/
-├── schemas/        task.py · claim.py · output.py · elo.py
-├── core/           agent.py (claim + execute)
-├── claiming/       scoring.py · phase1.py · phase2.py · prompts.py · dispatch.py
-├── runtime/        llm_client.py · runner.py
-├── tracing/        events.py · tracer.py · analysis.py · formatter.py · store.py  # store.py = V2c (persistance)
-├── demo/           agents.py · tasks.py · run_demo.py · run_health_check.py
+├── schemas/        task.py (+4 champs V3-A3) · claim.py · output.py (+tool_calls_count V3-A5) · elo.py
+├── core/           agent.py (claim + execute avec boucle tool-use V3-A5) · tool.py  # tool.py = V3-A5
+├── claiming/       scoring.py · phase1.py · phase2.py · prompts.py · dispatch.py (+dependency_failed V3-A3)
+├── config/         loader.py  # V3-A1 (load_agents YAML)
+├── runtime/        llm_client.py · runner.py (+run_chain V3-A3, +run_divided_task V3-A4) · divider.py · aggregator.py  # divider/aggregator = V3-A4
+├── tracing/        events.py (+ToolCalled/TaskDivided/TaskAggregated V3) · tracer.py · analysis.py · formatter.py · store.py  # store.py = V2c
+├── demo/           agents.py (loader A1) · agents.yaml · tasks.py · run_demo.py (+run divisé A4) · run_health_check.py
 ├── elo/            formula.py · updater.py · persistence.py          # V2a (implémenté)
 └── qa/             protocol.py · rule_based.py · health_check.py     # V2a (implémenté)
-                    criteria.py · spec.py · judge.py · spec_evaluator.py · test_set.py · lifecycle.py · adaptive.py  # V2b (implémenté)
+                    criteria.py (+llm_check V3-B1) · spec.py · judge.py · spec_evaluator.py · test_set.py · lifecycle.py · adaptive.py (+build_llm_spec V3-B1)  # V2b
+                    triage.py · task_spec_generator.py  # V3-B2 / V3-B3
 
 dashboard/          # V2c (implémenté) — app web d'observabilité
 ├── app.py · config.py · cache.py · graph_model.py (build_graph pur)
@@ -75,6 +81,10 @@ docs/superpowers/specs/  design specs · plans/  plans d'implémentation · epic
 
 **Pipeline V2** : `... → agent.execute → [QA evaluate] → [ELO update] → Output | QAFailure | DispatchResult`
 - `evaluator=None` → V1 behavior (pas de QA, pas d'ELO update)
+
+**Pipeline V3 (chaîne A3)** : `run_chain([sub_tasks]) → tri topologique Kahn → run_task par tâche, required_outputs injectés depuis les deps réussies`
+**Pipeline V3 (graphe émergent A4)** : `run_divided_task → divider.divide (LLM) → run_chain → aggregator.aggregate (LLM) | fallback successful[-1] | DispatchResult(unassigned)`
+**Boucle auto-amélioration V3 (B1-B3)** : `échec runtime → failure_to_test_case → triage_unattributed (B2) → fix_task_spec_cases (B3) → triage (B2) → active_cases → run_health_check` (orchestration côté caller)
 
 ## Stack et commandes
 
@@ -171,5 +181,15 @@ Dashboard web d'observabilité remplaçant `print_timeline`. Constat : la donné
 - `ExecutedEvent.llm_metadata` reste **optionnel** (`None` par défaut) — ne pas casser les fixtures `ExecutedEvent` existantes
 - Couche data dans `src/aaosa/` (concern runtime), app Flask dans `dashboard/` (racine) — ne pas mélanger
 - `build_graph` = **fonction pure** sans effet de bord (cœur testable, frontend hors TDD auto)
-- Graphe = **pipeline réel uniquement** — aucun nœud V3 (TaskDivider, Aggregateur, tools) produit
+- Graphe = **pipeline réel uniquement** — les nœuds `divider`/`aggregator` (A4) émergent d'un `TaskDividedEvent` réel dans la trace, jamais spéculatifs
 - **Pas de live mode** en V1 (review statique sur runs persistés)
+
+### Séparations strictes V3 à ne pas briser
+
+- **Rétrocompat stricte** : tout champ V3 est optionnel/default — `Task` +4 champs (A3), `Agent.tools=[]` (A5), `LLMMetadata.tool_calls_count=0` (A5). `run_task`/`run_chain`/`claim`/`execute` sans outils = comportement V1/V2 identique
+- TaskDivider et TaskAggregator (A4) **ne sont pas des Agent** — pas de `claim`, pas de `tags_with_elo`. L'output de l'aggregateur porte le sentinel `agent_id="aggregator"`, jamais un UUID
+- **Le graphe émerge** : aucune découpe hardcodée — `divider.divide` est un appel LLM. Une sous-tâche avec un tag inconnu → unassigned = signal de gap roster, pas un bug
+- Triage (B2) et TaskSpecGenerator (B3) = **batch, hors chemin runtime** — jamais appelés dans `run_task`. `triage_case`/`fix_task_spec` retournent `None` sur échec LLM (jamais d'exception propagée), ne mutent jamais l'input (nouveau `TestSet`)
+- B3 reset l'attribution à `"unattributed"` (repasse par B2), conserve `task.id`/`role`/`wrong_output`. Orchestration B2↔B3 **côté caller**, zéro couplage entre modules
+- `EvaluatorSpec` reste une **donnée** (B1 ne change que le producteur : `build_adaptive_spec` déterministe → `build_llm_spec` LLM, format inchangé). `llm_check` préservé par `_filter_unknown_criteria`
+- Boucle tool-use (A5) : tout `finish_reason != "tool_calls"` est terminal · cap `MAX_TOOL_ROUNDS=10` → `RuntimeError` · `ToolCalledEvent` émis seulement si `tracer` fourni
