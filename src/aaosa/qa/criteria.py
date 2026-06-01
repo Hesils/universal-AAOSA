@@ -79,6 +79,55 @@ def keyword_presence(task: Task, output: Output, params: dict) -> CriterionOutco
     )
 
 
+class _LLMCheckResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    score: float  # 0.0-1.0
+    reason: str
+
+
+@register_criterion("llm_check")
+def llm_check(task: Task, output: Output, params: dict) -> CriterionOutcome:
+    """Critère sémantique libre évalué par micro-appel LLM.
+
+    Params : description (str, requis) = le critère à vérifier ;
+    client (OpenAI, requis) = injecté à l'évaluation (pas sérialisé dans la spec).
+    """
+    description = params.get("description")
+    if not description:
+        raise ValueError("llm_check requires a non-empty 'description' param")
+    client = params.get("client")
+    if client is None:
+        raise ValueError("llm_check requires a 'client' in params")
+
+    system = (
+        "You are a strict QA criterion checker. Given a task, an agent output, and a "
+        "specific criterion, score from 0.0 to 1.0 how well the output satisfies that "
+        "criterion, and give a short reason. Reward only what is actually present."
+    )
+    user = (
+        f"# Task\n{task.description}\n\n"
+        f"# Criterion to check\n{description}\n\n"
+        f"# Agent output\n{output.content}"
+    )
+    response = client.beta.chat.completions.parse(
+        model="gpt-4o-mini",
+        temperature=0.0,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        response_format=_LLMCheckResult,
+    )
+    parsed = response.choices[0].message.parsed
+    if parsed is None:
+        raise ValueError("llm_check returned no parsed result")
+    score = float(parsed.score)
+    return CriterionOutcome(
+        name="llm_check", passed=score >= 0.5, score=score,
+        detail=f"{parsed.reason} (score={score:.2f})",
+    )
+
+
 @register_criterion("format_check")
 def format_check(task: Task, output: Output, params: dict) -> CriterionOutcome:
     kind = params.get("kind", "non_empty_lines")

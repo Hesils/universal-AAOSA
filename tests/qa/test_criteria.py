@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from aaosa.qa.criteria import (
@@ -10,9 +12,27 @@ from aaosa.qa.criteria import (
     references_tags,
     keyword_presence,
     format_check,
+    llm_check,
 )
 from aaosa.schemas.output import Output, LLMMetadata
 from aaosa.schemas.task import Task
+
+
+class _FakeParseClient:
+    """Mocks client.beta.chat.completions.parse -> parsed object with .score/.reason."""
+
+    def __init__(self, parsed):
+        self._parsed = parsed
+        self.captured_kwargs = None
+        self.beta = self
+        self.chat = self
+        self.completions = self
+
+    def parse(self, **kwargs):
+        self.captured_kwargs = kwargs
+        message = SimpleNamespace(parsed=self._parsed)
+        choice = SimpleNamespace(message=message)
+        return SimpleNamespace(choices=[choice])
 
 
 def make_task(required_tags=None, description="Do the thing") -> Task:
@@ -139,3 +159,33 @@ class TestFormatCheck:
     def test_non_empty_lines_fail(self):
         o = format_check(make_task(), make_output("\n   \n"), {"kind": "non_empty_lines"})
         assert o.passed is False
+
+
+class TestLLMCheck:
+    def test_registered(self):
+        assert "llm_check" in CRITERIA_REGISTRY
+
+    def test_passes_when_llm_says_yes(self):
+        client = _FakeParseClient(SimpleNamespace(score=1.0, reason="meets the criterion"))
+        o = llm_check(
+            make_task(),
+            make_output("a detailed answer with code examples"),
+            {"description": "must include code examples", "client": client},
+        )
+        assert o.passed is True
+        assert o.score == 1.0
+
+    def test_fails_when_llm_says_no(self):
+        client = _FakeParseClient(SimpleNamespace(score=0.0, reason="missing examples"))
+        o = llm_check(
+            make_task(),
+            make_output("a vague answer"),
+            {"description": "must include code examples", "client": client},
+        )
+        assert o.passed is False
+        assert o.score == 0.0
+
+    def test_missing_description_raises(self):
+        client = _FakeParseClient(SimpleNamespace(score=1.0, reason="ok"))
+        with pytest.raises(ValueError):
+            llm_check(make_task(), make_output("x"), {"client": client})
