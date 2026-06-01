@@ -21,6 +21,16 @@ class PassRatePoint(BaseModel):
     pass_rate: float
 
 
+class SessionInfraPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str
+    started_at: datetime
+    run_count: int
+    tokens_in: int
+    tokens_out: int
+    latency_mean: float | None
+
+
 class InfraStats(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_count: int
@@ -32,6 +42,7 @@ class InfraStats(BaseModel):
     total_tokens_out: int
     latency: LatencyStats
     pass_rate_over_time: list[PassRatePoint]
+    per_session: list[SessionInfraPoint]
 
 
 def collect(runs_root: Path) -> InfraStats:
@@ -40,6 +51,7 @@ def collect(runs_root: Path) -> InfraStats:
     latencies: list[float] = []
     qa_total = qa_pass = 0
     pass_rate_over_time: list[PassRatePoint] = []
+    per_session: list[SessionInfraPoint] = []
     agent_ids: set[str] = set()
 
     sdir = runs_root / "sessions"
@@ -53,14 +65,20 @@ def collect(runs_root: Path) -> InfraStats:
             task_count += len(meta.tasks)
             agent_ids.update(meta.agent_ids)
 
+            s_run_count = s_tokens_in = s_tokens_out = 0
+            s_latencies: list[float] = []
             s_qa_total = s_qa_pass = 0
             for e in load_trace(trace_path):
                 if isinstance(e, ExecutedEvent):
                     run_count += 1
+                    s_run_count += 1
                     if e.llm_metadata is not None:  # nullable -> skip si absent (S5)
                         tokens_in += e.llm_metadata.tokens_in
                         tokens_out += e.llm_metadata.tokens_out
                         latencies.append(e.llm_metadata.latency_ms)
+                        s_tokens_in += e.llm_metadata.tokens_in
+                        s_tokens_out += e.llm_metadata.tokens_out
+                        s_latencies.append(e.llm_metadata.latency_ms)
                 elif isinstance(e, QAEvaluatedEvent):
                     s_qa_total += 1
                     if e.success:
@@ -69,8 +87,17 @@ def collect(runs_root: Path) -> InfraStats:
             qa_pass += s_qa_pass
             if s_qa_total > 0:
                 pass_rate_over_time.append(PassRatePoint(timestamp=meta.started_at, pass_rate=s_qa_pass / s_qa_total))
+            per_session.append(SessionInfraPoint(
+                session_id=meta.session_id,
+                started_at=meta.started_at,
+                run_count=s_run_count,
+                tokens_in=s_tokens_in,
+                tokens_out=s_tokens_out,
+                latency_mean=(sum(s_latencies) / len(s_latencies)) if s_latencies else None,
+            ))
 
     pass_rate_over_time.sort(key=lambda p: p.timestamp)
+    per_session.sort(key=lambda p: p.started_at)
 
     reg_path = runs_root / "agents" / "registry.json"
     if reg_path.exists():
@@ -92,4 +119,5 @@ def collect(runs_root: Path) -> InfraStats:
             max_ms=max(latencies) if latencies else None,
         ),
         pass_rate_over_time=pass_rate_over_time,
+        per_session=per_session,
     )
