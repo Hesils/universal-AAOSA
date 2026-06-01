@@ -67,7 +67,7 @@ def list_agents(runs_root: Path) -> AgentList:
     ])
 
 
-def _elo_history(runs_root: Path, agent_id: str) -> list[TagEloSeries]:
+def _elo_history(runs_root: Path, agent_name: str) -> list[TagEloSeries]:
     snap_dir = runs_root / "elo_snapshots"
     if not snap_dir.exists():
         return []
@@ -77,7 +77,7 @@ def _elo_history(runs_root: Path, agent_id: str) -> list[TagEloSeries]:
             continue
         snap = EloSnapshot.model_validate_json(f.read_text(encoding="utf-8"))
         for a in snap.agents:
-            if a.agent_id != agent_id:
+            if a.agent_name != agent_name:  # nom stable, pas l'UUID régénéré (invariant projet)
                 continue
             for tag, elo in a.tags_with_elo.items():
                 series.setdefault(tag, []).append(EloPoint(timestamp=snap.timestamp, elo=elo))
@@ -117,6 +117,6 @@ def agent_detail(runs_root: Path, agent_id: str) -> AgentDetailView | None:
         name=entry.name,
         system_prompt=entry.system_prompt,
         tags_with_elo=entry.tags_with_elo,
-        elo_history=_elo_history(runs_root, agent_id),
+        elo_history=_elo_history(runs_root, entry.name),
         activity=_activity(runs_root, agent_id),
     )

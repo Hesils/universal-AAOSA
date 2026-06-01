@@ -28,3 +28,36 @@ def test_agent_detail(runs_root):
 
 def test_agent_detail_not_found(runs_root):
     assert agent_detail(runs_root, "nope") is None
+
+
+def test_elo_history_matches_by_name_not_id(tmp_path):
+    # Simule deux runs (process différents) : même agent_name, agent_id distincts.
+    from datetime import datetime, timedelta, timezone
+
+    from aaosa.elo.persistence import AgentEloSnapshot, EloSnapshot
+    from aaosa.tracing.store import save_agent_registry
+
+    root = tmp_path / "runs"
+    root.mkdir()
+    save_agent_registry(DEMO_AGENTS, root / "agents" / "registry.json")  # ids du run courant
+    snap_dir = root / "elo_snapshots"
+    snap_dir.mkdir()
+    a0 = DEMO_AGENTS[0]
+    base = datetime(2026, 6, 1, 9, 0, 0, tzinfo=timezone.utc)
+    for i, ts in enumerate([base, base + timedelta(hours=1)]):
+        snap = EloSnapshot(
+            timestamp=ts,
+            agents=[AgentEloSnapshot(
+                agent_name=a0.name,            # nom stable
+                agent_id=f"stale-uuid-{i}",    # id != registry (run antérieur)
+                tags_with_elo={"css": 90 + i},
+            )],
+        )
+        (snap_dir / (ts.strftime("%Y-%m-%dT%H-%M-%S") + ".json")).write_text(
+            snap.model_dump_json(), encoding="utf-8"
+        )
+
+    view = agent_detail(root, a0.id)
+    assert view is not None
+    css_series = next((s for s in view.elo_history if s.tag == "css"), None)
+    assert css_series is not None and len(css_series.points) == 2  # matché par nom
