@@ -52,7 +52,7 @@ def collect(runs_root: Path) -> InfraStats:
     qa_total = qa_pass = 0
     pass_rate_over_time: list[PassRatePoint] = []
     per_session: list[SessionInfraPoint] = []
-    agent_ids: set[str] = set()
+    agent_names: set[str] = set()  # par nom (stable) — pas par UUID régénéré à chaque run
 
     sdir = runs_root / "sessions"
     if sdir.exists():
@@ -63,7 +63,6 @@ def collect(runs_root: Path) -> InfraStats:
             session_count += 1
             meta = SessionMeta.model_validate_json(meta_path.read_text(encoding="utf-8"))
             task_count += len(meta.tasks)
-            agent_ids.update(meta.agent_ids)
 
             s_run_count = s_tokens_in = s_tokens_out = 0
             s_latencies: list[float] = []
@@ -102,12 +101,12 @@ def collect(runs_root: Path) -> InfraStats:
     reg_path = runs_root / "agents" / "registry.json"
     if reg_path.exists():
         reg = AgentRegistry.model_validate_json(reg_path.read_text(encoding="utf-8"))
-        agent_ids.update(e.agent_id for e in reg.agents)
+        agent_names.update(e.name for e in reg.agents)
 
     return InfraStats(
         session_count=session_count,
         task_count=task_count,
-        agent_count=len(agent_ids),
+        agent_count=len(agent_names),
         run_count=run_count,
         qa_pass_rate=(qa_pass / qa_total) if qa_total > 0 else None,
         total_tokens_in=tokens_in,

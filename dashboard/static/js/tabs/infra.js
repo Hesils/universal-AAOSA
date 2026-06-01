@@ -1,31 +1,37 @@
 import { api } from "../api.js";
 import { lineChart, barChart } from "../charts.js";
 
-function card(label, value) {
-  return `<div class="card"><div class="card-value">${value}</div><div class="card-label">${label}</div></div>`;
+function stat(label, value, accent = false) {
+  return `<div class="stat${accent ? " stat--accent" : ""}"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`;
 }
 
 export async function mountInfra(panel) {
   const s = await api.infra();
-  const pct = s.qa_pass_rate == null ? "—" : `${Math.round(s.qa_pass_rate * 100)}%`;
-  const lat = s.latency.mean_ms == null ? "—" : `${Math.round(s.latency.mean_ms)} ms`;
+  const qa = s.qa_pass_rate == null ? "—" : `${Math.round(s.qa_pass_rate * 100)}<small>%</small>`;
+  const lat = s.latency.mean_ms == null ? "—" : `${Math.round(s.latency.mean_ms)}<small>ms</small>`;
 
   panel.innerHTML = `
-    <div class="cards">
-      ${card("Sessions", s.session_count)}
-      ${card("Runs", s.run_count)}
-      ${card("Agents", s.agent_count)}
-      ${card("Tasks", s.task_count)}
-      ${card("QA pass", pct)}
-      ${card("Tokens in", s.total_tokens_in)}
-      ${card("Tokens out", s.total_tokens_out)}
-      ${card("Latence moy.", lat)}
+    <h2 class="sec">Infra</h2>
+    <div class="strip">
+      ${stat("Sessions", s.session_count)}
+      ${stat("Runs", s.run_count)}
+      ${stat("Agents", s.agent_count)}
+      ${stat("Tasks", s.task_count)}
+      ${stat("QA pass", qa, true)}
+      ${stat("Tokens in", s.total_tokens_in)}
+      ${stat("Tokens out", s.total_tokens_out)}
+      ${stat("Latence moy.", lat)}
     </div>
     <div class="charts">
-      <figure><figcaption>QA pass rate dans le temps</figcaption><svg data-c="passrate"></svg></figure>
-      <figure><figcaption>Runs par session</figcaption><svg data-c="runs"></svg></figure>
-      <figure><figcaption>Tokens in / out par session</figcaption><svg data-c="tokens"></svg></figure>
-      <figure><figcaption>Latence moyenne par session</figcaption><svg data-c="latency"></svg></figure>
+      <figure class="panel chart-card"><figcaption>qa_pass_rate / time</figcaption><svg class="chart" data-c="passrate"></svg></figure>
+      <figure class="panel chart-card"><figcaption>runs / session</figcaption><svg class="chart" data-c="runs"></svg></figure>
+      <figure class="panel chart-card"><figcaption>tokens / session</figcaption>
+        <div class="chart-legend">
+          <span class="legend"><i style="background:var(--fire)"></i>in</span>
+          <span class="legend"><i style="background:var(--cool)"></i>out</span>
+        </div>
+        <svg class="chart" data-c="tokens"></svg></figure>
+      <figure class="panel chart-card"><figcaption>latency / session</figcaption><svg class="chart" data-c="latency"></svg></figure>
     </div>`;
 
   const svg = c => panel.querySelector(`svg[data-c="${c}"]`);

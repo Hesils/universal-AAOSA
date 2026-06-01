@@ -19,7 +19,7 @@ Les skills `/prime` et `/save` viennent du master `.claude/` — disponibles san
 **V2a complète — 377 tests total** (commits `5265e3e` → `826d889`, 2026-05-27). Demo V2 validée LLM réel.
 **V2b complète — 471 tests total** (commits `04f12cd` → `f4f01b3`, 2026-05-28). Demo V2b validée LLM réel (judge déclenché, ELO mis à jour), health check demo validé (4 attributions, graduate lifecycle).
 
-**V2c complète — 588 tests total** (commits `39d46ce` → `aa356d5`, 2026-06-01). 6 épiques (01, 02, 03a, 03b, 04, 05). Dashboard d'observabilité opérationnel : couche data persistée (`runs/`) + app Flask `dashboard/` (`create_app`, cache on-demand, 4 collectors, API REST) + `build_graph` pur + frontend vanilla JS/SVG (4 tabs). Contrat data validé end-to-end sur app live. **Reste : passe graphique `/impeccable` + validation visuelle navigateur**, puis V3.
+**V2c complète — 588 tests total** (commits `39d46ce` → `aa356d5`, 2026-06-01). 6 épiques (01-05) + refonte graphique (06). Dashboard d'observabilité opérationnel : couche data persistée (`runs/`) + app Flask `dashboard/` (`create_app`, cache on-demand, 4 collectors, API REST) + `build_graph` pur + frontend vanilla JS/SVG (4 tabs). Contrat data validé end-to-end sur app live. **Refonte graphique « wireframe instrument » portée + validée navigateur** (`DESIGN.md`/`PRODUCT.md`, plan `v2c-06`) ; follow-ups XSS + `infra.agent_count` résorbés ; `design-lab/` supprimé. **V2c bouclée → V3.**
 
 V2 découpée en 3 sous-parties :
 - **V2a** (complète) : ELO mechanics + dual QA protocol
@@ -142,7 +142,7 @@ Spec complète : `docs/superpowers/specs/2026-05-28-v2b-qa-complet-design.md`. P
 
 ## Design V2c — Résumé rapide
 
-Spec complète : `docs/superpowers/specs/2026-05-28-v2c-dashboard-design.md`. Épiques : `docs/superpowers/epics/v2c-01..05.md`. Plans : `docs/superpowers/plans/v2c-02..05.md`. **Complète (2026-06-01, 588 tests).** Reste : passe `/impeccable` + validation navigateur.
+Spec complète : `docs/superpowers/specs/2026-05-28-v2c-dashboard-design.md`. Épiques : `docs/superpowers/epics/v2c-01..05.md`. Plans : `docs/superpowers/plans/v2c-02..06.md`. **Complète + validée navigateur (2026-06-01, 588 tests).**
 
 Dashboard web d'observabilité remplaçant `print_timeline`. Constat : la donnée n'est pas persistée → V2c = couche data (`src/aaosa/`) + app Flask (`dashboard/`).
 
@@ -150,6 +150,7 @@ Dashboard web d'observabilité remplaçant `print_timeline`. Constat : la donné
 - **`graph_model.build_graph`** (Épique 02, fonction pure) : `list[ClaimEvent] + session_meta -> GraphModel` (nodes/edges/steps, 3 couches TOP/CENTER/BOTTOM). Tab 4 = un step/task ordonné ; Tab 3 = un run/cas + pass_rate agrégé.
 - **Backend Flask** (Épiques 03a/03b) : `create_app(config)` factory, cache in-memory on-demand, 4 collectors (infra/agents/health_checks/sessions), API REST (`Cache-Control: no-store`).
 - **Frontend** (Épiques 04/05) : vanilla JS + SVG, composant graphe auto-fit + overlay modal par type de nœud + scrubber, 4 tabs.
+- **Refonte graphique** (Épique 06) : direction **« wireframe instrument »** (dark, neutres graphite, hero ember/fire) — système verrouillé dans `DESIGN.md` + `PRODUCT.md` (racine), plan `v2c-06`. CSS + markup JS only (backend/`build_graph` intouchés). Graphe hex tree-tiers (agents en haut, I/O en bas) inversé dans `graph.js`, pulses ember sur le chemin actif, scale-field + onde diagonale, stat strip, charts gridlines. Follow-ups XSS (`util.js esc()`) + `infra.agent_count` (compte par nom) résorbés.
 
 ### Séparations strictes V2c à ne pas briser
 

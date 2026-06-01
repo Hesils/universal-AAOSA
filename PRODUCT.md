@@ -16,20 +16,24 @@ Observability dashboard for the AAOSA multi-agent runtime. Replaces scattered pr
 
 Precise. Technical. Unsentimental.
 
+## Locked visual direction
+
+**Wireframe instrument** (dark). Full system in `DESIGN.md`: cool graphite neutrals, a single warm **ember/fire** hero, a wireframe scale-field background with a slow diagonal wave, and a hex-node execution graph (tree-tiered: agents=leaves, logic=trunk, I/O=roots) whose live path carries ember pulses.
+
 ## Anti-references
 
 - Grafana / Datadog default blue dashboards (commodity ops tooling aesthetic)
-- Emerald-on-black SaaS dashboards (the emerald is already claimed by graph active state; chrome must not compete)
-- Any "AI tool" purple-gradient-with-glassmorphism aesthetic
+- "AI tool" neon-on-black / purple-gradient / glassmorphism slop (the wireframe-dark + glow family is one cliché away from this; stay monochrome-cool + single warm hero)
+- Card-grid sprawl (use the stat strip)
 - Verbose SaaS onboarding chrome (zero marketing surface here)
 
 ## Design Principles
 
-1. **The graph speaks first.** Every chrome decision defers to graph legibility. If the nav competes with active edges, the nav loses.
-2. **Functional color separation.** Emerald = active/winning in the graph. Anything else in the UI must use a distinct hue — never reuse emerald for interactive states.
-3. **Density is a feature.** This is a data tool. Tables, labels, metrics at reading density. No card-grid sprawl.
-4. **Precision typography.** Monospace for data fields (ELO, latency, tokens). System sans for labels and nav. No display fonts.
-5. **Zero decoration.** No gradients, no shadows for depth illusion, no hover animations on static data. Motion is reserved for state changes (modal open/close).
+1. **The graph speaks first.** Every chrome decision defers to graph legibility. If the nav competes with the live path, the nav loses.
+2. **Functional color separation.** Ember (`--fire`) = active/winning in the graph. Chrome accents and state colors (`--cool`, `--warn`, `--fail`) stay distinct — never reuse ember as decoration.
+3. **Density is a feature.** This is a data tool. Tables, labels, metrics at reading density. No card-grid sprawl; metrics live in the stat strip.
+4. **Precision typography.** Monospace for all data (ELO, latency, tokens, ids, axis/node labels). Inter/system sans for labels and nav. No display fonts.
+5. **Motion conveys state.** The ambient scale-field wave and the active-path ember pulses are the signature; the winner burns steady. No marching-ant edges, no node ping, no decorative motion on static data. Glow only on live/winner elements. Transitions 150-250ms.
 
 ## Accessibility & Inclusion
 

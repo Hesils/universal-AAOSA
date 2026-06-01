@@ -61,14 +61,15 @@ function fieldLines(label, lines) {
   return wrap;
 }
 
-function renderDispatch(d) {
+function renderDispatch(d, runAgents) {
+  const nameOf = id => (runAgents || []).find(x => x.agent_id === id)?.name || id;
   const f = document.createDocumentFragment();
-  const candLines = d.candidates.map(c => `${c.agent_id} — fit ${c.fit_score.toFixed(2)} ${c.passed ? "✓" : "✗"}`);
+  const candLines = d.candidates.map(c => `${nameOf(c.agent_id)} — fit ${c.fit_score.toFixed(2)} ${c.passed ? "✓" : "✗"}`);
   f.append(fieldLines("Candidats (Phase 1)", candLines.length ? candLines : ["—"]));
-  const claimLines = d.claims.map(c => `${c.agent_id} — ${c.decision}`);
+  const claimLines = d.claims.map(c => `${nameOf(c.agent_id)} — ${c.decision}`);
   f.append(fieldLines("Claims (Phase 2)", claimLines.length ? claimLines : ["—"]));
-  for (const c of d.claims) if (c.justification) f.append(longField(`Justification — ${c.agent_id}`, c.justification));
-  f.append(field("Winner", d.winner_agent_id || "—"));
+  for (const c of d.claims) if (c.justification) f.append(longField(`Justification — ${nameOf(c.agent_id)}`, c.justification));
+  f.append(field("Winner", d.winner_agent_id ? nameOf(d.winner_agent_id) : "—"));
   if (d.dispatch_reason) f.append(field("Raison dispatch", d.dispatch_reason));
   if (d.unassigned_reason) f.append(field("Raison non-attribution", d.unassigned_reason));
   return f;
@@ -143,7 +144,7 @@ export function openNodeModal(node, step, runAgents) {
   if (!step) return;
   let title = node.label, body;
   switch (node.type) {
-    case "dispatch": body = renderDispatch(step.detail.dispatch); break;
+    case "dispatch": body = renderDispatch(step.detail.dispatch, runAgents); break;
     case "agent": {
       body = renderAgent(node.id, step, runAgents);
       const reg = (runAgents || []).find(x => x.agent_id === node.id);

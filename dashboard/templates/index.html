@@ -7,18 +7,28 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-  <nav class="tabnav">
-    <button class="tab-btn" data-tab="infra">Infra</button>
-    <button class="tab-btn" data-tab="agents">Agents</button>
-    <button class="tab-btn" data-tab="health">Health checks</button>
-    <button class="tab-btn is-active" data-tab="sessions">Sessions</button>
-  </nav>
+  <div class="scales" id="scales"></div>
+  <div class="vignette"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mk"></span>
+      <span class="brand-mark mono">AAOSA</span>
+      <span class="brand-sub">observability</span>
+    </div>
+    <nav class="tabnav" aria-label="Vues">
+      <button class="tab-btn is-active" data-tab="sessions">Sessions</button>
+      <button class="tab-btn" data-tab="agents">Agents</button>
+      <button class="tab-btn" data-tab="health">Health</button>
+      <button class="tab-btn" data-tab="infra">Infra</button>
+    </nav>
+  </header>
 
   <main>
-    <section class="tab-panel" data-tab="infra" hidden><p class="placeholder">Tab Infra — Épique 05</p></section>
-    <section class="tab-panel" data-tab="agents" hidden><p class="placeholder">Tab Agents — Épique 05</p></section>
-    <section class="tab-panel" data-tab="health" hidden><p class="placeholder">Tab Health checks — Épique 05</p></section>
     <section class="tab-panel" data-tab="sessions"></section>
+    <section class="tab-panel" data-tab="agents" hidden></section>
+    <section class="tab-panel" data-tab="health" hidden></section>
+    <section class="tab-panel" data-tab="infra" hidden></section>
   </main>
 
   <div id="modal-root"></div>

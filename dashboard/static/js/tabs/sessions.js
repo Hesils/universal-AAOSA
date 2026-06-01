@@ -1,28 +1,37 @@
 import { api } from "../api.js";
 import { renderGraph } from "../graph.js";
 import { openNodeModal } from "../modal.js";
+import { esc } from "../util.js";
 
 export async function mountSessions(panel) {
   panel.innerHTML = `
     <div class="toolbar">
-      <select class="session-select"></select>
+      <select class="sel session-select"></select>
       <span class="chips"></span>
     </div>
     <div class="session-body">
-      <div class="graph-wrap"><svg></svg></div>
-      <aside class="todo"></aside>
+      <div class="panel graph-frame">
+        <span class="ghead">EXECUTION GRAPH</span>
+        <svg class="graph"></svg>
+      </div>
+      <aside class="panel todo">
+        <h3>Tasks</h3>
+        <div class="todo-list"></div>
+      </aside>
     </div>
     <div class="scrubber">
-      <button class="scrub-prev">◀</button>
+      <button class="scrub-btn scrub-prev">◀</button>
+      <span class="scrub-track"><span class="scrub-fill"></span></span>
+      <button class="scrub-btn scrub-next">▶</button>
       <span class="scrub-label"></span>
-      <button class="scrub-next">▶</button>
     </div>`;
 
   const select = panel.querySelector(".session-select");
-  const svg = panel.querySelector(".graph-wrap svg");
+  const svg = panel.querySelector(".graph-frame svg");
   const chips = panel.querySelector(".chips");
-  const todo = panel.querySelector(".todo");
+  const todo = panel.querySelector(".todo-list");
   const scrubLabel = panel.querySelector(".scrub-label");
+  const scrubFill = panel.querySelector(".scrub-fill");
 
   const list = await api.sessions();
   if (!list.sessions.length) { panel.innerHTML = '<p class="placeholder">Aucune session persistée.</p>'; return; }
@@ -37,22 +46,27 @@ export async function mountSessions(panel) {
 
   function renderTodo() {
     const tasks = detail.meta.tasks;
-    todo.innerHTML = "<div class='field-label'>Tasks</div>" + tasks.map((t, i) => {
+    todo.innerHTML = tasks.map((t, i) => {
       const state = i < activeStepIndex ? "done" : (i === activeStepIndex ? "current" : "pending");
-      const mark = state === "done" ? "☑" : (state === "current" ? "▶" : "☐");
-      return `<div class="todo-item todo--${state}">${mark} ${t.description}</div>`;
+      return `<div class="todo-item todo--${state}"><span class="mk"></span><span>${esc(t.description)}</span></div>`;
     }).join("");
   }
 
   function renderChips() {
-    chips.textContent = `${detail.meta.tasks.length} tasks · ${detail.meta.agent_ids.length} agents`;
+    chips.innerHTML = `<span><b>${detail.meta.tasks.length}</b> tasks</span><span><b>${detail.meta.agent_ids.length}</b> agents</span>`;
   }
 
   function rerender() {
     renderGraph(svg, graph, activeStepIndex, (node, step) => openNodeModal(node, step, detail.agents), agentNames);
-    scrubLabel.textContent = graph.steps.length
-      ? `Step ${activeStepIndex + 1} / ${graph.steps.length} — ${graph.steps[activeStepIndex].label}`
-      : "Aucun step";
+    const n = graph.steps.length;
+    if (n) {
+      const step = graph.steps[activeStepIndex];
+      scrubLabel.innerHTML = `Step <b>${activeStepIndex + 1}</b> / ${n} — ${esc(step.label)}`;
+      scrubFill.style.width = `${((activeStepIndex + 1) / n) * 100}%`;
+    } else {
+      scrubLabel.textContent = "Aucun step";
+      scrubFill.style.width = "0%";
+    }
     renderTodo();
   }
 

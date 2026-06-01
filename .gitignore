@@ -9,3 +9,5 @@ dist/
 .env
 runs/
 .superpowers/
+design-lab/
+.impeccable/
