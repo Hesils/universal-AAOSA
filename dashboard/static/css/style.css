@@ -256,3 +256,15 @@ svg.chart { width: 100%; height: auto; display: block; background: var(--bg-1); 
 .legend { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-2); }
 .legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 .agent-select { background: var(--bg-2); color: var(--text-0); border: 1px solid var(--border-1); border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer; font-family: inherit; }
+
+/* ─── Tab 3 Health checks ─── */
+.hc-select, .case-select { background: var(--bg-2); color: var(--text-0); border: 1px solid var(--border-1); border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer; font-family: inherit; }
+.hc-overview { margin: 14px 0; }
+.hc-testset { margin-bottom: 16px; display: flex; flex-direction: column; gap: 4px; }
+.case-row { display: grid; grid-template-columns: 1fr 150px 110px 2fr 60px; gap: 10px; align-items: center; padding: 7px 10px; background: var(--bg-1); border: 1px solid var(--border-0); border-radius: 6px; font-size: 11.5px; color: var(--text-1); }
+.case-row.case-quarantined { opacity: 0.55; }
+.case-id { color: var(--text-0); font-family: "SF Mono", ui-monospace, monospace; }
+.case-role { color: var(--accent); }
+.case-attr, .case-eval { color: var(--text-2); }
+.case-pr { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-1); }
+.hc-case-label { color: var(--text-2); font-size: 12px; }
