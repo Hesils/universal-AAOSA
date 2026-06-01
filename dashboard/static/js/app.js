@@ -1,7 +1,8 @@
 import { mountSessions } from "./tabs/sessions.js";
 import { mountInfra } from "./tabs/infra.js";
+import { mountAgents } from "./tabs/agents.js";
 
-const MOUNTERS = { sessions: mountSessions, infra: mountInfra }; // agents/health ajoutés en Épique 05
+const MOUNTERS = { sessions: mountSessions, infra: mountInfra, agents: mountAgents }; // health ajouté en Épique 05
 const mounted = new Set();
 
 function showTab(name) {
