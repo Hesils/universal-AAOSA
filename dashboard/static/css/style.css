@@ -234,3 +234,12 @@ svg.chart { width: 100%; height: auto; display: block; background: var(--bg-1); 
 .chart-axis { fill: var(--text-2); font-size: 9px; font-family: "SF Mono", ui-monospace, monospace; }
 .chart-empty { fill: var(--text-2); font-size: 11px; }
 .chart-bar { fill: var(--accent); }
+
+/* ─── Cards + charts grid ─── */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.card { background: var(--bg-1); border: 1px solid var(--border-0); border-radius: 8px; padding: 14px 16px; }
+.card-value { font-size: 22px; font-weight: 600; color: var(--text-0); font-variant-numeric: tabular-nums; }
+.card-label { font-size: 11px; color: var(--text-2); margin-top: 4px; letter-spacing: 0.03em; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.charts figure { margin: 0; }
+.charts figcaption { font-size: 11px; color: var(--text-2); margin-bottom: 6px; letter-spacing: 0.03em; }
