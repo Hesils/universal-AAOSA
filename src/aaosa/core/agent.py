@@ -73,7 +73,15 @@ class Agent(BaseModel):
 
     def execute(self, task: Task, client: OpenAI) -> Output:
         context = task.metadata.get("context", "")
-        user_content = f"{task.description}\n\n{context}".strip() if context else task.description
+        deps = ""
+        if task.required_outputs:
+            deps = "\n\n# Required context from previous steps\n" + "\n---\n".join(
+                f"[{o.task_id}]: {o.content}" for o in task.required_outputs
+            )
+        user_content = f"{task.description}{deps}"
+        if context:
+            user_content = f"{user_content}\n\n{context}"
+        user_content = user_content.strip()
         start = time.monotonic()
         response = client.chat.completions.create(
             model="gpt-4o-mini",

@@ -86,3 +86,72 @@ def run_task(
         output=output,
         qa_result=qa_result,
     )
+
+
+def _topological_order(tasks: list[Task]) -> list[Task]:
+    """Tri topologique (Kahn) selon depends_on, en préservant l'ordre d'entrée
+    pour les tâches de même rang. Lève ValueError sur cycle ou dépendance inconnue."""
+    task_by_id = {t.id: t for t in tasks}
+    for t in tasks:
+        for dep in t.depends_on:
+            if dep not in task_by_id:
+                raise ValueError(f"unknown dependency id: {dep!r}")
+
+    in_degree = {t.id: 0 for t in tasks}
+    adjacency: dict[str, list[str]] = {t.id: [] for t in tasks}
+    for t in tasks:
+        for dep in t.depends_on:
+            adjacency[dep].append(t.id)
+            in_degree[t.id] += 1
+
+    queue = [t for t in tasks if in_degree[t.id] == 0]
+    order: list[Task] = []
+    while queue:
+        current = queue.pop(0)
+        order.append(current)
+        for nxt_id in adjacency[current.id]:
+            in_degree[nxt_id] -= 1
+            if in_degree[nxt_id] == 0:
+                queue.append(task_by_id[nxt_id])
+
+    if len(order) != len(tasks):
+        raise ValueError("cycle detected in task dependencies")
+    return order
+
+
+def run_chain(
+    tasks: list[Task],
+    agents: list[Agent],
+    client: OpenAI,
+    tracer: Tracer | None = None,
+    evaluator: QAEvaluator | None = None,
+) -> list[Output | DispatchResult | QAFailure]:
+    """Exécute une liste de sous-tâches ordonnée par leur graphe de dépendances.
+
+    Chaque tâche reçoit dans `required_outputs` uniquement les outputs réussis des
+    tâches déclarées dans son `depends_on`. Une tâche dont une dépendance n'a pas
+    produit d'output réussi est marquée `DispatchResult(status="dependency_failed")`
+    sans être exécutée. L'input n'est pas muté (copie via model_copy).
+    """
+    order = _topological_order(tasks)
+    outputs: dict[str, Output] = {}
+    results: list[Output | DispatchResult | QAFailure] = []
+
+    for task in order:
+        unmet = [dep for dep in task.depends_on if dep not in outputs]
+        if unmet:
+            results.append(DispatchResult(
+                status="dependency_failed",
+                agent_id=None,
+                reason=f"unresolved dependencies: {unmet}",
+            ))
+            continue
+
+        resolved = [outputs[dep] for dep in task.depends_on]
+        task_to_run = task.model_copy(update={"required_outputs": resolved})
+        result = run_task(task_to_run, agents, client, tracer, evaluator)
+        results.append(result)
+        if isinstance(result, Output):
+            outputs[task.id] = result
+
+    return results

@@ -22,7 +22,7 @@ class DispatchResult(BaseModel):
         fit_scores: Fit scores for each agent (agent_id -> score).
     """
 
-    status: Literal["assigned", "unassigned"]
+    status: Literal["assigned", "unassigned", "dependency_failed"]
     agent_id: str | None
     reason: str
     all_claims: list[Claim] = Field(default_factory=list)
@@ -34,8 +34,8 @@ class DispatchResult(BaseModel):
     def agent_id_matches_status(self) -> "DispatchResult":
         if self.status == "assigned" and self.agent_id is None:
             raise ValueError("agent_id must be set when status='assigned'")
-        if self.status == "unassigned" and self.agent_id is not None:
-            raise ValueError("agent_id must be None when status='unassigned'")
+        if self.status != "assigned" and self.agent_id is not None:
+            raise ValueError(f"agent_id must be None when status={self.status!r}")
         return self
 
 
