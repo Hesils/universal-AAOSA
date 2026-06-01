@@ -14,7 +14,7 @@ _event_adapter = TypeAdapter(ClaimEvent)
 
 def new_session_id() -> str:
     now = datetime.now(timezone.utc)
-    return now.strftime("%Y-%m-%dT%H-%M-%S") + "-" + uuid.uuid4().hex[:4]
+    return now.strftime("%Y-%m-%dT%H-%M-%S") + "-" + uuid.uuid4().hex[:8]
 
 
 class AgentRegistryEntry(BaseModel):
