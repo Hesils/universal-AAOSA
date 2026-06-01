@@ -70,6 +70,15 @@ class TagAcquiredEvent(_BaseEvent):
     initial_elo: int
 
 
+class ToolCalledEvent(_BaseEvent):
+    type: Literal["tool_called"] = "tool_called"
+    agent_id: str
+    tool_name: str
+    arguments: dict
+    result: str
+    latency_ms: float
+
+
 class TaskDividedEvent(_BaseEvent):
     type: Literal["task_divided"] = "task_divided"
     task_id: str                    # parent task ID
@@ -95,6 +104,7 @@ ClaimEvent = Annotated[
         QAEvaluatedEvent,
         EloUpdatedEvent,
         TagAcquiredEvent,
+        ToolCalledEvent,
         TaskDividedEvent,
         TaskAggregatedEvent,
     ],

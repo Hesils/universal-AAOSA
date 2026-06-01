@@ -9,6 +9,7 @@ class LLMMetadata(BaseModel):
     tokens_in: int
     tokens_out: int
     latency_ms: float
+    tool_calls_count: int = 0    # A5 — cumulé sur toute la boucle tool-use
 
 
 class Output(BaseModel):
