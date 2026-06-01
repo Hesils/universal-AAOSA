@@ -1,12 +1,12 @@
 import pytest
 from aaosa.core.agent import Agent
-from aaosa.demo.agents import (
-    AGENT_FRONTEND,
-    AGENT_BACKEND,
-    AGENT_DEVOPS,
-    AGENT_FULLSTACK,
-    DEMO_AGENTS,
-)
+from aaosa.demo.agents import DEMO_AGENTS
+
+_by_name = {a.name: a for a in DEMO_AGENTS}
+AGENT_FRONTEND = _by_name["Frontend"]
+AGENT_BACKEND = _by_name["Backend"]
+AGENT_DEVOPS = _by_name["DevOps"]
+AGENT_FULLSTACK = _by_name["Fullstack"]
 
 
 class TestAgentInstanceTypes:
