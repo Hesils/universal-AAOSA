@@ -144,7 +144,12 @@ export function openNodeModal(node, step, runAgents) {
   let title = node.label, body;
   switch (node.type) {
     case "dispatch": body = renderDispatch(step.detail.dispatch); break;
-    case "agent": body = renderAgent(node.id, step, runAgents); title = node.label + (step.winner_agent_id === node.id ? " ★" : ""); break;
+    case "agent": {
+      body = renderAgent(node.id, step, runAgents);
+      const reg = (runAgents || []).find(x => x.agent_id === node.id);
+      title = (reg ? reg.name : node.label) + (step.winner_agent_id === node.id ? " ★" : "");
+      break;
+    }
     case "evaluator": body = renderEvaluator(step.detail.evaluator); break;
     case "input": body = renderInput(step.detail.input); break;
     case "output": body = renderOutput(step.detail.output); break;

@@ -28,7 +28,7 @@ function layout(graph) {
 function center(p) { return { cx: p.x + NODE_W / 2, cy: p.y + NODE_H / 2 }; }
 function edgeKey(e) { return `${e.from}->${e.to}`; }
 
-export function renderGraph(svg, graph, activeStepIndex, onNodeClick) {
+export function renderGraph(svg, graph, activeStepIndex, onNodeClick, agentNames = {}) {
   while (svg.firstChild) svg.removeChild(svg.firstChild);
   svg.setAttribute("class", "graph");
 
@@ -65,7 +65,7 @@ export function renderGraph(svg, graph, activeStepIndex, onNodeClick) {
 
     const rect = el("rect", { x: p.x, y: p.y, width: NODE_W, height: NODE_H, rx: 8 });
     const label = el("text", { x: p.x + NODE_W / 2, y: p.y + NODE_H / 2 + 5, "text-anchor": "middle", class: "node-label" });
-    label.textContent = n.label;
+    label.textContent = (n.type === "agent" && agentNames[n.id]) || n.label;
     g.append(rect, label);
     if (onNodeClick) g.addEventListener("click", () => onNodeClick(n, step));
     svg.appendChild(g);

@@ -34,7 +34,7 @@ export async function mountHealth(panel) {
     hcSelect.appendChild(opt);
   }
 
-  let detail = null;
+  let detail = null, agentNames = {};
 
   function renderOverview() {
     const quarantine = detail.task_spec_quarantined.length + detail.evaluator_quarantined.length + detail.unattributed.length;
@@ -53,7 +53,8 @@ export async function mountHealth(panel) {
       detail.cases.map(c => {
         const role = ROLE_LABEL[c.role] || c.role;
         const pr = c.result ? `${c.result.pass_count}/${c.result.n_runs}` : "—";
-        return `<div class="case-row${c.graphable ? "" : " case-quarantined"}">
+        const cls = c.graphable ? " case-row--clickable" : " case-quarantined";
+        return `<div class="case-row${cls}" data-task="${c.task_id}">
           <span class="case-id">${c.task_id}</span>
           <span class="case-role">${role}</span>
           <span class="case-attr">${c.attribution}</span>
@@ -61,6 +62,12 @@ export async function mountHealth(panel) {
           <span class="case-pr">${pr}</span>
         </div>`;
       }).join("");
+    panel.querySelectorAll(".hc-testset .case-row--clickable").forEach(row => {
+      row.addEventListener("click", () => {
+        caseSelect.value = row.dataset.task;
+        loadGraph(row.dataset.task);
+      });
+    });
   }
 
   function renderCaseOptions() {
@@ -76,12 +83,14 @@ export async function mountHealth(panel) {
   async function loadGraph(taskId) {
     const c = detail.cases.find(x => x.task_id === taskId);
     passrate.textContent = c && c.result ? `pass_rate ${pct(c.result.pass_rate)} (${c.result.pass_count}/${c.result.n_runs})` : "";
+    panel.querySelectorAll(".hc-testset .case-row").forEach(r => r.classList.toggle("case-row--active", r.dataset.task === taskId));
     const graph = await api.healthCheckGraph(detail.id, taskId);
-    renderGraph(svg, graph, 0, (node, step) => openNodeModal(node, step, detail.agents));
+    renderGraph(svg, graph, 0, (node, step) => openNodeModal(node, step, detail.agents), agentNames);
   }
 
   async function load(rid) {
     detail = await api.healthCheck(rid);
+    agentNames = Object.fromEntries(detail.agents.map(a => [a.agent_id, a.name]));
     renderOverview();
     renderTestSet();
     renderCaseOptions();

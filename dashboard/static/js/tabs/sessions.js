@@ -33,7 +33,7 @@ export async function mountSessions(panel) {
     select.appendChild(opt);
   }
 
-  let detail = null, graph = null, activeStepIndex = 0;
+  let detail = null, graph = null, activeStepIndex = 0, agentNames = {};
 
   function renderTodo() {
     const tasks = detail.meta.tasks;
@@ -49,7 +49,7 @@ export async function mountSessions(panel) {
   }
 
   function rerender() {
-    renderGraph(svg, graph, activeStepIndex, (node, step) => openNodeModal(node, step, detail.agents));
+    renderGraph(svg, graph, activeStepIndex, (node, step) => openNodeModal(node, step, detail.agents), agentNames);
     scrubLabel.textContent = graph.steps.length
       ? `Step ${activeStepIndex + 1} / ${graph.steps.length} — ${graph.steps[activeStepIndex].label}`
       : "Aucun step";
@@ -58,6 +58,7 @@ export async function mountSessions(panel) {
 
   async function load(sid) {
     [detail, graph] = await Promise.all([api.session(sid), api.sessionGraph(sid)]);
+    agentNames = Object.fromEntries(detail.agents.map(a => [a.agent_id, a.name]));
     activeStepIndex = 0;
     renderChips();
     rerender();
