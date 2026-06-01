@@ -50,7 +50,7 @@ def save_agent_registry(agents: list[Agent], path: Path) -> Path:
     return path
 
 
-TaskOutcome = Literal["qa_pass", "qa_fail", "unassigned", "no_qa"]
+TaskOutcome = Literal["qa_pass", "qa_fail", "unassigned", "no_qa", "divided"]
 
 
 class SessionTaskRecord(BaseModel):

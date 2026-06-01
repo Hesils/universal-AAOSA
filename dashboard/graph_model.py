@@ -13,13 +13,15 @@ from aaosa.tracing.events import (
     Phase2ClaimedEvent,
     QAEvaluatedEvent,
     TagAcquiredEvent,
+    TaskAggregatedEvent,
+    TaskDividedEvent,
     UnassignedEvent,
 )
 from aaosa.tracing.store import SessionMeta, SessionTaskRecord
 
 NodeLayer = Literal["top", "center", "bottom"]
-NodeType = Literal["input", "dispatch", "evaluator", "output", "testset", "agent"]
-Outcome = Literal["qa_pass", "qa_fail", "unassigned", "no_qa"]
+NodeType = Literal["input", "dispatch", "evaluator", "output", "testset", "agent", "divider", "aggregator"]
+Outcome = Literal["qa_pass", "qa_fail", "unassigned", "no_qa", "divided"]
 
 
 class GraphNode(BaseModel):
@@ -178,6 +180,9 @@ def _build_nodes(events: list[ClaimEvent]) -> list[GraphNode]:
         GraphNode(id="output", layer="top", type="output", label="Output"),
         GraphNode(id="testset", layer="top", type="testset", label="TestSet"),
     ]
+    if any(isinstance(e, TaskDividedEvent) for e in events):
+        nodes.append(GraphNode(id="divider", layer="center", type="divider", label="Divider"))
+        nodes.append(GraphNode(id="aggregator", layer="center", type="aggregator", label="Aggregator"))
     for aid in _agent_ids(events):
         nodes.append(GraphNode(id=aid, layer="bottom", type="agent", label=aid))
     return nodes
@@ -191,6 +196,10 @@ def _build_edges(nodes: list[GraphNode]) -> list[GraphEdge]:
     edges += [GraphEdge(from_node=aid, to="output") for aid in agent_ids]
     edges.append(GraphEdge(from_node="evaluator", to="output"))
     edges.append(GraphEdge(from_node="evaluator", to="testset"))
+    if any(n.id == "divider" for n in nodes):
+        edges.append(GraphEdge(from_node="input", to="divider"))
+        edges.append(GraphEdge(from_node="divider", to="aggregator"))
+        edges.append(GraphEdge(from_node="aggregator", to="output"))
     return edges
 
 
@@ -222,6 +231,14 @@ def _order_task_ids(events: list[ClaimEvent], session_meta: SessionMeta | None) 
 
 
 def _active_path(outcome: Outcome, winner_id: str | None) -> tuple[list[str], list[GraphEdge]]:
+    if outcome == "divided":
+        nodes = ["input", "divider", "aggregator", "output"]
+        edges = [
+            GraphEdge(from_node="input", to="divider"),
+            GraphEdge(from_node="divider", to="aggregator"),
+            GraphEdge(from_node="aggregator", to="output"),
+        ]
+        return nodes, edges
     nodes = ["input", "dispatch"]
     edges = [GraphEdge(from_node="input", to="dispatch")]
     if outcome == "unassigned" or winner_id is None:
@@ -252,11 +269,16 @@ def _build_step(task_id: str, run: list[ClaimEvent], meta_record: SessionTaskRec
     qa_ev = next((e for e in run if isinstance(e, QAEvaluatedEvent)), None)
     elo_ev = next((e for e in run if isinstance(e, EloUpdatedEvent)), None)
     tag_evs = [e for e in run if isinstance(e, TagAcquiredEvent)]
+    divided_ev = next((e for e in run if isinstance(e, TaskDividedEvent)), None)
+    aggregated_ev = next((e for e in run if isinstance(e, TaskAggregatedEvent)), None)
 
     winner_id = dispatched.agent_id if dispatched is not None else None
 
-    if unassigned_ev is not None or dispatched is None:
-        outcome: Outcome = "unassigned"
+    if divided_ev is not None:
+        outcome: Outcome = "divided"
+        winner_id = None
+    elif unassigned_ev is not None or dispatched is None:
+        outcome = "unassigned"
     elif qa_ev is None:
         outcome = "no_qa"
     elif qa_ev.success:
@@ -302,7 +324,12 @@ def _build_step(task_id: str, run: list[ClaimEvent], meta_record: SessionTaskRec
             criteria_results={}, judge=None,
         )
 
-    if executed is not None:
+    if aggregated_ev is not None:
+        output_detail = OutputDetail(
+            produced=True, output_summary=aggregated_ev.output_summary,
+            output_content=aggregated_ev.output_content, llm_metadata=aggregated_ev.llm_metadata,
+        )
+    elif executed is not None:
         output_detail = OutputDetail(
             produced=True, output_summary=executed.output_summary,
             output_content=executed.output_content, llm_metadata=executed.llm_metadata,

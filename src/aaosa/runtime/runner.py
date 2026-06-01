@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from openai import OpenAI
 
 from aaosa.claiming.dispatch import DispatchResult, dispatch
@@ -10,6 +12,10 @@ from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
 from aaosa.tracing.events import ExecutedEvent, QAEvaluatedEvent, EloUpdatedEvent, TagAcquiredEvent
 from aaosa.tracing.tracer import Tracer
+
+if TYPE_CHECKING:
+    from aaosa.runtime.aggregator import TaskAggregator
+    from aaosa.runtime.divider import TaskDivider
 
 
 def run_task(
@@ -155,3 +161,36 @@ def run_chain(
             outputs[task.id] = result
 
     return results
+
+
+def run_divided_task(
+    task: Task,
+    agents: list[Agent],
+    client: OpenAI,
+    divider: "TaskDivider",
+    aggregator: "TaskAggregator",
+    tracer: Tracer | None = None,
+    evaluator: QAEvaluator | None = None,
+) -> Output | DispatchResult:
+    """Divise une tâche, exécute la chaîne de sous-tâches, puis agrège.
+
+    Stratégie B (LLM Aggregator) primaire. Fallback C : si aggregate() lève une
+    exception, retourne le dernier Output réussi de la chaîne (qui peut être une
+    sous-tâche de synthèse si le divider en a inclus une). Aucun output réussi →
+    DispatchResult(status="unassigned").
+    """
+    sub_tasks = divider.divide(task, agents, client, tracer)
+    sub_results = run_chain(sub_tasks, agents, client, tracer, evaluator)
+    successful = [r for r in sub_results if isinstance(r, Output)]
+
+    if not successful:
+        return DispatchResult(
+            status="unassigned",
+            agent_id=None,
+            reason="no sub-tasks succeeded",
+        )
+
+    try:
+        return aggregator.aggregate(task, successful, client, tracer)
+    except Exception:
+        return successful[-1]  # fallback C : dernier output réussi

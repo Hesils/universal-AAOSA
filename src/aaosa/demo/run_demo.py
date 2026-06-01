@@ -9,9 +9,12 @@ from aaosa.elo.persistence import save_snapshot
 from aaosa.qa.adaptive import build_adaptive_spec
 from aaosa.qa.protocol import QAFailure
 from aaosa.qa.spec_evaluator import from_spec
+from aaosa.runtime.aggregator import TaskAggregator
+from aaosa.runtime.divider import TaskDivider
 from aaosa.runtime.llm_client import create_client
-from aaosa.runtime.runner import run_task
+from aaosa.runtime.runner import run_divided_task, run_task
 from aaosa.schemas.output import Output
+from aaosa.schemas.task import Task
 from aaosa.tracing.formatter import print_timeline
 from aaosa.tracing.store import (
     SessionMeta,
@@ -60,6 +63,40 @@ def run_demo() -> None:
             context=task.metadata.get("context") or None,
         ))
         print()
+
+    # --- A4 : run divisé (TaskDivider + Aggregateur émergent) ---
+    divider = TaskDivider(system_prompt=(
+        "You are a task decomposer. Break a task into the minimal set of ordered "
+        "sub-tasks needed to fully resolve it. Prefer few, well-scoped sub-tasks."
+    ))
+    aggregator = TaskAggregator(system_prompt=(
+        "You are a synthesizer. Merge the sub-task results into one coherent, "
+        "complete answer to the original task."
+    ))
+    divided_task = Task(
+        description=(
+            "Build a small REST API with a Python backend, a database layer, "
+            "and a test suite covering the endpoints."
+        ),
+        required_tags={"python": 70, "backend": 70},
+    )
+    print(f"Divided task: {divided_task.description}")
+    divided_result = run_divided_task(
+        divided_task, DEMO_AGENTS, client, divider, aggregator, tracer=tracer
+    )
+    if isinstance(divided_result, Output):
+        print("  -> Aggregated output produced (divided)")
+        d_outcome, d_winner = "divided", None
+    else:
+        print(f"  -> Unassigned ({divided_result.reason})")
+        d_outcome, d_winner = "unassigned", None
+    task_records.append(SessionTaskRecord(
+        id=divided_task.id, description=divided_task.description,
+        winner_agent_id=d_winner, outcome=d_outcome,
+        required_tags=divided_task.required_tags,
+        context=None,
+    ))
+    print()
 
     print("=== Timeline ===")
     print_timeline(tracer.events)

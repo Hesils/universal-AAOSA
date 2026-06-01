@@ -8,6 +8,8 @@ from aaosa.tracing.events import (
     QAEvaluatedEvent,
     EloUpdatedEvent,
     TagAcquiredEvent,
+    TaskDividedEvent,
+    TaskAggregatedEvent,
 )
 
 
@@ -71,6 +73,16 @@ def format_timeline(events: list[ClaimEvent]) -> str:
 
         elif isinstance(event, TagAcquiredEvent):
             line = f"[{time_str}] ACQUIRED {event.agent_id} -> {event.tag}: {event.initial_elo} (new tag)"
+            lines.append(line)
+
+        elif isinstance(event, TaskDividedEvent):
+            line = f"[{time_str}] DIVIDED -> {len(event.sub_task_ids)} sub-tasks"
+            lines.append(line)
+
+        elif isinstance(event, TaskAggregatedEvent):
+            summary = event.output_summary
+            summary_display = summary[:60] + "..." if len(summary) > 60 else summary
+            line = f"[{time_str}] AGGREGATED <- {len(event.sub_task_ids)} sub-tasks ({summary_display})"
             lines.append(line)
 
     return "\n".join(lines)

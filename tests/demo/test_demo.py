@@ -206,6 +206,16 @@ def _fake_run_judge(task, output, spec, client, reference=None):
     return JudgeResult(dimension_scores=[], overall=1.0, reason="mocked judge")
 
 
+def _fake_run_divided_task(task, *args, **kwargs):
+    """Stub the A4 divided run so demo tests stay offline."""
+    return Output(
+        task_id=task.id,
+        agent_id="aggregator",
+        content="Aggregated synthesis covering the divided task" + "x" * 40,
+        llm_metadata=LLMMetadata(model_name="gpt-4o-mini", tokens_in=10, tokens_out=5, latency_ms=100.0),
+    )
+
+
 class TestDemoV2:
     def test_demo_runs_without_error(self, tmp_path, monkeypatch):
         """La demo V2 complete ne crash pas."""
@@ -224,6 +234,7 @@ class TestDemoV2:
         monkeypatch.setattr(Agent, "claim", fake_claim)
         monkeypatch.setattr(Agent, "execute", fake_execute)
         monkeypatch.setattr("aaosa.qa.spec_evaluator.run_judge", _fake_run_judge)
+        monkeypatch.setattr("aaosa.demo.run_demo.run_divided_task", _fake_run_divided_task)
         monkeypatch.setenv("OPENAI_API_KEY", "fake")
         monkeypatch.chdir(tmp_path)
 
@@ -245,6 +256,7 @@ class TestDemoV2:
         monkeypatch.setattr(Agent, "claim", fake_claim)
         monkeypatch.setattr(Agent, "execute", fake_execute)
         monkeypatch.setattr("aaosa.qa.spec_evaluator.run_judge", _fake_run_judge)
+        monkeypatch.setattr("aaosa.demo.run_demo.run_divided_task", _fake_run_divided_task)
         monkeypatch.setenv("OPENAI_API_KEY", "fake")
         monkeypatch.chdir(tmp_path)
 
@@ -269,6 +281,7 @@ class TestDemoV2:
         monkeypatch.setattr(Agent, "claim", fake_claim)
         monkeypatch.setattr(Agent, "execute", fake_execute)
         monkeypatch.setattr("aaosa.qa.spec_evaluator.run_judge", _fake_run_judge)
+        monkeypatch.setattr("aaosa.demo.run_demo.run_divided_task", _fake_run_divided_task)
         monkeypatch.setenv("OPENAI_API_KEY", "fake")
         monkeypatch.chdir(tmp_path)
 
@@ -323,6 +336,7 @@ class TestDemoV2b:
         monkeypatch.setattr(
             demo_module, "run_task", lambda task, *a, **k: _output_for_v2b(task, a_id)
         )
+        monkeypatch.setattr(demo_module, "run_divided_task", _fake_run_divided_task)
         monkeypatch.setattr(demo_module, "save_snapshot", lambda agents, d: tmp_path / "latest.json")
         monkeypatch.setattr(demo_module, "save_agent_registry", lambda *a, **k: None)
         monkeypatch.setattr(demo_module, "save_session", lambda *a, **k: tmp_path / "sessions")
@@ -339,6 +353,7 @@ class TestDemoV2b:
         monkeypatch.setattr(
             demo_module, "run_task", lambda task, *a, **k: _qa_failure_for(task, a_id)
         )
+        monkeypatch.setattr(demo_module, "run_divided_task", _fake_run_divided_task)
         monkeypatch.setattr(demo_module, "save_snapshot", lambda agents, d: tmp_path / "latest.json")
         monkeypatch.setattr(demo_module, "save_agent_registry", lambda *a, **k: None)
         monkeypatch.setattr(demo_module, "save_session", lambda *a, **k: tmp_path / "sessions")

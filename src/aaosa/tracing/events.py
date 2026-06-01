@@ -70,6 +70,21 @@ class TagAcquiredEvent(_BaseEvent):
     initial_elo: int
 
 
+class TaskDividedEvent(_BaseEvent):
+    type: Literal["task_divided"] = "task_divided"
+    task_id: str                    # parent task ID
+    sub_task_ids: list[str]         # IDs des sous-tâches générées
+
+
+class TaskAggregatedEvent(_BaseEvent):
+    type: Literal["task_aggregated"] = "task_aggregated"
+    task_id: str                    # parent task ID
+    sub_task_ids: list[str]
+    output_summary: str
+    output_content: str
+    llm_metadata: LLMMetadata | None = None
+
+
 ClaimEvent = Annotated[
     Union[
         Phase1FilteredEvent,
@@ -80,6 +95,8 @@ ClaimEvent = Annotated[
         QAEvaluatedEvent,
         EloUpdatedEvent,
         TagAcquiredEvent,
+        TaskDividedEvent,
+        TaskAggregatedEvent,
     ],
     Field(discriminator="type"),
 ]
