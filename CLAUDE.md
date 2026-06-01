@@ -26,6 +26,20 @@ V2 découpée en 3 sous-parties :
 - **V2b** (complète) : QA complet (evaluator composable + boucle auto-amélioration)
 - **V2c** (complète) : Dashboard d'observabilité (couche data `src/aaosa/` + app Flask `dashboard/`, 4 tabs)
 
+### V3 — en cours (deep-dives → implémentation)
+
+V3 = runtime générique par config + boucle auto-améliorante (QA générée par agents) + présentation. **14 épiques** découpées (A1-A6, B1-B7, C1-C3), détail dans `roadmap.md` (AIOS), deep-dives par épique dans `docs/superpowers/epics/v3-*.md`.
+
+**Ordre d'implémentation (chemin critique)** : `A1 → B1 → A3 → A4 → B2 → B3 → A5 → C`. Aucune épique V3 n'est encore implémentée (toujours 588 tests). Cible après A+B : **656 tests** (A1+6, B1+10, A3+11, A4+16, B2+8, B3+7, A5+10).
+
+- **Nature A** (généricité) : A1 agents par config · A3 subdivision de tâches (schema+threading) · A4 TaskDivider + Aggregateur (pièce centrale « le graphe émerge ») · A5 tools par agent. A2 (2e domaine) hors chemin critique.
+- **Nature B** (auto-amélioration) : B1 evaluator émis par agent · B2 triage auto-attribution · B3 TaskSpecGenerator. **La nature B s'arrête à B3.**
+- **Nature C** (doc/présentation) : en dernier, reflète A+B réels.
+
+**Déferrés (2026-06-02, hors chemin critique)** : **B4 sidecar advisory + B5 canal bidirectionnel** — le `SystemAdvisory` chevauche largement l'ELO (déjà la boucle de feedback comportemental) ; B4 sans B5 = infra sans consommateur. Valeur non acquise → à réévaluer si le besoin émerge sur runs réels. Aussi hors chemin : B6 (spike ELO 3 signaux), B7 (live mode). Deep-dive `v3-b4-*.md` gardé sur disque ; **B5 n'a pas de fichier** (déferré pendant sa discussion de deep-dive). Cf. `decisions/log.md` 2026-06-02.
+
+**Prochain pas concret** : démarrer l'implémentation **A1** (zéro dépendance, débloque le multi-domaine) ou deep-dive d'une épique non encore creusée. A1, B1, A3, A4, A5, B2, B3, B4 sont deep-divés (fichiers `v3-*.md`) ; A2, B6, B7, C restent à creuser ; B5 déferré.
+
 ## Architecture
 
 ```
