@@ -1,9 +1,67 @@
+import logging
+from typing import Literal
+
 from openai import OpenAI
+from pydantic import BaseModel, ConfigDict, Field
 
 from aaosa.qa.criteria import CRITERIA_REGISTRY
 from aaosa.qa.spec import CriterionSpec, EvaluatorSpec, JudgeSpec
 from aaosa.schemas.elo import ELO_EXPERT_MIN
 from aaosa.schemas.task import Task
+
+logger = logging.getLogger(__name__)
+
+
+# --- Schémas LLM-facing (structured output) -------------------------------
+# OpenAI structured output interdit les dict ouverts (cf. divider.SubTaskSpec).
+# CriterionSpec.params est un dict → on ne peut PAS le passer en response_format.
+# On expose donc des paramètres explicites et on reconstruit le dict côté Python.
+class _LLMCriterion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    weight: float = 1.0
+    gate: bool = False
+    # params possibles, aplatis (un critère n'en utilise qu'un sous-ensemble) :
+    min_chars: int | None = None          # min_length
+    description: str | None = None        # llm_check
+    keywords: list[str] | None = None     # keyword_presence
+    kind: str | None = None               # format_check
+
+    def to_criterion(self) -> CriterionSpec:
+        params: dict = {}
+        if self.min_chars is not None:
+            params["min_chars"] = self.min_chars
+        if self.description is not None:
+            params["description"] = self.description
+        if self.keywords is not None:
+            params["keywords"] = self.keywords
+        if self.kind is not None:
+            params["kind"] = self.kind
+        return CriterionSpec(name=self.name, params=params, weight=self.weight, gate=self.gate)
+
+
+class _LLMJudge(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["rubric", "reference_based"] = "rubric"
+    rubric: list[str]
+    weight: float = 0.3
+
+    def to_judge(self) -> JudgeSpec:
+        return JudgeSpec(mode=self.mode, rubric=self.rubric, weight=self.weight)
+
+
+class _LLMEvaluatorSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    criteria: list[_LLMCriterion]
+    judge: _LLMJudge | None = None
+    success_threshold: float = 0.7
+
+    def to_spec(self) -> EvaluatorSpec:
+        return EvaluatorSpec(
+            criteria=[c.to_criterion() for c in self.criteria],
+            judge=self.judge.to_judge() if self.judge is not None else None,
+            success_threshold=self.success_threshold,
+        )
 
 
 def build_adaptive_spec(task: Task) -> EvaluatorSpec:
@@ -85,12 +143,15 @@ def build_llm_spec(task: Task, client: OpenAI) -> EvaluatorSpec:
                 {"role": "system", "content": "Tu produis une spec d'évaluation déclarative."},
                 {"role": "user", "content": _build_prompt(task)},
             ],
-            response_format=EvaluatorSpec,
+            response_format=_LLMEvaluatorSpec,
         )
         parsed = response.choices[0].message.parsed
         if parsed is None:
-            raise ValueError("LLM returned no parsed EvaluatorSpec")
-        spec = _filter_unknown_criteria(parsed, task)
+            raise ValueError("LLM returned no parsed _LLMEvaluatorSpec")
+        spec = _filter_unknown_criteria(parsed.to_spec(), task)
         return _ensure_non_empty_gate(spec)
-    except Exception:
+    except Exception as e:
+        # Fallback runtime-safe (un hoquet LLM ne casse pas le run) mais PLUS silencieux :
+        # c'est ce except nu + le dict ouvert de CriterionSpec qui masquaient le bug spec.
+        logger.warning("build_llm_spec fallback to deterministic spec: %s", e)
         return build_adaptive_spec(task)

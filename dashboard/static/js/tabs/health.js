@@ -89,13 +89,24 @@ export async function mountHealth(panel) {
     }
   }
 
+  // Cas health = run mono-tâche, vue statique : on résout chaque nœud vers le jalon
+  // qui porte son détail (chaque jalon n'apparaît qu'une fois dans un run simple).
+  function stepForNode(graph, node) {
+    const last = graph.steps[graph.steps.length - 1];
+    const byMilestone = mt => graph.steps.find(s => s.milestone_type === mt) || last;
+    if (node.type === "tool") return graph.steps.find(s => s.detail.tool && s.detail.tool.tool_name === node.label) || last;
+    if (node.type === "agent") return graph.steps.find(s => s.milestone_type === "agent") || byMilestone("dispatch");
+    return byMilestone(node.type);
+  }
+
   async function loadGraph(taskId) {
     const c = detail.cases.find(x => x.task_id === taskId);
     ghead.textContent = `CASE GRAPH — ${taskId}`;
     passrate.innerHTML = c && c.result ? `pass_rate <b>${pct(c.result.pass_rate)}</b> · ${c.result.pass_count}/${c.result.n_runs} runs` : "";
     panel.querySelectorAll(".hc-testset .case-row").forEach(r => r.classList.toggle("case-row--active", r.dataset.task === taskId));
     const graph = await api.healthCheckGraph(detail.id, taskId);
-    renderGraph(svg, graph, 0, (node, step) => openNodeModal(node, step, detail.agents), agentNames);
+    // chemin complet allumé (pas de scrubber sur le case graph)
+    renderGraph(svg, graph, 0, (node) => openNodeModal(node, stepForNode(graph, node), detail.agents), agentNames, { fullPath: true });
   }
 
   async function load(rid) {

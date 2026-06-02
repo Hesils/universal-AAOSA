@@ -98,7 +98,10 @@ class TaskDivider:
                 session_id=tracer.session_id,
                 task_id=task.id,
                 sub_tasks=[
-                    DividedSubTask(id=st.id, description=st.description, depends_on=list(st.depends_on))
+                    DividedSubTask(
+                        id=st.id, description=st.description, depends_on=list(st.depends_on),
+                        required_tags=dict(st.required_tags),
+                    )
                     for st in sub_tasks
                 ],
             ))

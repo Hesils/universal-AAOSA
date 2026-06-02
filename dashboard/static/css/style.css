@@ -128,9 +128,14 @@ svg.graph { display: block; width: 100%; height: 100%; max-height: 100%; overflo
 
 .todo { padding: 15px 16px; overflow-y: auto; }
 .todo h3 { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-2); margin: 0 0 11px; }
-.todo-item { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 13px; color: var(--fg-1); }
+.todo-item { display: flex; align-items: center; gap: 10px; padding: 7px 6px 7px 0; font-size: 13px; color: var(--fg-1); cursor: pointer; transition: background 140ms var(--ease); }
+.todo-item:hover { background: oklch(20% 0.009 250 / 0.55); }
 .todo-item .mk { width: 15px; height: 15px; flex-shrink: 0; border: 1px solid var(--wire); transform: rotate(45deg); }
-.todo--done { color: var(--fg-2); text-decoration: line-through; } .todo--done .mk { background: var(--fire-dim); border-color: var(--fire); }
+/* texte tronqué sur une ligne (l'input racine peut être long) ; full text via l'icône d'expand */
+.todo-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.todo-expand { flex-shrink: 0; background: none; border: 1px solid var(--wire); color: var(--fg-2); width: 20px; height: 20px; line-height: 1; font-size: 12px; cursor: pointer; padding: 0; display: grid; place-items: center; transition: color 140ms var(--ease), border-color 140ms; }
+.todo-expand:hover { color: var(--fire); border-color: var(--fire); }
+.todo--done { color: var(--fg-2); } .todo--done .todo-text { text-decoration: line-through; } .todo--done .mk { background: var(--fire-dim); border-color: var(--fire); }
 .todo--current { color: var(--fg-0); } .todo--current .mk { border-color: var(--fire); box-shadow: 0 0 6px var(--fire-glow); }
 .todo--pending { color: var(--fg-1); }
 /* sous-tâches d'un run divisé : indentées sous la racine */
@@ -141,8 +146,15 @@ svg.graph { display: block; width: 100%; height: 100%; max-height: 100%; overflo
 .scrubber { display: flex; align-items: center; gap: 14px; margin-top: 14px; position: relative; z-index: 2; flex-shrink: 0; }
 .scrub-btn { font-family: var(--mono); font-size: 12px; background: var(--bg-1); color: var(--fg-1); border: 1px solid var(--wire); width: 30px; height: 28px; cursor: pointer; transition: color 160ms var(--ease), border-color 160ms; }
 .scrub-btn:hover { color: var(--fire); border-color: var(--fire); }
-.scrub-track { flex: 1; height: 3px; background: var(--bg-2); position: relative; }
-.scrub-fill { display: block; height: 100%; width: 0; background: var(--fire); box-shadow: 0 0 8px var(--fire-glow); transition: width 200ms var(--ease); }
+/* piste : 16px de zone cliquable/draggable, fil visuel fin centré via ::before */
+.scrub-track { flex: 1; height: 16px; position: relative; cursor: pointer; touch-action: none; }
+.scrub-track::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); height: 3px; background: var(--bg-2); }
+.scrub-fill { position: absolute; top: 50%; left: 0; transform: translateY(-50%); height: 3px; width: 0; background: var(--fire); box-shadow: 0 0 8px var(--fire-glow); transition: width 150ms var(--ease); }
+.scrub-handle { position: absolute; top: 50%; left: 0; width: 11px; height: 11px; transform: translate(-50%, -50%) rotate(45deg); background: var(--fire); box-shadow: 0 0 8px var(--fire-glow); transition: left 150ms var(--ease); }
+.scrub-track:focus { outline: none; }
+.scrub-track:focus-visible .scrub-handle { box-shadow: 0 0 0 3px var(--fire-dim), 0 0 8px var(--fire-glow); }
+/* drag en cours : pas de transition, le curseur colle au pointeur */
+.scrub-track.scrubbing .scrub-fill, .scrub-track.scrubbing .scrub-handle { transition: none; }
 /* largeur fixe + ellipse : le track garde une taille stable quelle que soit la longueur du
    titre de tâche (le titre complet reste lisible dans le module TaskList). */
 .scrub-label { flex: 0 0 240px; min-width: 0; font-family: var(--mono); font-size: 12px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -163,7 +175,9 @@ svg.graph { display: block; width: 100%; height: 100%; max-height: 100%; overflo
 .node text { font-family: var(--mono); font-size: 12px; fill: var(--fg-1); letter-spacing: 0.02em; pointer-events: none; }
 .gtier { font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; fill: var(--fg-2); opacity: 0.7; }
 .node:hover .hex { stroke: var(--fg-1); }
-.node--active .hex { stroke: var(--wire-2); }
+/* actif (non-winner) : la coloration suit l'allumage — stroke ember + tint chaud léger, SANS glow
+   (le glow est réservé au winner / aux éléments live, cf. DESIGN). Avant : stroke = idle → invisible. */
+.node--active .hex { stroke: var(--fire); stroke-width: 1.5; fill: oklch(21% 0.035 45 / 0.6); }
 .node--active text { fill: var(--fg-0); }
 .node--winner .hex { stroke: var(--fire); stroke-width: 2; fill: oklch(24% 0.06 45 / 0.85); filter: drop-shadow(0 0 7px var(--fire-glow)); }
 .node--winner text { fill: var(--crest); font-weight: 600; }

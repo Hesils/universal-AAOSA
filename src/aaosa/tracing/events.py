@@ -20,6 +20,7 @@ class DividedSubTask(BaseModel):
     id: str
     description: str
     depends_on: list[str] = Field(default_factory=list)
+    required_tags: dict[str, int] = Field(default_factory=dict)
 
 
 class Phase1FilteredEvent(_BaseEvent):

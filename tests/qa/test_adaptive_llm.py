@@ -2,8 +2,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from aaosa.qa.adaptive import build_adaptive_spec, build_llm_spec
-from aaosa.qa.spec import CriterionSpec, EvaluatorSpec, JudgeSpec
+from aaosa.qa.adaptive import (
+    _LLMCriterion,
+    _LLMEvaluatorSpec,
+    _LLMJudge,
+    build_adaptive_spec,
+    build_llm_spec,
+)
+from aaosa.qa.spec import EvaluatorSpec
 from aaosa.qa.spec_evaluator import SpecEvaluator
 from aaosa.schemas.task import Task
 
@@ -41,10 +47,10 @@ class _RaisingClient:
 
 class TestBuildLLMSpec:
     def test_returns_evaluator_spec(self):
-        spec = EvaluatorSpec(
+        spec = _LLMEvaluatorSpec(
             criteria=[
-                CriterionSpec(name="non_empty", gate=True),
-                CriterionSpec(name="min_length", params={"min_chars": 100}, weight=1.0),
+                _LLMCriterion(name="non_empty", gate=True),
+                _LLMCriterion(name="min_length", min_chars=100, weight=1.0),
             ],
             success_threshold=0.8,
         )
@@ -55,20 +61,39 @@ class TestBuildLLMSpec:
         names = {c.name for c in result.criteria}
         assert {"non_empty", "min_length"} <= names
 
+    def test_response_format_is_closed_schema(self):
+        # Garde anti-régression : on ne doit JAMAIS repasser EvaluatorSpec (dict ouvert)
+        # en response_format — c'est ce qui faisait échouer le structured output.
+        client = _FakeParseClient(_LLMEvaluatorSpec(criteria=[_LLMCriterion(name="non_empty", gate=True)]))
+        build_llm_spec(make_task(), client)
+        assert client.captured_kwargs["response_format"] is _LLMEvaluatorSpec
+
+    def test_min_chars_converted_to_params(self):
+        spec = _LLMEvaluatorSpec(criteria=[_LLMCriterion(name="min_length", min_chars=120)])
+        result = build_llm_spec(make_task(), _FakeParseClient(spec))
+        ml = next(c for c in result.criteria if c.name == "min_length")
+        assert ml.params == {"min_chars": 120}
+
+    def test_judge_converted(self):
+        spec = _LLMEvaluatorSpec(
+            criteria=[_LLMCriterion(name="non_empty", gate=True)],
+            judge=_LLMJudge(mode="rubric", rubric=["correctness", "completeness"], weight=0.3),
+        )
+        result = build_llm_spec(make_task(), _FakeParseClient(spec))
+        assert result.judge is not None
+        assert result.judge.rubric == ["correctness", "completeness"]
+        assert result.judge.weight == 0.3
+
     def test_always_has_non_empty_gate(self):
         # LLM omits non_empty entirely — invariant must re-add it as a gate.
-        spec = EvaluatorSpec(
-            criteria=[CriterionSpec(name="min_length", params={"min_chars": 50})],
-        )
+        spec = _LLMEvaluatorSpec(criteria=[_LLMCriterion(name="min_length", min_chars=50)])
         client = _FakeParseClient(spec)
         result = build_llm_spec(make_task(), client)
         gates = [c for c in result.criteria if c.name == "non_empty" and c.gate]
         assert len(gates) == 1
 
     def test_injects_into_spec_evaluator(self):
-        spec = EvaluatorSpec(
-            criteria=[CriterionSpec(name="non_empty", gate=True)],
-        )
+        spec = _LLMEvaluatorSpec(criteria=[_LLMCriterion(name="non_empty", gate=True)])
         client = _FakeParseClient(spec)
         result = build_llm_spec(make_task(), client)
         # judge is None -> SpecEvaluator accepts client=None without raising
@@ -80,11 +105,11 @@ class TestBuildLLMSpec:
         assert result == build_adaptive_spec(task)
 
     def test_filters_unknown_criteria(self):
-        spec = EvaluatorSpec(
+        spec = _LLMEvaluatorSpec(
             criteria=[
-                CriterionSpec(name="non_empty", gate=True),
-                CriterionSpec(name="hallucinated_criterion", weight=2.0),
-                CriterionSpec(name="min_length", params={"min_chars": 50}),
+                _LLMCriterion(name="non_empty", gate=True),
+                _LLMCriterion(name="hallucinated_criterion", weight=2.0),
+                _LLMCriterion(name="min_length", min_chars=50),
             ],
         )
         client = _FakeParseClient(spec)
@@ -95,28 +120,26 @@ class TestBuildLLMSpec:
 
     def test_filters_all_unknown_falls_back(self):
         task = make_task()
-        spec = EvaluatorSpec(
+        spec = _LLMEvaluatorSpec(
             criteria=[
-                CriterionSpec(name="totally_made_up"),
-                CriterionSpec(name="also_fake"),
+                _LLMCriterion(name="totally_made_up"),
+                _LLMCriterion(name="also_fake"),
             ],
         )
         client = _FakeParseClient(spec)
         result = build_llm_spec(task, client)
         assert result == build_adaptive_spec(task)
 
-    def test_llm_check_preserved(self):
-        spec = EvaluatorSpec(
+    def test_llm_check_preserved_with_description(self):
+        spec = _LLMEvaluatorSpec(
             criteria=[
-                CriterionSpec(name="non_empty", gate=True),
-                CriterionSpec(
-                    name="llm_check",
-                    params={"description": "must include code examples"},
-                    weight=1.5,
-                ),
+                _LLMCriterion(name="non_empty", gate=True),
+                _LLMCriterion(name="llm_check", description="must include code examples", weight=1.5),
             ],
         )
         client = _FakeParseClient(spec)
         result = build_llm_spec(make_task(), client)
-        names = {c.name for c in result.criteria}
-        assert "llm_check" in names
+        llm = next((c for c in result.criteria if c.name == "llm_check"), None)
+        assert llm is not None
+        assert llm.params == {"description": "must include code examples"}
+        assert llm.weight == 1.5

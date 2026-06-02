@@ -127,6 +127,9 @@ class TestTaskDivider:
         assert [s.id for s in emitted] == [st.id for st in sub_tasks]
         assert [s.description for s in emitted] == ["a", "b"]
         assert emitted[1].depends_on == [sub_tasks[0].id]
+        # required_tags par sous-tâche émis dans l'event (sinon le dashboard ne les voit pas)
+        assert emitted[0].required_tags == {"python": 60}
+        assert emitted[1].required_tags == {"python": 60}
 
     def test_divide_requires_at_least_one_subtask(self):
         with pytest.raises(ValueError, match="sub_tasks cannot be empty"):
