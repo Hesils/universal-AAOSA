@@ -515,8 +515,28 @@ def _milestones_simple(run: "_SubTaskRun | None", record: SessionTaskRecord | No
     return steps
 
 
-def _tool_milestones(run, detail, acc, tid):  # remplacé en Task 4
-    return []
+def _tool_milestones(run: "_SubTaskRun", input_detail_owner: StepDetail, acc: _EdgeAccumulator, tid: str) -> list[GraphStep]:
+    winner = run.winner_id
+    if winner is None:
+        return []
+    winner_tools = [t for t in run.tools if t.agent_id == winner]
+    steps: list[GraphStep] = []
+    for group in _tool_groups(winner_tools):
+        tname = group[0].tool_name
+        tool_node = _tool_node_id(tname)
+        # detail scopé tool pour ce jalon (réutilise le StepDetail de la sous-tâche, surcharge .tool)
+        detail = input_detail_owner.model_copy()
+        detail.tool = ToolDetail(
+            agent_id=winner, tool_name=tname,
+            calls=[ToolCallInfo(tool_name=c.tool_name, arguments=c.arguments, result=c.result, latency_ms=c.latency_ms) for c in group],
+        )
+        fan = [("dispatch", winner), (winner, tool_node)]
+        label = f"TOOL · {tname}" + (f" ×{len(group)}" if len(group) > 1 else "")
+        steps.append(GraphStep(milestone_type="tool", label=label, sub_task_id=tid,
+                               active_nodes=[winner, tool_node], active_edges=acc.snapshot(fan),
+                               winner_agent_id=winner, outcome=run.outcome, detail=detail,
+                               todo=[]))   # le caller assigne le todo
+    return steps
 
 
 def _todo_simple(record, tid, milestone, run):  # remplacé en Task 6

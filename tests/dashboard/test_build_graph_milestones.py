@@ -120,3 +120,39 @@ class TestSimpleRunMilestones:
         assert ("input", "dispatch") in pairs   # backbone cumulatif toujours présent
         assert ("evaluator", "output") in pairs
         assert out.detail.output.output_content == "content"
+
+
+class TestToolMilestones:
+    def _run_with_tools(self, names):
+        tid, aid = "t1", "ag"
+        evs = [
+            Phase1FilteredEvent(session_id=SID, task_id=tid, agent_id=aid, passed=True, fit_score=0.9),
+            DispatchedEvent(session_id=SID, task_id=tid, agent_id=aid, reason="sole claimer"),
+        ]
+        evs += [ToolCalledEvent(session_id=SID, task_id=tid, agent_id=aid, tool_name=n, arguments={"i": i}, result="r", latency_ms=0.1) for i, n in enumerate(names)]
+        evs += [
+            ExecutedEvent(session_id=SID, task_id=tid, agent_id=aid, output_summary="s", output_content="c"),
+            QAEvaluatedEvent(session_id=SID, task_id=tid, agent_id=aid, success=True, score=1.0, reason="r"),
+        ]
+        return evs
+
+    def test_consecutive_same_tool_collapses(self):
+        # grep, grep, read, grep -> 3 jalons tool
+        graph = build_graph(self._run_with_tools(["grep", "grep", "read", "grep"]), _meta("t1", "x"))
+        tool_steps = [s for s in graph.steps if s.milestone_type == "tool"]
+        assert [s.detail.tool.tool_name for s in tool_steps] == ["grep", "read", "grep"]
+        assert len(tool_steps[0].detail.tool.calls) == 2   # 2 grep fusionnés
+        assert len(tool_steps[2].detail.tool.calls) == 1
+
+    def test_tool_milestone_lights_agent_and_tool(self):
+        graph = build_graph(self._run_with_tools(["grep"]), _meta("t1", "x"))
+        ts = next(s for s in graph.steps if s.milestone_type == "tool")
+        assert "ag" in ts.active_nodes and "tool:grep" in ts.active_nodes
+        pairs = {(e.from_node, e.to) for e in ts.active_edges}
+        assert ("dispatch", "ag") in pairs   # dispatch→agent reste allumé tant que k actif
+        assert ("ag", "tool:grep") in pairs
+
+    def test_tool_milestones_between_dispatch_and_agent(self):
+        graph = build_graph(self._run_with_tools(["grep"]), _meta("t1", "x"))
+        types = [s.milestone_type for s in graph.steps]
+        assert types == ["input", "dispatch", "tool", "agent", "evaluator", "output"]
