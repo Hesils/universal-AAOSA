@@ -156,3 +156,80 @@ class TestToolMilestones:
         graph = build_graph(self._run_with_tools(["grep"]), _meta("t1", "x"))
         types = [s.milestone_type for s in graph.steps]
         assert types == ["input", "dispatch", "tool", "agent", "evaluator", "output"]
+
+
+def _divided_meta(parent_id, desc):
+    return SessionMeta(
+        session_id=SID, started_at="2026-01-01T00:00:00Z", ended_at="2026-01-01T00:01:00Z",
+        tasks=[SessionTaskRecord(id=parent_id, description=desc, winner_agent_id=None, outcome="divided", required_tags={})],
+        agent_ids=["ag"],
+    )
+
+
+def _divided_events():
+    """Parent divisé en 2 sous-tâches séquentielles, chacune dispatchée à ag, l'une avec un tool."""
+    P, S1, S2 = "parent", "sub1", "sub2"
+    return [
+        TaskDividedEvent(session_id=SID, task_id=P, sub_tasks=[
+            DividedSubTask(id=S1, description="investigate", depends_on=[]),
+            DividedSubTask(id=S2, description="fix", depends_on=[S1]),
+        ]),
+        # sous-tâche 1 (avec tool)
+        Phase1FilteredEvent(session_id=SID, task_id=S1, agent_id="ag", passed=True, fit_score=0.9),
+        DispatchedEvent(session_id=SID, task_id=S1, agent_id="ag", reason="sole claimer"),
+        ToolCalledEvent(session_id=SID, task_id=S1, agent_id="ag", tool_name="grep", arguments={}, result="r", latency_ms=0.1),
+        ExecutedEvent(session_id=SID, task_id=S1, agent_id="ag", output_summary="s1", output_content="c1"),
+        QAEvaluatedEvent(session_id=SID, task_id=S1, agent_id="ag", success=True, score=1.0, reason="r"),
+        # sous-tâche 2 (sans tool)
+        Phase1FilteredEvent(session_id=SID, task_id=S2, agent_id="ag", passed=True, fit_score=0.9),
+        DispatchedEvent(session_id=SID, task_id=S2, agent_id="ag", reason="sole claimer"),
+        ExecutedEvent(session_id=SID, task_id=S2, agent_id="ag", output_summary="s2", output_content="c2"),
+        QAEvaluatedEvent(session_id=SID, task_id=S2, agent_id="ag", success=True, score=1.0, reason="r"),
+        TaskAggregatedEvent(session_id=SID, task_id=P, sub_task_ids=[S1, S2], output_summary="final", output_content="final report"),
+    ]
+
+
+class TestDividedRunMilestones:
+    def test_milestone_sequence(self):
+        graph = build_graph(_divided_events(), _divided_meta("parent", "incident"))
+        types = [s.milestone_type for s in graph.steps]
+        assert types == [
+            "input", "divider",
+            "dispatch", "tool", "agent", "evaluator",   # sub1
+            "dispatch", "agent", "evaluator",            # sub2 (pas de tool)
+            "aggregator", "output",
+        ]
+
+    def test_divider_milestone_lists_sub_tasks(self):
+        graph = build_graph(_divided_events(), _divided_meta("parent", "incident"))
+        div = next(s for s in graph.steps if s.milestone_type == "divider")
+        assert "divider" in div.active_nodes
+        assert [st.id for st in div.detail.divider.sub_tasks] == ["sub1", "sub2"]
+        pairs = {(e.from_node, e.to) for e in div.active_edges}
+        assert ("input", "divider") in pairs
+
+    def test_dispatch_backbone_divider_to_dispatch(self):
+        graph = build_graph(_divided_events(), _divided_meta("parent", "incident"))
+        first_disp = next(s for s in graph.steps if s.milestone_type == "dispatch")
+        pairs = {(e.from_node, e.to) for e in first_disp.active_edges}
+        assert ("divider", "dispatch") in pairs
+
+    def test_subtask_detail_scoped(self):
+        graph = build_graph(_divided_events(), _divided_meta("parent", "incident"))
+        agent_steps = [s for s in graph.steps if s.milestone_type == "agent"]
+        assert agent_steps[0].detail.agents["ag"].output_content == "c1"
+        assert agent_steps[1].detail.agents["ag"].output_content == "c2"
+        assert agent_steps[0].sub_task_id == "sub1"
+        assert agent_steps[1].sub_task_id == "sub2"
+
+    def test_aggregator_and_output(self):
+        graph = build_graph(_divided_events(), _divided_meta("parent", "incident"))
+        agg = next(s for s in graph.steps if s.milestone_type == "aggregator")
+        assert agg.detail.aggregator.sub_task_ids == ["sub1", "sub2"]
+        pairs = {(e.from_node, e.to) for e in agg.active_edges}
+        assert ("evaluator", "aggregator") in pairs
+        out = graph.steps[-1]
+        assert out.milestone_type == "output"
+        assert out.detail.output.output_content == "final report"
+        out_pairs = {(e.from_node, e.to) for e in out.active_edges}
+        assert ("aggregator", "output") in out_pairs

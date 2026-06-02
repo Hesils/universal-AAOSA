@@ -543,11 +543,89 @@ def _todo_simple(record, tid, milestone, run):  # remplacé en Task 6
     return []
 
 
-def _milestones_divided(divided_ev, aggregated_ev, sub_runs, parent_record, parent_id):  # remplacé en Task 5
-    return []
+def _milestones_divided(divided_ev, aggregated_ev, sub_runs, parent_record, parent_id) -> list[GraphStep]:
+    parent_input = _make_input_detail(parent_record, parent_id)
+    acc = _EdgeAccumulator()
+    steps: list[GraphStep] = []
+
+    # INPUT (parent)
+    parent_detail = StepDetail(input=parent_input)
+    steps.append(GraphStep(milestone_type="input", label="INPUT", active_nodes=["input"],
+                           active_edges=acc.snapshot([]), outcome="divided", detail=parent_detail,
+                           todo=_todo_divided(divided_ev, sub_runs, "input", None)))
+
+    # DIVIDER
+    acc.add_backbone("input", "divider")
+    div_detail = StepDetail(input=parent_input, divider=DividerDetail(
+        divided=True,
+        sub_tasks=[DividerSubTaskInfo(id=st.id, description=st.description, depends_on=list(st.depends_on)) for st in divided_ev.sub_tasks],
+    ))
+    steps.append(GraphStep(milestone_type="divider", label="DIVIDER", active_nodes=["divider"],
+                           active_edges=acc.snapshot([]), outcome="divided", detail=div_detail,
+                           todo=_todo_divided(divided_ev, sub_runs, "divider", None)))
+
+    # Sous-tâches dans l'ordre d'émission (= ordre topologique de run_chain)
+    for idx, run in enumerate(sub_runs):
+        sub_input = InputDetail(task_id=run.task_id, description=_sub_desc(divided_ev, run.task_id))
+        detail = _scope_detail(sub_input, run)
+        winner = run.winner_id
+
+        acc.add_backbone("divider", "dispatch")
+        fan = [("dispatch", winner)] if winner else []
+        nodes_active = ["dispatch"] + ([winner] if winner else [])
+        steps.append(GraphStep(milestone_type="dispatch", label=f"DISPATCH · {idx + 1}", sub_task_id=run.task_id,
+                               order_index=idx, active_nodes=nodes_active, active_edges=acc.snapshot(fan),
+                               winner_agent_id=winner, outcome=run.outcome, detail=detail,
+                               todo=_todo_divided(divided_ev, sub_runs, "dispatch", run.task_id)))
+        if winner is None:
+            continue
+
+        for ts in _tool_milestones(run, detail, acc, run.task_id):
+            ts.order_index = idx
+            ts.todo = _todo_divided(divided_ev, sub_runs, "tool", run.task_id)
+            steps.append(ts)
+
+        steps.append(GraphStep(milestone_type="agent", label=f"AGENT · {winner}", sub_task_id=run.task_id,
+                               order_index=idx, active_nodes=[winner], active_edges=acc.snapshot([("dispatch", winner)]),
+                               winner_agent_id=winner, outcome=run.outcome, detail=detail,
+                               todo=_todo_divided(divided_ev, sub_runs, "agent", run.task_id)))
+
+        if run.qa is not None:
+            fanq = [("dispatch", winner), (winner, "evaluator")]
+            nodes_q = ["evaluator"]
+            if run.outcome == "qa_fail":
+                fanq.append(("evaluator", "testset"))
+                nodes_q.append("testset")
+            steps.append(GraphStep(milestone_type="evaluator", label=f"EVALUATOR · {idx + 1}", sub_task_id=run.task_id,
+                                   order_index=idx, active_nodes=nodes_q, active_edges=acc.snapshot(fanq),
+                                   winner_agent_id=winner, outcome=run.outcome, detail=detail,
+                                   todo=_todo_divided(divided_ev, sub_runs, "evaluator", run.task_id)))
+
+    # AGGREGATOR
+    if aggregated_ev is not None:
+        acc.add_backbone("evaluator", "aggregator")
+        agg_detail = StepDetail(input=parent_input, aggregator=AggregatorDetail(
+            aggregated=True, sub_task_ids=list(aggregated_ev.sub_task_ids),
+            output_summary=aggregated_ev.output_summary, output_content=aggregated_ev.output_content,
+        ))
+        agg_detail.output = OutputDetail(produced=True, output_summary=aggregated_ev.output_summary,
+                                         output_content=aggregated_ev.output_content, llm_metadata=aggregated_ev.llm_metadata)
+        steps.append(GraphStep(milestone_type="aggregator", label="AGGREGATOR", active_nodes=["aggregator"],
+                               active_edges=acc.snapshot([]), outcome="divided", detail=agg_detail,
+                               todo=_todo_divided(divided_ev, sub_runs, "aggregator", None)))
+
+        # OUTPUT
+        acc.add_backbone("aggregator", "output")
+        steps.append(GraphStep(milestone_type="output", label="OUTPUT", active_nodes=["output"],
+                               active_edges=acc.snapshot([]), outcome="divided", detail=agg_detail,
+                               todo=_todo_divided(divided_ev, sub_runs, "output", None)))
+    return steps
 
 
-def _sub_desc(divided_ev, task_id):  # remplacé en Task 5
+def _sub_desc(divided_ev, task_id: str) -> str:
+    for st in divided_ev.sub_tasks:
+        if st.id == task_id:
+            return st.description
     return task_id
 
 

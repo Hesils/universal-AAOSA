@@ -4,18 +4,25 @@ from aaosa.tracing.events import (
     Phase1FilteredEvent,
     Phase2ClaimedEvent,
     DispatchedEvent,
+    QAEvaluatedEvent,
     TaskAggregatedEvent,
     TaskDividedEvent,
 )
+from aaosa.tracing.store import SessionMeta, SessionTaskRecord
 from dashboard.graph_model import build_graph
 
-SID = "sess-1"
-PARENT = "parent-task"
-SUB1 = "sub-1"
+SID, PARENT, SUB1 = "sess-1", "parent-task", "sub-1"
+
+
+def _meta():
+    return SessionMeta(
+        session_id=SID, started_at="2026-01-01T00:00:00Z", ended_at="2026-01-01T00:01:00Z",
+        tasks=[SessionTaskRecord(id=PARENT, description="parent", winner_agent_id=None, outcome="divided", required_tags={})],
+        agent_ids=["ag-1"],
+    )
 
 
 def _divided_events():
-    """A parent task that was divided, plus one sub-task that ran normally."""
     return [
         TaskDividedEvent(session_id=SID, task_id=PARENT,
                          sub_tasks=[DividedSubTask(id=SUB1, description="sub", depends_on=[])]),
@@ -23,28 +30,21 @@ def _divided_events():
         Phase2ClaimedEvent(session_id=SID, task_id=SUB1, agent_id="ag-1", decision="claim", justification="mine"),
         DispatchedEvent(session_id=SID, task_id=SUB1, agent_id="ag-1", reason="sole claimer"),
         ExecutedEvent(session_id=SID, task_id=SUB1, agent_id="ag-1", output_summary="o", output_content="o"),
-        TaskAggregatedEvent(
-            session_id=SID, task_id=PARENT, sub_task_ids=[SUB1],
-            output_summary="synth", output_content="synthesized",
-        ),
+        QAEvaluatedEvent(session_id=SID, task_id=SUB1, agent_id="ag-1", success=True, score=1.0, reason="r"),
+        TaskAggregatedEvent(session_id=SID, task_id=PARENT, sub_task_ids=[SUB1],
+                            output_summary="synth", output_content="synthesized"),
     ]
 
 
 class TestBuildGraphA4:
-    def test_build_graph_divided_task_has_divider_node(self):
-        graph = build_graph(_divided_events())
-        node_ids = {n.id for n in graph.nodes}
-        assert "divider" in node_ids
-        assert "aggregator" in node_ids
+    def test_divided_has_divider_and_aggregator_nodes(self):
+        ids = {n.id for n in build_graph(_divided_events(), _meta()).nodes}
+        assert "divider" in ids and "aggregator" in ids
 
-    def test_build_graph_divided_step_outcome_is_divided(self):
-        graph = build_graph(_divided_events())
-        parent_step = next(s for s in graph.steps if s.task_id == PARENT)
-        assert parent_step.outcome == "divided"
-        assert parent_step.winner_agent_id is None
-        assert parent_step.detail.output.output_content == "synthesized"
+    def test_divided_milestone_sequence(self):
+        types = [s.milestone_type for s in build_graph(_divided_events(), _meta()).steps]
+        assert types == ["input", "divider", "dispatch", "agent", "evaluator", "aggregator", "output"]
 
-    def test_build_graph_divided_active_path(self):
-        graph = build_graph(_divided_events())
-        parent_step = next(s for s in graph.steps if s.task_id == PARENT)
-        assert parent_step.active_nodes == ["input", "divider", "aggregator", "output"]
+    def test_output_carries_aggregated_content(self):
+        out = build_graph(_divided_events(), _meta()).steps[-1]
+        assert out.detail.output.output_content == "synthesized"
