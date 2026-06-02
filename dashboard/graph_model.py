@@ -539,8 +539,17 @@ def _tool_milestones(run: "_SubTaskRun", input_detail_owner: StepDetail, acc: _E
     return steps
 
 
-def _todo_simple(record, tid, milestone, run):  # remplacé en Task 6
-    return []
+def _root_state(milestone: str) -> Literal["current", "done"]:
+    return "done" if milestone == "output" else "current"
+
+
+def _todo_simple(record, tid, milestone, run) -> list[TodoItem]:
+    desc = record.description if record is not None else tid
+    if run is not None and milestone == "evaluator" and run.outcome == "qa_fail":
+        state: Literal["pending", "current", "done", "failed"] = "failed"
+    else:
+        state = _root_state(milestone)
+    return [TodoItem(id=tid, description=desc, state=state, is_root=True)]
 
 
 def _milestones_divided(divided_ev, aggregated_ev, sub_runs, parent_record, parent_id) -> list[GraphStep]:
@@ -629,8 +638,37 @@ def _sub_desc(divided_ev, task_id: str) -> str:
     return task_id
 
 
-def _todo_divided(divided_ev, sub_runs, milestone, current_task_id):  # remplacé en Task 5/6
-    return []
+def _todo_divided(divided_ev, sub_runs, milestone, current_task_id) -> list[TodoItem]:
+    # racine
+    items = [TodoItem(id=divided_ev.task_id, description="(input)", state=_root_state(milestone), is_root=True)]
+    if milestone == "input":
+        return items
+    # ordre des sous-tâches = ordre d'exécution (sub_runs), fallback ordre divider
+    order = [r.task_id for r in sub_runs] or [st.id for st in divided_ev.sub_tasks]
+    run_by_id = {r.task_id: r for r in sub_runs}
+    # index de la sous-tâche courante dans l'ordre d'exécution (None si jalon parent)
+    cur_idx = order.index(current_task_id) if current_task_id in order else None
+    desc_by_id = {st.id: st.description for st in divided_ev.sub_tasks}
+    for i, tid in enumerate(order):
+        run = run_by_id.get(tid)
+        if milestone in ("aggregator", "output"):
+            state = ("failed" if (run is not None and run.outcome == "qa_fail") else "done")
+        elif cur_idx is None:
+            state = "pending"  # jalon divider : tout pending
+        elif i < cur_idx:
+            state = ("failed" if (run is not None and run.outcome == "qa_fail") else "done")
+        elif i == cur_idx:
+            # current jusqu'à son evaluator résolu
+            if milestone == "evaluator" and run is not None and run.outcome == "qa_fail":
+                state = "failed"
+            elif milestone == "evaluator" and run is not None and run.outcome == "qa_pass":
+                state = "done"
+            else:
+                state = "current"
+        else:
+            state = "pending"
+        items.append(TodoItem(id=tid, description=desc_by_id.get(tid, tid), state=state, is_root=False))
+    return items
 
 
 def build_graph(events: list[ClaimEvent], session_meta: SessionMeta | None = None) -> GraphModel:

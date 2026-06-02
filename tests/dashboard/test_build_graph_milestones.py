@@ -233,3 +233,62 @@ class TestDividedRunMilestones:
         assert out.detail.output.output_content == "final report"
         out_pairs = {(e.from_node, e.to) for e in out.active_edges}
         assert ("aggregator", "output") in out_pairs
+
+
+class TestTodoSimple:
+    def test_root_only_and_done_at_output(self):
+        graph = build_graph(_simple_run(), _meta("t1", "do it"))
+        first = graph.steps[0].todo
+        assert len(first) == 1 and first[0].is_root and first[0].state == "current"
+        last = graph.steps[-1].todo
+        assert last[0].state == "done"
+
+    def test_root_failed_on_qa_fail(self):
+        graph = build_graph(_simple_run(success=False), _meta("t1", "do it"))
+        ev = next(s for s in graph.steps if s.milestone_type == "evaluator")
+        assert ev.todo[0].state == "failed"
+
+
+class TestTodoDivided:
+    def test_subtasks_appear_at_divider(self):
+        graph = build_graph(_divided_events(), _divided_meta("parent", "incident"))
+        inp = graph.steps[0].todo
+        assert len(inp) == 1 and inp[0].is_root
+        div = next(s for s in graph.steps if s.milestone_type == "divider").todo
+        assert {t.id for t in div if not t.is_root} == {"sub1", "sub2"}
+        assert all(t.state == "pending" for t in div if not t.is_root)
+
+    def test_subtask_current_then_done(self):
+        graph = build_graph(_divided_events(), _divided_meta("parent", "incident"))
+        # au dispatch de sub1, sub1 = current, sub2 = pending
+        disp1 = next(s for s in graph.steps if s.milestone_type == "dispatch" and s.sub_task_id == "sub1")
+        states = {t.id: t.state for t in disp1.todo if not t.is_root}
+        assert states == {"sub1": "current", "sub2": "pending"}
+        # à l'output, les deux sont done
+        out = graph.steps[-1].todo
+        done = {t.id: t.state for t in out if not t.is_root}
+        assert done == {"sub1": "done", "sub2": "done"}
+
+
+import pytest
+from pathlib import Path
+from aaosa.tracing.store import load_trace
+
+_REAL = Path("runs/sessions/2026-06-02T09-24-21-12a72561")
+
+
+@pytest.mark.skipif(not (_REAL / "trace.jsonl").exists(), reason="trace réelle gitignored absente")
+class TestRealDividedTrace:
+    def test_real_trace_milestone_shape(self):
+        from aaosa.tracing.store import SessionMeta
+        events = load_trace(_REAL / "trace.jsonl")
+        meta = SessionMeta.model_validate_json((_REAL / "meta.json").read_text(encoding="utf-8"))
+        graph = build_graph(events, meta)
+        types = [s.milestone_type for s in graph.steps]
+        assert types[0] == "input" and types[1] == "divider"
+        assert types[-1] == "output" and types[-2] == "aggregator"
+        assert types.count("evaluator") == 6     # 6 sous-tâches
+        assert "tool" in types
+        # tools RLE : moins de jalons tool que d'appels bruts (16 appels)
+        n_tool_calls = sum(1 for e in events if e.type == "tool_called")
+        assert sum(1 for t in types if t == "tool") < n_tool_calls
