@@ -130,9 +130,13 @@ svg.graph { display: block; width: 100%; height: 100%; max-height: 100%; overflo
 .todo h3 { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-2); margin: 0 0 11px; }
 .todo-item { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 13px; color: var(--fg-1); }
 .todo-item .mk { width: 15px; height: 15px; flex-shrink: 0; border: 1px solid var(--wire); transform: rotate(45deg); }
-.todo--done { color: var(--fg-2); } .todo--done .mk { background: var(--fire-dim); border-color: var(--fire); }
+.todo--done { color: var(--fg-2); text-decoration: line-through; } .todo--done .mk { background: var(--fire-dim); border-color: var(--fire); }
 .todo--current { color: var(--fg-0); } .todo--current .mk { border-color: var(--fire); box-shadow: 0 0 6px var(--fire-glow); }
 .todo--pending { color: var(--fg-1); }
+/* sous-tâches d'un run divisé : indentées sous la racine */
+.todo--sub { margin-left: 16px; }
+/* échec QA : réutilise la teinte d'échec (--fail), pas de rouge néon nouveau */
+.todo--failed { color: var(--fail); } .todo--failed .mk { border-color: var(--fail); background: var(--fail); opacity: 0.55; }
 
 .scrubber { display: flex; align-items: center; gap: 14px; margin-top: 14px; position: relative; z-index: 2; flex-shrink: 0; }
 .scrub-btn { font-family: var(--mono); font-size: 12px; background: var(--bg-1); color: var(--fg-1); border: 1px solid var(--wire); width: 30px; height: 28px; cursor: pointer; transition: color 160ms var(--ease), border-color 160ms; }
@@ -163,6 +167,9 @@ svg.graph { display: block; width: 100%; height: 100%; max-height: 100%; overflo
 .node--active text { fill: var(--fg-0); }
 .node--winner .hex { stroke: var(--fire); stroke-width: 2; fill: oklch(24% 0.06 45 / 0.85); filter: drop-shadow(0 0 7px var(--fire-glow)); }
 .node--winner text { fill: var(--crest); font-weight: 600; }
+/* tier tools : canopée idle (pointillé discret), s'allume comme les autres nœuds quand actif */
+.node--tool .hex { stroke-dasharray: 3 3; opacity: 0.7; }
+.node--tool.node--active .hex { stroke-dasharray: none; opacity: 1; }
 .edge { fill: none; stroke: var(--wire); stroke-width: 1; }
 .edge--a { stroke: var(--fire-2); stroke-width: 1.5; opacity: 0.85; }
 .edge--fail { stroke: var(--fail); stroke-dasharray: 5 5; }
