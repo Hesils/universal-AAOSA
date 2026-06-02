@@ -141,10 +141,15 @@ function renderAgent(agentId, step, runAgents) {
   return f;
 }
 
-function renderEvaluator(e) {
+function renderEvaluator(e, step) {
   const f = document.createDocumentFragment();
   if (!e.ran) { f.append(field("Evaluator", "non exécuté")); return f; }
   f.append(field("Résultat", (e.success ? "succès" : "échec") + (e.score != null ? ` · score ${e.score.toFixed(2)}` : "")));
+  // Output jugé : l'output du winner exécuté (porté par le detail partagé de la sous-tâche)
+  const winner = step && step.winner_agent_id;
+  const evaluated = (winner && step.detail.agents[winner] && step.detail.agents[winner].output_content)
+    || (step.detail.output && step.detail.output.output_content);
+  if (evaluated) f.append(longField("Output évalué", evaluated));
   const critLines = Object.entries(e.criteria_results || {}).map(([k, v]) => `${k} : ${v ? "✓" : "✗"}`);
   if (critLines.length) f.append(fieldLines("Critères / gates", critLines));
   if (e.judge) f.append(field("Judge", `${e.judge.mode} · ${e.judge.overall != null ? e.judge.overall.toFixed(2) : "—"}`));
@@ -241,7 +246,7 @@ export function openNodeModal(node, step, runAgents) {
       title = (reg ? reg.name : node.label) + (step.winner_agent_id === node.id ? " ★" : "");
       break;
     }
-    case "evaluator": body = renderEvaluator(step.detail.evaluator); break;
+    case "evaluator": body = renderEvaluator(step.detail.evaluator, step); break;
     case "input": body = renderInput(step.detail.input); break;
     case "output": body = renderOutput(step.detail.output); break;
     case "testset": body = renderTestSet(step.detail.testset); break;
