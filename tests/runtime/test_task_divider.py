@@ -56,6 +56,22 @@ class TestTaskDivider:
         assert all(st.parent_task_id == task.id for st in sub_tasks)
         assert sub_tasks[0].required_tags == {"python": 60}
 
+    def test_divide_subtask_without_tags_inherits_parent_tags(self):
+        # Le LLM peut renvoyer une sous-tâche sans required_tags (ex: synthèse) ;
+        # Task interdit required_tags vide → on hérite des tags du parent.
+        task = make_task()  # required_tags={"python": 60}
+        result = DivisionResult(
+            sub_tasks=[
+                SubTaskSpec(description="investigate", required_tags=[TagSpec(tag="backend", elo=70)]),
+                SubTaskSpec(description="synthesize", required_tags=[]),
+            ]
+        )
+        divider = TaskDivider(system_prompt="You split tasks.")
+        sub_tasks = divider.divide(task, [make_agent()], _client_returning(result))
+
+        assert sub_tasks[0].required_tags == {"backend": 70}
+        assert sub_tasks[1].required_tags == {"python": 60}  # hérité du parent
+
     def test_divide_resolves_depends_on_indices(self):
         task = make_task()
         result = DivisionResult(

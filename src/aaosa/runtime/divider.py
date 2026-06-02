@@ -51,6 +51,7 @@ class TaskDivider:
             "not covered above — but prefer the existing vocabulary when it fits.\n"
             "If you use an unknown tag, no agent may be able to claim that sub-task.\n\n"
             "Decompose the following task into ordered sub-tasks.\n"
+            "Every sub-task MUST list at least one required tag (prefer the vocabulary above).\n"
             "Express dependencies between sub-tasks as 0-based indices into your sub_tasks list.\n\n"
             f"Task: {task.description}"
         )
@@ -80,7 +81,9 @@ class TaskDivider:
         sub_tasks = [
             Task(
                 description=spec.description,
-                required_tags={ts.tag: ts.elo for ts in spec.required_tags},
+                # Garde : le LLM peut omettre les tags (ex: sous-tâche de synthèse).
+                # Task interdit required_tags vide → on hérite des tags du parent.
+                required_tags={ts.tag: ts.elo for ts in spec.required_tags} or dict(task.required_tags),
                 parent_task_id=task.id,
                 order_index=i,
             )
