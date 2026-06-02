@@ -15,8 +15,11 @@ class SpecEvaluator:
         client: OpenAI | None = None,
         reference: str | None = None,
     ):
-        if spec.judge is not None and client is None:
-            raise ValueError("spec has a judge but no client was provided")
+        needs_client = spec.judge is not None or any(
+            c.name == "llm_check" for c in spec.criteria
+        )
+        if needs_client and client is None:
+            raise ValueError("spec needs a client (judge or llm_check) but none was provided")
         self.spec = spec
         self.client = client
         self.reference = reference
@@ -28,7 +31,7 @@ class SpecEvaluator:
         for c in self.spec.criteria:
             if not c.gate:
                 continue
-            outcome = get_criterion(c.name)(task, output, c.params)
+            outcome = get_criterion(c.name)(task, output, {**c.params, "client": self.client})
             criteria_results[outcome.name] = outcome.passed
             if not outcome.passed:
                 return QAResult(
@@ -44,7 +47,7 @@ class SpecEvaluator:
             total_weight = sum(c.weight for c in scored)
             weighted = 0.0
             for c in scored:
-                outcome = get_criterion(c.name)(task, output, c.params)
+                outcome = get_criterion(c.name)(task, output, {**c.params, "client": self.client})
                 criteria_results[outcome.name] = outcome.passed
                 weighted += outcome.score * c.weight
             det_score = weighted / total_weight if total_weight > 0 else 1.0
@@ -76,6 +79,7 @@ class SpecEvaluator:
             success=final >= self.spec.success_threshold,
             score=final, reason=reason, criteria_results=criteria_results,
             judge=judge_breakdown,
+            spec_used=self.spec,
         )
 
 

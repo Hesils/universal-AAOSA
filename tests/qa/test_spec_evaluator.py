@@ -168,3 +168,52 @@ class TestQAResultJudgeBreakdown:
         output = make_output("non empty")
         result = evaluator.evaluate(task, output)
         assert result.judge is None
+
+
+from types import SimpleNamespace
+
+
+class _LLMCheckClient:
+    """Mock le micro-appel de llm_check : parse() -> parsed{score, reason}."""
+    def __init__(self, score: float, reason: str = "ok"):
+        self._parsed = SimpleNamespace(score=score, reason=reason)
+        self.beta = self
+        self.chat = self
+        self.completions = self
+
+    def parse(self, **kwargs):
+        message = SimpleNamespace(parsed=self._parsed)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+class TestLLMCheckIntegration:
+    def test_llm_check_client_injected(self):
+        # Sans le fix, llm_check lève "requires a 'client' in params".
+        spec = EvaluatorSpec(
+            criteria=[
+                CriterionSpec(name="non_empty", gate=True),
+                CriterionSpec(name="llm_check",
+                              params={"description": "must mention indexing"}, weight=1.0),
+            ],
+            success_threshold=0.5,
+        )
+        ev = SpecEvaluator(spec, client=_LLMCheckClient(score=0.9))
+        r = ev.evaluate(make_task(), make_output("use a DB index on the token column"))
+        assert r.criteria_results["llm_check"] is True
+        assert r.success is True
+
+    def test_llm_check_without_client_raises_at_construction(self):
+        spec = EvaluatorSpec(
+            criteria=[
+                CriterionSpec(name="non_empty", gate=True),
+                CriterionSpec(name="llm_check", params={"description": "x"}, weight=1.0),
+            ],
+        )
+        with pytest.raises(ValueError, match="client"):
+            SpecEvaluator(spec, client=None)
+
+    def test_spec_used_populated(self):
+        spec = EvaluatorSpec(criteria=[CriterionSpec(name="non_empty", gate=True)],
+                             success_threshold=0.5)
+        r = SpecEvaluator(spec).evaluate(make_task(), make_output("hello"))
+        assert r.spec_used == spec
