@@ -45,15 +45,19 @@ export async function mountSessions(panel) {
   let detail = null, graph = null, activeStepIndex = 0, agentNames = {};
 
   function renderTodo() {
-    const tasks = detail.meta.tasks;
-    todo.innerHTML = tasks.map((t, i) => {
-      const state = i < activeStepIndex ? "done" : (i === activeStepIndex ? "current" : "pending");
-      return `<div class="todo-item todo--${state}"><span class="mk"></span><span>${esc(t.description)}</span></div>`;
+    const step = graph.steps[activeStepIndex];
+    const items = step ? step.todo : [];
+    todo.innerHTML = items.map(t => {
+      const indent = t.is_root ? "" : " todo--sub";
+      return `<div class="todo-item todo--${t.state}${indent}"><span class="mk"></span><span>${esc(t.description)}</span></div>`;
     }).join("");
   }
 
   function renderChips() {
-    chips.innerHTML = `<span><b>${detail.meta.tasks.length}</b> tasks</span><span><b>${detail.meta.agent_ids.length}</b> agents</span>`;
+    const div = graph.steps.find(s => s.milestone_type === "divider");
+    const subCount = div ? div.detail.divider.sub_tasks.length : 0;
+    const sub = subCount ? `<span><b>${subCount}</b> sous-tâches</span>` : "";
+    chips.innerHTML = `<span><b>${detail.meta.tasks.length}</b> tasks</span>${sub}<span><b>${detail.meta.agent_ids.length}</b> agents</span>`;
   }
 
   function rerender() {
@@ -61,7 +65,7 @@ export async function mountSessions(panel) {
     const n = graph.steps.length;
     if (n) {
       const step = graph.steps[activeStepIndex];
-      scrubLabel.innerHTML = `Step <b>${activeStepIndex + 1}</b> / ${n} — ${esc(step.label)}`;
+      scrubLabel.innerHTML = `Jalon <b>${activeStepIndex + 1}</b> / ${n} — <span class="mono">${esc(step.label)}</span>`;
       scrubFill.style.width = `${((activeStepIndex + 1) / n) * 100}%`;
     } else {
       scrubLabel.textContent = "Aucun step";
