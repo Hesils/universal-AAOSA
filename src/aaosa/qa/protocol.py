@@ -3,6 +3,7 @@ from typing import Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict
 
 from aaosa.qa.judge import JudgeBreakdown
+from aaosa.qa.spec import EvaluatorSpec
 from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
 
@@ -17,6 +18,7 @@ class QAResult(BaseModel):
     reason: str
     criteria_results: dict[str, bool]
     judge: JudgeBreakdown | None = None
+    spec_used: EvaluatorSpec | None = None
 
 
 @runtime_checkable

@@ -139,6 +139,26 @@ class TestQAFailure:
             )
 
 
+def test_qaresult_spec_used_defaults_none():
+    from aaosa.qa.protocol import QAResult
+    r = QAResult(
+        task_id="t1", agent_id="a1", success=True, score=1.0,
+        reason="ok", criteria_results={"non_empty": True},
+    )
+    assert r.spec_used is None
+
+
+def test_qaresult_accepts_spec_used():
+    from aaosa.qa.protocol import QAResult
+    from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
+    spec = EvaluatorSpec(criteria=[CriterionSpec(name="non_empty", gate=True)])
+    r = QAResult(
+        task_id="t1", agent_id="a1", success=True, score=1.0,
+        reason="ok", criteria_results={"non_empty": True}, spec_used=spec,
+    )
+    assert r.spec_used == spec
+
+
 class TestQAEvaluatorProtocol:
     def test_class_with_evaluate_method_satisfies_protocol(self):
         class FakeEvaluator:
