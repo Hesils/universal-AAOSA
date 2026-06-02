@@ -1,13 +1,18 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
 const NODE_W = 120, NODE_H = 48, GAP_X = 44, BAND_GAP = 124, PAD = 52;
-const LAYERS = ["top", "center", "bottom"];
+const LAYERS = ["tools", "bottom", "center", "top"];
 
 // Hex wireframe (largeur NODE_W, hauteur NODE_H), centré sur l'origine.
 const HEX_PTS = `${NODE_W / 2},0 ${NODE_W / 4},${NODE_H / 2} ${-NODE_W / 4},${NODE_H / 2} ${-NODE_W / 2},0 ${-NODE_W / 4},${-NODE_H / 2} ${NODE_W / 4},${-NODE_H / 2}`;
 
-// Anatomie « arbre » : agents (layer bottom) = feuilles en haut, logique = tronc au milieu,
-// in/out (layer top) = racines en bas. On inverse donc l'ordre vertical des bandes.
-const TIER_LABEL = { bottom: "leaves · agents", center: "trunk · logic", top: "roots · in/out" };
+// Anatomie « arbre » : tools = canopée (le plus haut), agents = feuilles, logique = tronc,
+// in/out = racines (le plus bas). Ordre vertical visuel top→bottom.
+const TIER_LABEL = {
+  tools: "tools · capabilities",
+  bottom: "leaves · agents",
+  center: "trunk · logic",
+  top: "roots · in/out",
+};
 
 let hexSeq = 0;
 
@@ -18,17 +23,14 @@ function el(name, attrs = {}) {
 }
 
 function layout(graph) {
-  const byLayer = { top: [], center: [], bottom: [] };
+  const byLayer = { tools: [], bottom: [], center: [], top: [] };
   for (const n of graph.nodes) byLayer[n.layer].push(n);
   const maxCount = Math.max(1, ...LAYERS.map(l => byLayer[l].length));
   const width = PAD * 2 + maxCount * NODE_W + (maxCount - 1) * GAP_X;
-  const height = PAD * 2 + 3 * NODE_H + 2 * BAND_GAP;
-  // bandes inversées : bottom (agents) en haut, top (in/out) en bas.
-  const bandTop = {
-    bottom: PAD,
-    center: PAD + NODE_H + BAND_GAP,
-    top: PAD + 2 * (NODE_H + BAND_GAP),
-  };
+  const height = PAD * 2 + 4 * NODE_H + 3 * BAND_GAP;
+  // bandes empilées top→bottom : tools (canopée), bottom (agents), center (logic), top (in/out).
+  const bandTop = {};
+  LAYERS.forEach((l, i) => { bandTop[l] = PAD + i * (NODE_H + BAND_GAP); });
   const pos = {};
   for (const layer of LAYERS) {
     const row = byLayer[layer];
