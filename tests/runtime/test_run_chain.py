@@ -89,6 +89,30 @@ class TestRunChain:
                 run_chain([t1], [a], MagicMock())
         assert recorded[t1.id] == []
 
+    def test_execution_error_is_contained(self):
+        # Une sous-tâche dont l'exécution lève (ex: MAX_TOOL_ROUNDS) ne doit pas
+        # tuer la chaîne : elle est marquée execution_failed, les autres continuent.
+        a = make_agent()
+        t1 = make_task("A")                       # lèvera
+        t2 = make_task("B")                       # indépendante -> réussit
+        t3 = make_task("C", depends_on=[t1.id])   # dépend de la tâche en échec
+
+        def exploding_execute(self, task, client, tracer=None):
+            if task.description == "A":
+                raise RuntimeError("max tool rounds exceeded")
+            return Output(
+                task_id=task.id, agent_id=self.id, content="ok",
+                llm_metadata=LLMMetadata(model_name="m", tokens_in=1, tokens_out=1, latency_ms=1.0),
+            )
+
+        with patch.object(Agent, "claim", _claim_for(a)):
+            with patch.object(Agent, "execute", exploding_execute):
+                results = run_chain([t1, t2, t3], [a], MagicMock())
+
+        assert isinstance(results[0], DispatchResult) and results[0].status == "execution_failed"
+        assert isinstance(results[1], Output) and results[1].task_id == t2.id
+        assert isinstance(results[2], DispatchResult) and results[2].status == "dependency_failed"
+
     def test_dependency_failed_skips(self):
         a = make_agent()
         t1 = make_task("A")

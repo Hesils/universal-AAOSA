@@ -156,7 +156,17 @@ def run_chain(
 
         resolved = [outputs[dep] for dep in task.depends_on]
         task_to_run = task.model_copy(update={"required_outputs": resolved})
-        result = run_task(task_to_run, agents, client, tracer, evaluator)
+        try:
+            result = run_task(task_to_run, agents, client, tracer, evaluator)
+        except Exception as exc:
+            # Containment : l'échec d'exécution d'une sous-tâche (ex: MAX_TOOL_ROUNDS)
+            # ne doit pas tuer la chaîne. Les sous-tâches réussies restent agrégeables.
+            results.append(DispatchResult(
+                status="execution_failed",
+                agent_id=None,
+                reason=f"execution raised: {type(exc).__name__}: {exc}",
+            ))
+            continue
         results.append(result)
         if isinstance(result, Output):
             outputs[task.id] = result

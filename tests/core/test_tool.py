@@ -47,4 +47,4 @@ class TestToolDef:
         assert tool.fn(query="x") == "Résultat pour : x"
 
     def test_max_tool_rounds_constant(self):
-        assert MAX_TOOL_ROUNDS == 10
+        assert MAX_TOOL_ROUNDS == 20

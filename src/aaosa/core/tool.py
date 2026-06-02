@@ -8,7 +8,7 @@ formatage OpenAI.
 from dataclasses import dataclass
 from typing import Callable
 
-MAX_TOOL_ROUNDS = 10
+MAX_TOOL_ROUNDS = 20
 
 
 @dataclass

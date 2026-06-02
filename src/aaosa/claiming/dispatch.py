@@ -22,7 +22,7 @@ class DispatchResult(BaseModel):
         fit_scores: Fit scores for each agent (agent_id -> score).
     """
 
-    status: Literal["assigned", "unassigned", "dependency_failed"]
+    status: Literal["assigned", "unassigned", "dependency_failed", "execution_failed"]
     agent_id: str | None
     reason: str
     all_claims: list[Claim] = Field(default_factory=list)
