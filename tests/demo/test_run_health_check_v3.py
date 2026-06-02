@@ -13,3 +13,21 @@ def test_build_seed_test_set_all_unattributed_with_wrong_output():
 
 def test_run_demo_health_check_v3_is_callable():
     assert callable(run_demo_health_check_v3)
+
+
+def test_seed_designed_for_full_triage_taxonomy():
+    ts = build_seed_test_set()  # chemin offline (client=None)
+    assert len(ts.cases) == 3
+
+    descriptions = [c.task.description for c in ts.cases]
+    # tâche aux contraintes contradictoires -> visera "task_spec" au triage
+    assert any("single line of code" in d for d in descriptions)
+    # tâche factuelle concise -> visera "evaluator" au triage
+    status_case = next(
+        c for c in ts.cases if "status code" in c.task.description.lower()
+    )
+
+    # le cas evaluator porte un gate min_length inadapté + un bon output
+    gate_names = {cr.name for cr in status_case.evaluator_spec.criteria if cr.gate}
+    assert "min_length" in gate_names
+    assert status_case.wrong_output.content == "204 No Content."
