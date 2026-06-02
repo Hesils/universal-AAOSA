@@ -315,146 +315,242 @@ def _order_task_ids(events: list[ClaimEvent], session_meta: SessionMeta | None) 
     return sorted(first_ts, key=lambda tid: first_ts[tid])
 
 
-def _active_path(outcome: Outcome, winner_id: str | None) -> tuple[list[str], list[GraphEdge]]:
-    if outcome == "divided":
-        nodes = ["input", "divider", "aggregator", "output"]
-        edges = [
-            GraphEdge(from_node="input", to="divider"),
-            GraphEdge(from_node="divider", to="aggregator"),
-            GraphEdge(from_node="aggregator", to="output"),
-        ]
-        return nodes, edges
-    nodes = ["input", "dispatch"]
-    edges = [GraphEdge(from_node="input", to="dispatch")]
-    if outcome == "unassigned" or winner_id is None:
-        return nodes, edges
-    nodes.append(winner_id)
-    edges.append(GraphEdge(from_node="dispatch", to=winner_id))
-    if outcome == "no_qa":
-        nodes.append("output")
-        edges.append(GraphEdge(from_node=winner_id, to="output"))
-        return nodes, edges
-    nodes.append("evaluator")
-    edges.append(GraphEdge(from_node=winner_id, to="evaluator"))
-    if outcome == "qa_pass":
-        nodes.append("output")
-        edges.append(GraphEdge(from_node="evaluator", to="output"))
-    else:  # qa_fail
-        nodes.append("testset")
-        edges.append(GraphEdge(from_node="evaluator", to="testset"))
-    return nodes, edges
+def _make_input_detail(meta_record: SessionTaskRecord | None, task_id: str) -> InputDetail:
+    if meta_record is not None:
+        return InputDetail(
+            task_id=task_id, description=meta_record.description,
+            required_tags=dict(meta_record.required_tags), context=meta_record.context,
+        )
+    return InputDetail(task_id=task_id, description=task_id)
 
 
-def _build_step(task_id: str, run: list[ClaimEvent], meta_record: SessionTaskRecord | None) -> GraphStep:
-    phase1 = [e for e in run if isinstance(e, Phase1FilteredEvent)]
-    phase2 = {e.agent_id: e for e in run if isinstance(e, Phase2ClaimedEvent)}
-    dispatched = next((e for e in run if isinstance(e, DispatchedEvent)), None)
-    unassigned_ev = next((e for e in run if isinstance(e, UnassignedEvent)), None)
-    executed = next((e for e in run if isinstance(e, ExecutedEvent)), None)
-    qa_ev = next((e for e in run if isinstance(e, QAEvaluatedEvent)), None)
-    elo_ev = next((e for e in run if isinstance(e, EloUpdatedEvent)), None)
-    tag_evs = [e for e in run if isinstance(e, TagAcquiredEvent)]
-    divided_ev = next((e for e in run if isinstance(e, TaskDividedEvent)), None)
-    aggregated_ev = next((e for e in run if isinstance(e, TaskAggregatedEvent)), None)
-
-    winner_id = dispatched.agent_id if dispatched is not None else None
-
-    if divided_ev is not None:
-        outcome: Outcome = "divided"
-        winner_id = None
-    elif unassigned_ev is not None or dispatched is None:
-        outcome = "unassigned"
-    elif qa_ev is None:
-        outcome = "no_qa"
-    elif qa_ev.success:
-        outcome = "qa_pass"
-    else:
-        outcome = "qa_fail"
-
-    dispatch_detail = DispatchDetail(
-        candidates=[CandidateInfo(agent_id=e.agent_id, passed=e.passed, fit_score=e.fit_score) for e in phase1],
-        claims=[ClaimInfo(agent_id=e.agent_id, decision=e.decision, justification=e.justification) for e in phase2.values()],
-        winner_agent_id=winner_id,
-        dispatch_reason=dispatched.reason if dispatched is not None else None,
-        unassigned_reason=unassigned_ev.reason if unassigned_ev is not None else None,
+def _agent_detail(aid, phase1_by_agent, phase2_by_agent, winner_id, executed, elo_ev, tag_evs, tool_calls):
+    p1 = phase1_by_agent.get(aid)
+    claim = phase2_by_agent.get(aid)
+    is_winner = aid == winner_id
+    return AgentDetail(
+        agent_id=aid,
+        role="winner" if is_winner else "candidate",
+        passed=p1.passed if p1 is not None else False,
+        fit_score=p1.fit_score if p1 is not None else 0.0,
+        claim_decision=claim.decision if claim is not None else None,
+        justification=claim.justification if claim is not None else None,
+        output_summary=executed.output_summary if (is_winner and executed is not None) else None,
+        output_content=executed.output_content if (is_winner and executed is not None) else None,
+        llm_metadata=executed.llm_metadata if (is_winner and executed is not None) else None,
+        elo_deltas=dict(elo_ev.deltas) if (is_winner and elo_ev is not None) else {},
+        tags_acquired=[TagAcquiredInfo(tag=t.tag, initial_elo=t.initial_elo) for t in tag_evs] if is_winner else [],
+        tool_calls=[ToolCallInfo(tool_name=t.tool_name, arguments=t.arguments, result=t.result, latency_ms=t.latency_ms) for t in tool_calls] if is_winner else [],
     )
 
-    agents: dict[str, AgentDetail] = {}
-    for e in phase1:
-        aid = e.agent_id
-        claim = phase2.get(aid)
-        is_winner = aid == winner_id
-        agents[aid] = AgentDetail(
-            agent_id=aid,
-            role="winner" if is_winner else "candidate",
-            passed=e.passed,
-            fit_score=e.fit_score,
-            claim_decision=claim.decision if claim is not None else None,
-            justification=claim.justification if claim is not None else None,
-            output_summary=executed.output_summary if (is_winner and executed is not None) else None,
-            output_content=executed.output_content if (is_winner and executed is not None) else None,
-            llm_metadata=executed.llm_metadata if (is_winner and executed is not None) else None,
-            elo_deltas=dict(elo_ev.deltas) if (is_winner and elo_ev is not None) else {},
-            tags_acquired=[TagAcquiredInfo(tag=t.tag, initial_elo=t.initial_elo) for t in tag_evs] if is_winner else [],
-        )
 
-    if qa_ev is not None:
-        evaluator_detail = EvaluatorDetail(
-            ran=True, success=qa_ev.success, score=qa_ev.score, reason=qa_ev.reason,
-            criteria_results=dict(qa_ev.criteria_results), judge=qa_ev.judge,
-        )
-    else:
-        evaluator_detail = EvaluatorDetail(
-            ran=False, success=None, score=None, reason=None,
-            criteria_results={}, judge=None,
-        )
+def _tool_groups(tool_evs: list[ToolCalledEvent]) -> list[list[ToolCalledEvent]]:
+    """Run-length encoding par tool_name : appels consécutifs du même tool fusionnés."""
+    groups: list[list[ToolCalledEvent]] = []
+    for t in tool_evs:
+        if groups and groups[-1][-1].tool_name == t.tool_name:
+            groups[-1].append(t)
+        else:
+            groups.append([t])
+    return groups
 
-    if aggregated_ev is not None:
-        output_detail = OutputDetail(
-            produced=True, output_summary=aggregated_ev.output_summary,
-            output_content=aggregated_ev.output_content, llm_metadata=aggregated_ev.llm_metadata,
-        )
-    elif executed is not None:
-        output_detail = OutputDetail(
-            produced=True, output_summary=executed.output_summary,
-            output_content=executed.output_content, llm_metadata=executed.llm_metadata,
-        )
-    else:
-        output_detail = OutputDetail(produced=False, output_summary=None, output_content=None, llm_metadata=None)
 
-    testset_detail = TestSetDetail(forked=(outcome == "qa_fail"), from_task_id=task_id)
+class _SubTaskRun:
+    """Events d'une sous-tâche (ou de l'unique tâche d'un run simple), dans l'ordre."""
+    def __init__(self, task_id: str, events: list[ClaimEvent]):
+        self.task_id = task_id
+        self.phase1 = [e for e in events if isinstance(e, Phase1FilteredEvent)]
+        self.phase2 = {e.agent_id: e for e in events if isinstance(e, Phase2ClaimedEvent)}
+        self.phase1_by_agent = {e.agent_id: e for e in self.phase1}
+        self.dispatched = next((e for e in events if isinstance(e, DispatchedEvent)), None)
+        self.unassigned = next((e for e in events if isinstance(e, UnassignedEvent)), None)
+        self.executed = next((e for e in events if isinstance(e, ExecutedEvent)), None)
+        self.qa = next((e for e in events if isinstance(e, QAEvaluatedEvent)), None)
+        self.elo = next((e for e in events if isinstance(e, EloUpdatedEvent)), None)
+        self.tags = [e for e in events if isinstance(e, TagAcquiredEvent)]
+        self.tools = [e for e in events if isinstance(e, ToolCalledEvent)]
 
-    description = meta_record.description if meta_record is not None else task_id
-    required_tags = dict(meta_record.required_tags) if meta_record is not None else {}
-    context = meta_record.context if meta_record is not None else None
-    input_detail = InputDetail(task_id=task_id, description=description, required_tags=required_tags, context=context)
+    @property
+    def winner_id(self) -> str | None:
+        return self.dispatched.agent_id if self.dispatched is not None else None
 
-    active_nodes, active_edges = _active_path(outcome, winner_id)
+    @property
+    def outcome(self) -> Outcome:
+        if self.unassigned is not None or self.dispatched is None:
+            return "unassigned"
+        if self.qa is None:
+            return "no_qa"
+        return "qa_pass" if self.qa.success else "qa_fail"
 
-    return GraphStep(
-        task_id=task_id,
-        label=description,
-        active_nodes=active_nodes,
-        active_edges=active_edges,
-        winner_agent_id=winner_id,
-        outcome=outcome,
-        detail=StepDetail(
-            input=input_detail,
-            dispatch=dispatch_detail,
-            agents=agents,
-            evaluator=evaluator_detail,
-            output=output_detail,
-            testset=testset_detail,
-        ),
+
+def _split_sub_runs(events: list[ClaimEvent]) -> list[_SubTaskRun]:
+    """Découpe les events (hors task_divided/task_aggregated) en runs de sous-tâche.
+
+    Un nouveau run démarre à un Phase1FilteredEvent qui suit un event non-Phase1.
+    Gère le run simple (1 run) et le run divisé (N sous-tâches contiguës).
+    """
+    runs: list[list[ClaimEvent]] = []
+    current: list[ClaimEvent] = []
+    for e in events:
+        if isinstance(e, (TaskDividedEvent, TaskAggregatedEvent)):
+            continue
+        if isinstance(e, Phase1FilteredEvent) and current and not isinstance(current[-1], Phase1FilteredEvent):
+            runs.append(current)
+            current = []
+        current.append(e)
+    if current:
+        runs.append(current)
+    return [_SubTaskRun(r[0].task_id, r) for r in runs if r]
+
+
+class _EdgeAccumulator:
+    def __init__(self):
+        self.backbone: list[GraphEdge] = []
+        self._seen: set[tuple[str, str]] = set()
+
+    def add_backbone(self, frm: str, to: str) -> None:
+        if (frm, to) not in self._seen:
+            self._seen.add((frm, to))
+            self.backbone.append(GraphEdge(from_node=frm, to=to))
+
+    def snapshot(self, fanout: list[tuple[str, str]]) -> list[GraphEdge]:
+        return list(self.backbone) + [GraphEdge(from_node=f, to=t) for f, t in fanout]
+
+
+def _evaluator_detail(run: "_SubTaskRun") -> EvaluatorDetail:
+    if run is None or run.qa is None:
+        return EvaluatorDetail(ran=False, success=None, score=None, reason=None)
+    return EvaluatorDetail(
+        ran=True, success=run.qa.success, score=run.qa.score, reason=run.qa.reason,
+        criteria_results=dict(run.qa.criteria_results), judge=run.qa.judge, spec=run.qa.spec,
     )
+
+
+def _dispatch_detail(run: "_SubTaskRun") -> DispatchDetail:
+    return DispatchDetail(
+        candidates=[CandidateInfo(agent_id=e.agent_id, passed=e.passed, fit_score=e.fit_score) for e in run.phase1],
+        claims=[ClaimInfo(agent_id=e.agent_id, decision=e.decision, justification=e.justification) for e in run.phase2.values()],
+        winner_agent_id=run.winner_id,
+        dispatch_reason=run.dispatched.reason if run.dispatched is not None else None,
+        unassigned_reason=run.unassigned.reason if run.unassigned is not None else None,
+    )
+
+
+def _scope_detail(input_detail: InputDetail, run: "_SubTaskRun | None") -> StepDetail:
+    """StepDetail scopé sur une sous-tâche (réutilisé par chaque jalon de cette sous-tâche)."""
+    detail = StepDetail(input=input_detail)
+    if run is None:
+        return detail
+    detail.dispatch = _dispatch_detail(run)
+    detail.evaluator = _evaluator_detail(run)
+    detail.testset = TestSetDetail(forked=(run.outcome == "qa_fail"), from_task_id=run.task_id)
+    winner = run.winner_id
+    winner_tools = [t for t in run.tools if t.agent_id == winner] if winner else []
+    for aid in run.phase1_by_agent:
+        detail.agents[aid] = _agent_detail(
+            aid, run.phase1_by_agent, run.phase2, winner, run.executed, run.elo, run.tags, winner_tools
+        )
+    if run.executed is not None:
+        detail.output = OutputDetail(
+            produced=True, output_summary=run.executed.output_summary,
+            output_content=run.executed.output_content, llm_metadata=run.executed.llm_metadata,
+        )
+    return detail
+
+
+def _milestones_simple(run: "_SubTaskRun | None", record: SessionTaskRecord | None, tid: str) -> list[GraphStep]:
+    input_detail = _make_input_detail(record, tid)
+    detail = _scope_detail(input_detail, run)
+    acc = _EdgeAccumulator()
+    steps: list[GraphStep] = []
+
+    # INPUT
+    steps.append(GraphStep(milestone_type="input", label="INPUT", active_nodes=["input"],
+                           active_edges=acc.snapshot([]), outcome="no_qa", detail=detail,
+                           todo=_todo_simple(record, tid, "input", run)))
+    if run is None:
+        return steps
+
+    winner = run.winner_id
+    # DISPATCH
+    acc.add_backbone("input", "dispatch")
+    fan = [("dispatch", winner)] if winner else []
+    nodes_active = ["dispatch"] + ([winner] if winner else [])
+    steps.append(GraphStep(milestone_type="dispatch", label="DISPATCH", sub_task_id=tid,
+                           active_nodes=nodes_active, active_edges=acc.snapshot(fan),
+                           winner_agent_id=winner, outcome=run.outcome, detail=detail,
+                           todo=_todo_simple(record, tid, "dispatch", run)))
+    if winner is None:
+        return steps  # unassigned : la séquence s'arrête au dispatch
+
+    # TOOL milestones (Task 4 les ajoute) ; le caller assigne le todo
+    for ts in _tool_milestones(run, detail, acc, tid):
+        ts.todo = _todo_simple(record, tid, "tool", run)
+        steps.append(ts)
+
+    # AGENT (executed)
+    steps.append(GraphStep(milestone_type="agent", label=f"AGENT · {winner}", sub_task_id=tid,
+                           active_nodes=[winner], active_edges=acc.snapshot([("dispatch", winner)]),
+                           winner_agent_id=winner, outcome=run.outcome, detail=detail,
+                           todo=_todo_simple(record, tid, "agent", run)))
+
+    # EVALUATOR
+    if run.qa is not None:
+        fanq = [("dispatch", winner), (winner, "evaluator")]
+        nodes_q = ["evaluator"]
+        if run.outcome == "qa_fail":
+            fanq.append(("evaluator", "testset"))
+            nodes_q.append("testset")
+        steps.append(GraphStep(milestone_type="evaluator", label="EVALUATOR", sub_task_id=tid,
+                               active_nodes=nodes_q, active_edges=acc.snapshot(fanq),
+                               winner_agent_id=winner, outcome=run.outcome, detail=detail,
+                               todo=_todo_simple(record, tid, "evaluator", run)))
+
+    # OUTPUT
+    if run.outcome != "qa_fail":
+        acc.add_backbone("evaluator", "output")
+        steps.append(GraphStep(milestone_type="output", label="OUTPUT", active_nodes=["output"],
+                               active_edges=acc.snapshot([]), winner_agent_id=winner, outcome=run.outcome,
+                               detail=detail, todo=_todo_simple(record, tid, "output", run)))
+    return steps
+
+
+def _tool_milestones(run, detail, acc, tid):  # remplacé en Task 4
+    return []
+
+
+def _todo_simple(record, tid, milestone, run):  # remplacé en Task 6
+    return []
+
+
+def _milestones_divided(divided_ev, aggregated_ev, sub_runs, parent_record, parent_id):  # remplacé en Task 5
+    return []
+
+
+def _sub_desc(divided_ev, task_id):  # remplacé en Task 5
+    return task_id
+
+
+def _todo_divided(divided_ev, sub_runs, milestone, current_task_id):  # remplacé en Task 5/6
+    return []
 
 
 def build_graph(events: list[ClaimEvent], session_meta: SessionMeta | None = None) -> GraphModel:
     nodes = _build_nodes(events)
     edges = _build_edges(nodes, events)
-    by_task = _events_by_task(events)
-    steps = [
-        _build_step(tid, _segment_runs(by_task[tid]), _meta_record(session_meta, tid))
-        for tid in _order_task_ids(events, session_meta)
-    ]
+
+    divided_ev = next((e for e in events if isinstance(e, TaskDividedEvent)), None)
+    aggregated_ev = next((e for e in events if isinstance(e, TaskAggregatedEvent)), None)
+    sub_runs = _split_sub_runs(events)
+
+    if divided_ev is not None:
+        parent_id = divided_ev.task_id
+        parent_record = _meta_record(session_meta, parent_id)
+        steps = _milestones_divided(divided_ev, aggregated_ev, sub_runs, parent_record, parent_id)
+    else:
+        run = sub_runs[0] if sub_runs else None
+        tid = run.task_id if run is not None else (session_meta.tasks[0].id if session_meta and session_meta.tasks else "task")
+        record = _meta_record(session_meta, tid)
+        steps = _milestones_simple(run, record, tid)
+
     return GraphModel(nodes=nodes, edges=edges, steps=steps)
