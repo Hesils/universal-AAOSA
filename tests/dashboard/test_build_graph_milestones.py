@@ -8,6 +8,7 @@ from aaosa.tracing.events import (
     TaskAggregatedEvent,
     TaskDividedEvent,
     ToolCalledEvent,
+    UnassignedEvent,
 )
 from aaosa.tracing.store import SessionMeta, SessionTaskRecord
 from dashboard.graph_model import _build_nodes, _build_edges, _tool_node_id, build_graph
@@ -292,3 +293,38 @@ class TestRealDividedTrace:
         # tools RLE : moins de jalons tool que d'appels bruts (16 appels)
         n_tool_calls = sum(1 for e in events if e.type == "tool_called")
         assert sum(1 for t in types if t == "tool") < n_tool_calls
+
+
+class TestFailAndUnassignedStates:
+    def test_subtask_qa_fail_lights_testset_and_marks_todo(self):
+        P, S1 = "p", "s1"
+        events = [
+            TaskDividedEvent(session_id=SID, task_id=P, sub_tasks=[DividedSubTask(id=S1, description="x", depends_on=[])]),
+            Phase1FilteredEvent(session_id=SID, task_id=S1, agent_id="ag", passed=True, fit_score=0.9),
+            DispatchedEvent(session_id=SID, task_id=S1, agent_id="ag", reason="sole claimer"),
+            ExecutedEvent(session_id=SID, task_id=S1, agent_id="ag", output_summary="s", output_content="c"),
+            QAEvaluatedEvent(session_id=SID, task_id=S1, agent_id="ag", success=False, score=0.0, reason="bad"),
+            TaskAggregatedEvent(session_id=SID, task_id=P, sub_task_ids=[S1], output_summary="f", output_content="f"),
+        ]
+        graph = build_graph(events, _divided_meta("p", "x"))
+        ev = next(s for s in graph.steps if s.milestone_type == "evaluator")
+        assert ev.outcome == "qa_fail"
+        assert "testset" in ev.active_nodes
+        assert {(e.from_node, e.to) for e in ev.active_edges} >= {("evaluator", "testset")}
+        sub_item = next(t for t in ev.todo if not t.is_root)
+        assert sub_item.state == "failed"
+
+    def test_subtask_unassigned_stops_at_dispatch(self):
+        P, S1 = "p", "s1"
+        events = [
+            TaskDividedEvent(session_id=SID, task_id=P, sub_tasks=[DividedSubTask(id=S1, description="x", depends_on=[])]),
+            Phase1FilteredEvent(session_id=SID, task_id=S1, agent_id="ag", passed=False, fit_score=0.0),
+            UnassignedEvent(session_id=SID, task_id=S1, reason="no agent"),
+            TaskAggregatedEvent(session_id=SID, task_id=P, sub_task_ids=[], output_summary="f", output_content="f"),
+        ]
+        graph = build_graph(events, _divided_meta("p", "x"))
+        sub_types = [s.milestone_type for s in graph.steps if s.sub_task_id == S1]
+        assert sub_types == ["dispatch"]   # pas d'agent/evaluator
+        disp = next(s for s in graph.steps if s.milestone_type == "dispatch")
+        assert disp.winner_agent_id is None
+        assert disp.detail.dispatch.unassigned_reason == "no agent"
