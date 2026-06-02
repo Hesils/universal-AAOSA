@@ -11,8 +11,8 @@ from openai import OpenAI
 from aaosa.demo.agents import DEMO_AGENTS
 from aaosa.demo.tasks import TASK_SECURITY_AUDIT
 from aaosa.qa.adaptive import build_adaptive_spec, build_llm_spec
-from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
 from aaosa.qa.health_check import run_health_check, save_health_check
+from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
 from aaosa.qa.task_spec_generator import fix_task_spec_cases
 from aaosa.qa.test_set import TestCase, TestSet, active_cases
 from aaosa.qa.triage import triage_unattributed
@@ -24,9 +24,15 @@ from aaosa.tracing.tracer import Tracer
 
 
 # Tâches volontairement dégénérées — matériel de seed uniquement, jamais dans DEMO_TASKS.
-TASK_VAGUE = Task(
-    description="Improve the codebase and make it better",
-    required_tags={"python": 50},
+# Contraintes mutuellement exclusives -> infaisable tel quel : le triage doit imputer
+# la tâche (task_spec), pas l'agent. Combiné avec un output de bonne foi (cf. seed).
+TASK_CONTRADICTORY = Task(
+    description=(
+        "Rewrite the entire authentication module in a single line of code while adding "
+        "full OAuth2, multi-factor authentication, and audit logging — without changing "
+        "any existing function signatures"
+    ),
+    required_tags={"backend": 70, "python": 70},
 )
 
 TASK_STATUS_CODE = Task(
@@ -61,7 +67,8 @@ def build_seed_test_set(client: OpenAI | None = None) -> TestSet:
     vers trois attributions distinctes. Voir le design 2026-06-03.
 
     - agent     : tâche bien formée + output nul
-    - task_spec : tâche réellement vague (corrigée par B3 ensuite)
+    - task_spec : tâche aux contraintes contradictoires + output de bonne foi qui
+                  pointe l'infaisabilité (corrigée par B3 ensuite)
     - evaluator : bon output + tâche claire mais gate min_length inadapté
     """
     return TestSet(cases=[
@@ -72,12 +79,19 @@ def build_seed_test_set(client: OpenAI | None = None) -> TestSet:
             origin="runtime_failure", role="fix_target", attribution="unattributed",
             wrong_output=_wrong_output(TASK_SECURITY_AUDIT, "Looks fine to me."),
         ),
-        # tâche réellement vague -> triage attendu "task_spec" -> corrigée par B3
+        # contraintes contradictoires + effort de bonne foi -> triage attendu "task_spec" -> B3
         TestCase(
-            task=TASK_VAGUE,
-            evaluator_spec=_spec_for(TASK_VAGUE, client),
+            task=TASK_CONTRADICTORY,
+            evaluator_spec=_spec_for(TASK_CONTRADICTORY, client),
             origin="runtime_failure", role="fix_target", attribution="unattributed",
-            wrong_output=_wrong_output(TASK_VAGUE, "I made some improvements."),
+            wrong_output=_wrong_output(
+                TASK_CONTRADICTORY,
+                "These constraints are mutually exclusive: OAuth2, MFA, and audit logging "
+                "cannot coexist in a single line of code, and adding MFA necessarily changes "
+                "the authenticate() signature, which the task forbids. I cannot satisfy all "
+                "of them at once. Please relax either the single-line constraint or the "
+                "no-signature-change constraint so I can implement a correct solution.",
+            ),
         ),
         # bon output + tâche claire mais gate min_length inadapté -> triage attendu "evaluator"
         TestCase(

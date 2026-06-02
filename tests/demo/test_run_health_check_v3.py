@@ -20,8 +20,8 @@ def test_seed_designed_for_full_triage_taxonomy():
     assert len(ts.cases) == 3
 
     descriptions = [c.task.description for c in ts.cases]
-    # tâche réellement vague -> visera "task_spec" au triage
-    assert "Improve the codebase and make it better" in descriptions
+    # tâche aux contraintes contradictoires -> visera "task_spec" au triage
+    assert any("single line of code" in d for d in descriptions)
     # tâche factuelle concise -> visera "evaluator" au triage
     status_case = next(
         c for c in ts.cases if "status code" in c.task.description.lower()
