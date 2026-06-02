@@ -9,8 +9,9 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from aaosa.demo.agents import DEMO_AGENTS
-from aaosa.demo.tasks import TASK_OPTIMIZE_SQL, TASK_REFACTOR_REST_API, TASK_SECURITY_AUDIT
+from aaosa.demo.tasks import TASK_SECURITY_AUDIT
 from aaosa.qa.adaptive import build_adaptive_spec, build_llm_spec
+from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
 from aaosa.qa.health_check import run_health_check, save_health_check
 from aaosa.qa.task_spec_generator import fix_task_spec_cases
 from aaosa.qa.test_set import TestCase, TestSet, active_cases
@@ -20,6 +21,25 @@ from aaosa.schemas.output import LLMMetadata, Output
 from aaosa.schemas.task import Task
 from aaosa.tracing.store import new_session_id
 from aaosa.tracing.tracer import Tracer
+
+
+# Tâches volontairement dégénérées — matériel de seed uniquement, jamais dans DEMO_TASKS.
+TASK_VAGUE = Task(
+    description="Improve the codebase and make it better",
+    required_tags={"python": 50},
+)
+
+TASK_STATUS_CODE = Task(
+    description="State the correct HTTP status code for a successful DELETE with no body",
+    required_tags={"backend": 30},
+)
+
+# Spec inadaptée pour le cas evaluator : gate min_length absurde sur une réponse concise.
+# Construite sans LLM -> le chemin offline du seed reste constructible.
+_MISMATCHED_SPEC = EvaluatorSpec(criteria=[
+    CriterionSpec(name="non_empty", gate=True),
+    CriterionSpec(name="min_length", params={"min_chars": 2000}, gate=True),
+])
 
 
 def _wrong_output(task: Task, content: str) -> Output:
@@ -37,27 +57,34 @@ def _spec_for(task: Task, client: OpenAI | None):
 
 
 def build_seed_test_set(client: OpenAI | None = None) -> TestSet:
-    """Cas runtime_failure non attribués, avec wrong_output canned (matière au triage)."""
+    """Trois cas runtime_failure non attribués, conçus pour orienter le triage (B2)
+    vers trois attributions distinctes. Voir le design 2026-06-03.
+
+    - agent     : tâche bien formée + output nul
+    - task_spec : tâche réellement vague (corrigée par B3 ensuite)
+    - evaluator : bon output + tâche claire mais gate min_length inadapté
+    """
     return TestSet(cases=[
-        # output vraiment faible -> triage attendu "agent"
+        # tâche bien formée + output nul -> triage attendu "agent"
         TestCase(
             task=TASK_SECURITY_AUDIT,
             evaluator_spec=_spec_for(TASK_SECURITY_AUDIT, client),
             origin="runtime_failure", role="fix_target", attribution="unattributed",
             wrong_output=_wrong_output(TASK_SECURITY_AUDIT, "Looks fine to me."),
         ),
-        # tâche ambiguë -> triage attendu "task_spec" -> corrigée par B3
+        # tâche réellement vague -> triage attendu "task_spec" -> corrigée par B3
         TestCase(
-            task=TASK_REFACTOR_REST_API,
-            evaluator_spec=_spec_for(TASK_REFACTOR_REST_API, client),
+            task=TASK_VAGUE,
+            evaluator_spec=_spec_for(TASK_VAGUE, client),
             origin="runtime_failure", role="fix_target", attribution="unattributed",
-            wrong_output=_wrong_output(TASK_REFACTOR_REST_API, "I refactored some things."),
+            wrong_output=_wrong_output(TASK_VAGUE, "I made some improvements."),
         ),
+        # bon output + tâche claire mais gate min_length inadapté -> triage attendu "evaluator"
         TestCase(
-            task=TASK_OPTIMIZE_SQL,
-            evaluator_spec=_spec_for(TASK_OPTIMIZE_SQL, client),
+            task=TASK_STATUS_CODE,
+            evaluator_spec=_MISMATCHED_SPEC,
             origin="runtime_failure", role="fix_target", attribution="unattributed",
-            wrong_output=_wrong_output(TASK_OPTIMIZE_SQL, "Added an index."),
+            wrong_output=_wrong_output(TASK_STATUS_CODE, "204 No Content."),
         ),
     ])
 
