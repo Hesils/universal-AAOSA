@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from aaosa.qa.judge import JudgeBreakdown
+from aaosa.qa.spec import EvaluatorSpec
 from aaosa.schemas.output import LLMMetadata
 from aaosa.tracing.events import (
     ClaimEvent,
@@ -19,8 +20,9 @@ from aaosa.tracing.events import (
 )
 from aaosa.tracing.store import SessionMeta, SessionTaskRecord
 
-NodeLayer = Literal["top", "center", "bottom"]
-NodeType = Literal["input", "dispatch", "evaluator", "output", "testset", "agent", "divider", "aggregator"]
+NodeLayer = Literal["tools", "bottom", "center", "top"]
+NodeType = Literal["input", "dispatch", "evaluator", "output", "testset", "agent", "divider", "aggregator", "tool"]
+MilestoneType = Literal["input", "divider", "dispatch", "agent", "tool", "evaluator", "aggregator", "output"]
 Outcome = Literal["qa_pass", "qa_fail", "unassigned", "no_qa", "divided"]
 
 
@@ -54,11 +56,11 @@ class ClaimInfo(BaseModel):
 
 class DispatchDetail(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    candidates: list[CandidateInfo]
-    claims: list[ClaimInfo]
-    winner_agent_id: str | None
-    dispatch_reason: str | None
-    unassigned_reason: str | None
+    candidates: list[CandidateInfo] = Field(default_factory=list)
+    claims: list[ClaimInfo] = Field(default_factory=list)
+    winner_agent_id: str | None = None
+    dispatch_reason: str | None = None
+    unassigned_reason: str | None = None
 
 
 class TagAcquiredInfo(BaseModel):
@@ -78,8 +80,9 @@ class AgentDetail(BaseModel):
     output_summary: str | None
     output_content: str | None
     llm_metadata: LLMMetadata | None
-    elo_deltas: dict[str, int]
-    tags_acquired: list[TagAcquiredInfo]
+    elo_deltas: dict[str, int] = Field(default_factory=dict)
+    tags_acquired: list[TagAcquiredInfo] = Field(default_factory=list)
+    tool_calls: list["ToolCallInfo"] = Field(default_factory=list)
 
 
 class EvaluatorDetail(BaseModel):
@@ -88,24 +91,25 @@ class EvaluatorDetail(BaseModel):
     success: bool | None
     score: float | None
     reason: str | None
-    criteria_results: dict[str, bool]
-    judge: JudgeBreakdown | None
+    criteria_results: dict[str, bool] = Field(default_factory=dict)
+    judge: JudgeBreakdown | None = None
+    spec: EvaluatorSpec | None = None
 
 
 class InputDetail(BaseModel):
     model_config = ConfigDict(extra="forbid")
     task_id: str
     description: str
-    required_tags: dict[str, int]
+    required_tags: dict[str, int] = Field(default_factory=dict)
     context: str | None = None
 
 
 class OutputDetail(BaseModel):
     model_config = ConfigDict(extra="forbid")
     produced: bool
-    output_summary: str | None
-    output_content: str | None
-    llm_metadata: LLMMetadata | None
+    output_summary: str | None = None
+    output_content: str | None = None
+    llm_metadata: LLMMetadata | None = None
 
 
 class TestSetDetail(BaseModel):
@@ -115,25 +119,81 @@ class TestSetDetail(BaseModel):
     from_task_id: str
 
 
+class DividerSubTaskInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    description: str
+    depends_on: list[str] = Field(default_factory=list)
+
+
+class DividerDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    divided: bool
+    sub_tasks: list[DividerSubTaskInfo] = Field(default_factory=list)
+
+
+class AggregatorDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    aggregated: bool
+    sub_task_ids: list[str] = Field(default_factory=list)
+    output_summary: str | None = None
+    output_content: str | None = None
+
+
+class ToolCallInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tool_name: str
+    arguments: dict = Field(default_factory=dict)
+    result: str
+    latency_ms: float
+
+
+class ToolDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    agent_id: str | None
+    tool_name: str
+    calls: list[ToolCallInfo] = Field(default_factory=list)
+
+
 class StepDetail(BaseModel):
     model_config = ConfigDict(extra="forbid")
     input: InputDetail
-    dispatch: DispatchDetail
-    agents: dict[str, AgentDetail]
-    evaluator: EvaluatorDetail
-    output: OutputDetail
-    testset: TestSetDetail
+    dispatch: DispatchDetail = Field(default_factory=lambda: DispatchDetail())
+    agents: dict[str, AgentDetail] = Field(default_factory=dict)
+    evaluator: EvaluatorDetail = Field(
+        default_factory=lambda: EvaluatorDetail(ran=False, success=None, score=None, reason=None)
+    )
+    output: OutputDetail = Field(default_factory=lambda: OutputDetail(produced=False))
+    testset: TestSetDetail = Field(default_factory=lambda: TestSetDetail(forked=False, from_task_id=""))
+    divider: DividerDetail = Field(default_factory=lambda: DividerDetail(divided=False))
+    aggregator: AggregatorDetail = Field(default_factory=lambda: AggregatorDetail(aggregated=False))
+    tool: ToolDetail | None = None
+
+    @classmethod
+    def empty(cls, task_id: str, description: str) -> "StepDetail":
+        return cls(input=InputDetail(task_id=task_id, description=description))
+
+
+class TodoItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    description: str
+    state: Literal["pending", "current", "done", "failed"]
+    is_root: bool
 
 
 class GraphStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    task_id: str
+    milestone_type: MilestoneType
     label: str
-    active_nodes: list[str]
-    active_edges: list[GraphEdge]
-    winner_agent_id: str | None
-    outcome: Outcome
+    sub_task_id: str | None = None
+    order_index: int | None = None
+    active_nodes: list[str] = Field(default_factory=list)
+    active_edges: list[GraphEdge] = Field(default_factory=list)
+    winner_agent_id: str | None = None
+    outcome: Outcome = "no_qa"
     detail: StepDetail
+    todo: list[TodoItem] = Field(default_factory=list)
 
 
 class GraphModel(BaseModel):
