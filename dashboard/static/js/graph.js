@@ -16,6 +16,11 @@ const TIER_LABEL = {
 
 let hexSeq = 0;
 
+// Ordre de lecture dans une bande = ordre de la pipeline (et non l'ordre de création).
+// Trunk : divider → dispatch → evaluator → aggregator. Roots : input → output → testset.
+// Agents/tools (rank absent) gardent leur ordre d'apparition (tri stable).
+const PIPELINE_RANK = { input: 0, divider: 1, dispatch: 2, evaluator: 3, aggregator: 4, output: 5, testset: 6 };
+
 function el(name, attrs = {}) {
   const e = document.createElementNS(SVG_NS, name);
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
@@ -25,6 +30,7 @@ function el(name, attrs = {}) {
 function layout(graph) {
   const byLayer = { tools: [], bottom: [], center: [], top: [] };
   for (const n of graph.nodes) byLayer[n.layer].push(n);
+  for (const l of LAYERS) byLayer[l].sort((a, b) => (PIPELINE_RANK[a.type] ?? 99) - (PIPELINE_RANK[b.type] ?? 99));
   const maxCount = Math.max(1, ...LAYERS.map(l => byLayer[l].length));
   const width = PAD * 2 + maxCount * NODE_W + (maxCount - 1) * GAP_X;
   const height = PAD * 2 + 4 * NODE_H + 3 * BAND_GAP;
@@ -46,7 +52,21 @@ function layout(graph) {
 
 function edgeKey(e) { return `${e.from}->${e.to}`; }
 
-export function renderGraph(svg, graph, activeStepIndex, onNodeClick, agentNames = {}) {
+// Union cumulée de tous les jalons : le chemin complet réellement parcouru par le run.
+// Utilisé par le graphe health (run mono-tâche, vue statique sans scrubber).
+function unionActive(graph) {
+  const nodes = new Set(), edges = new Set();
+  let winnerId = null, failBranch = false;
+  for (const s of graph.steps) {
+    s.active_nodes.forEach(n => nodes.add(n));
+    s.active_edges.forEach(e => edges.add(edgeKey(e)));
+    if (s.winner_agent_id) winnerId = s.winner_agent_id;
+    if (s.outcome === "qa_fail") failBranch = true;
+  }
+  return { activeNodes: nodes, activeEdges: edges, winnerId, failBranch };
+}
+
+export function renderGraph(svg, graph, activeStepIndex, onNodeClick, agentNames = {}, opts = {}) {
   while (svg.firstChild) svg.removeChild(svg.firstChild);
   svg.setAttribute("class", "graph");
 
@@ -68,10 +88,17 @@ export function renderGraph(svg, graph, activeStepIndex, onNodeClick, agentNames
   }
 
   const step = graph.steps[activeStepIndex] || null;
-  const activeNodes = new Set(step ? step.active_nodes : []);
-  const activeEdges = new Set(step ? step.active_edges.map(edgeKey) : []);
-  const winnerId = step ? step.winner_agent_id : null;
-  const failBranch = step && step.outcome === "qa_fail";
+  let activeNodes, activeEdges, winnerId, failBranch;
+  if (opts.fullPath) {
+    const u = unionActive(graph);
+    activeNodes = u.activeNodes; activeEdges = u.activeEdges;
+    winnerId = u.winnerId; failBranch = u.failBranch;
+  } else {
+    activeNodes = new Set(step ? step.active_nodes : []);
+    activeEdges = new Set(step ? step.active_edges.map(edgeKey) : []);
+    winnerId = step ? step.winner_agent_id : null;
+    failBranch = step && step.outcome === "qa_fail";
+  }
 
   // arêtes : idle (wire) ; actives (ember) ; branche fail pointillée.
   const edgeLayer = el("g");

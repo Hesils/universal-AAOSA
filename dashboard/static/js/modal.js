@@ -2,6 +2,43 @@ const root = () => document.getElementById("modal-root");
 
 function closeModal() { root().innerHTML = ""; }
 
+// Coquille de modal partagée : head (titre + ×) + body rempli par `bodyNode`.
+function mountModal(title, bodyNode) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.addEventListener("click", (ev) => { if (ev.target === overlay) closeModal(); });
+
+  const card = document.createElement("div");
+  card.className = "modal-card";
+  const head = document.createElement("div");
+  head.className = "modal-head";
+  const titleSpan = document.createElement("span");
+  titleSpan.className = "modal-title";
+  titleSpan.textContent = title;
+  const closeBtn = document.createElement("span");
+  closeBtn.className = "modal-close";
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", closeModal);
+  head.append(titleSpan, closeBtn);
+  const content = document.createElement("div");
+  content.className = "modal-body";
+  content.appendChild(bodyNode);
+
+  card.append(head, content);
+  overlay.appendChild(card);
+  root().innerHTML = "";
+  root().appendChild(overlay);
+}
+
+// Modal texte simple (input de tâche complet, etc.) — full text, scrollable.
+export function openTextModal(title, text) {
+  const box = document.createElement("div");
+  box.className = "field-value";
+  box.style.whiteSpace = "pre-wrap";
+  box.textContent = text || "—";
+  mountModal(title, box);
+}
+
 // champ texte long : tronqué + toggle "voir tout" inline
 function longField(label, value, max = 220) {
   const wrap = document.createElement("div");
@@ -156,16 +193,27 @@ function renderDivider(d) {
   d.sub_tasks.forEach((st, i) => {
     const deps = st.depends_on.length ? ` (dépend de ${st.depends_on.length})` : "";
     f.append(longField(`Sous-tâche ${i + 1}${deps}`, st.description));
+    const tags = Object.entries(st.required_tags || {}).map(([t, lvl]) => `${t} ≥ ${lvl}`).join(" · ");
+    if (tags) f.append(field(`Tags requis — sous-tâche ${i + 1}`, tags));
   });
   return f;
 }
 
 function renderAggregator(a) {
   const f = document.createDocumentFragment();
-  if (!a.aggregated) { f.append(field("Aggregator", "non exécuté")); return f; }
-  f.append(field("Sous-tâches agrégées", String(a.sub_task_ids.length)));
-  if (a.output_summary) f.append(longField("Résumé", a.output_summary));
-  if (a.output_content) f.append(longField("Output synthétisé", a.output_content));
+  // 3 états : agrégé (synthèse) · collecte en cours (K/N) · en attente
+  if (a.aggregated) {
+    f.append(field("Sous-tâches agrégées", String(a.sub_task_ids.length)));
+    if (a.output_summary) f.append(longField("Résumé", a.output_summary));
+    if (a.output_content) f.append(longField("Output synthétisé", a.output_content));
+    return f;
+  }
+  if (a.collected > 0) {
+    f.append(field("Collecte en cours", `${a.collected} / ${a.total} sous-tâches validées`));
+    f.append(field("Statut", "en attente d'agrégation (synthèse en fin de run)"));
+    return f;
+  }
+  f.append(field("Aggregator", "en attente — aucune sous-tâche encore validée"));
   return f;
 }
 
@@ -203,28 +251,5 @@ export function openNodeModal(node, step, runAgents) {
     default: return;
   }
 
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  overlay.addEventListener("click", (ev) => { if (ev.target === overlay) closeModal(); });
-
-  const card = document.createElement("div");
-  card.className = "modal-card";
-  const head = document.createElement("div");
-  head.className = "modal-head";
-  const titleSpan = document.createElement("span");
-  titleSpan.className = "modal-title";
-  titleSpan.textContent = title;
-  const closeBtn = document.createElement("span");
-  closeBtn.className = "modal-close";
-  closeBtn.textContent = "×";
-  closeBtn.addEventListener("click", closeModal);
-  head.append(titleSpan, closeBtn);
-  const content = document.createElement("div");
-  content.className = "modal-body";
-  content.appendChild(body);
-
-  card.append(head, content);
-  overlay.appendChild(card);
-  root().innerHTML = "";
-  root().appendChild(overlay);
+  mountModal(title, body);
 }

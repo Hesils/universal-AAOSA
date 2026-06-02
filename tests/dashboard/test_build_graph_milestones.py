@@ -24,7 +24,15 @@ class TestNodes:
     def test_base_nodes_present(self):
         nodes = _build_nodes([])
         ids = {n.id for n in nodes}
-        assert {"input", "dispatch", "evaluator", "output", "testset"} <= ids
+        assert {"input", "dispatch", "evaluator", "output"} <= ids
+        # testset (fork de régression) n'apparaît qu'en cas d'échec QA, pas dans le run de base
+        assert "testset" not in ids
+
+    def test_testset_node_only_on_qa_fail(self):
+        ids_pass = {n.id for n in _build_nodes([QAEvaluatedEvent(session_id=SID, task_id="t", agent_id="ag", success=True, score=1.0, reason="r")])}
+        assert "testset" not in ids_pass
+        ids_fail = {n.id for n in _build_nodes([QAEvaluatedEvent(session_id=SID, task_id="t", agent_id="ag", success=False, score=0.0, reason="r")])}
+        assert "testset" in ids_fail
 
     def test_tool_nodes_from_distinct_tool_names(self):
         events = [_tool("t1", "ag", "grep"), _tool("t1", "ag", "grep"), _tool("t1", "ag", "read")]
@@ -54,9 +62,14 @@ class TestEdges:
         nodes = _build_nodes(divided)
         edges = _build_edges(nodes, divided)
         pairs = {(e.from_node, e.to) for e in edges}
+        # pipeline réelle : input→divider→dispatch ... →evaluator→aggregator→output
         assert ("input", "divider") in pairs
-        assert ("divider", "aggregator") in pairs
+        assert ("divider", "dispatch") in pairs
+        assert ("evaluator", "aggregator") in pairs
         assert ("aggregator", "output") in pairs
+        # arêtes hors-pipeline qui parasitaient le graphe (corrigées)
+        assert ("input", "dispatch") not in pairs
+        assert ("divider", "aggregator") not in pairs
 
 
 def _meta(task_id, desc, tags=None):
@@ -172,8 +185,8 @@ def _divided_events():
     P, S1, S2 = "parent", "sub1", "sub2"
     return [
         TaskDividedEvent(session_id=SID, task_id=P, sub_tasks=[
-            DividedSubTask(id=S1, description="investigate", depends_on=[]),
-            DividedSubTask(id=S2, description="fix", depends_on=[S1]),
+            DividedSubTask(id=S1, description="investigate", depends_on=[], required_tags={"backend": 70}),
+            DividedSubTask(id=S2, description="fix", depends_on=[S1], required_tags={"python": 60}),
         ]),
         # sous-tâche 1 (avec tool)
         Phase1FilteredEvent(session_id=SID, task_id=S1, agent_id="ag", passed=True, fit_score=0.9),
@@ -229,11 +242,35 @@ class TestDividedRunMilestones:
         assert agg.detail.aggregator.sub_task_ids == ["sub1", "sub2"]
         pairs = {(e.from_node, e.to) for e in agg.active_edges}
         assert ("evaluator", "aggregator") in pairs
+
+    def test_evaluator_pass_lights_aggregator_progressively(self):
+        # Récit progressif : chaque evaluator qa_pass allume l'aggregator + arête transitoire,
+        # et le compteur collected s'incrémente (1, puis 2).
+        graph = build_graph(_divided_events(), _divided_meta("parent", "incident"))
+        ev_steps = [s for s in graph.steps if s.milestone_type == "evaluator"]
+        assert len(ev_steps) == 2
+        for k, ev in enumerate(ev_steps, start=1):
+            assert "aggregator" in ev.active_nodes
+            assert ("evaluator", "aggregator") in {(e.from_node, e.to) for e in ev.active_edges}
+            assert ev.detail.aggregator.aggregated is False
+            assert ev.detail.aggregator.collected == k
+            assert ev.detail.aggregator.total == 2
+
+    def test_subtask_required_tags_propagated(self):
+        graph = build_graph(_divided_events(), _divided_meta("parent", "incident"))
+        div = next(s for s in graph.steps if s.milestone_type == "divider")
+        tags_by_id = {st.id: st.required_tags for st in div.detail.divider.sub_tasks}
+        assert tags_by_id == {"sub1": {"backend": 70}, "sub2": {"python": 60}}
+        # le modal Input d'une sous-tâche montre SES tags (pas ceux du parent)
+        disp1 = next(s for s in graph.steps if s.milestone_type == "dispatch" and s.sub_task_id == "sub1")
+        assert disp1.detail.input.required_tags == {"backend": 70}
         out = graph.steps[-1]
         assert out.milestone_type == "output"
         assert out.detail.output.output_content == "final report"
         out_pairs = {(e.from_node, e.to) for e in out.active_edges}
         assert ("aggregator", "output") in out_pairs
+        # état terminal : l'aggregator reste allumé (l'arête ember ne part pas d'un nœud éteint)
+        assert "aggregator" in out.active_nodes and "output" in out.active_nodes
 
 
 class TestTodoSimple:
