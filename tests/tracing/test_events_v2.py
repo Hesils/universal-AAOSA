@@ -241,3 +241,25 @@ class TestQAEvaluatedEventEnrichment:
         e2 = QAEvaluatedEvent.model_validate_json(e.model_dump_json())
         assert e2.criteria_results == {"gate": False}
         assert e2.judge.mode == "reference_based"
+
+
+def test_qa_evaluated_event_carries_spec():
+    from aaosa.tracing.events import QAEvaluatedEvent
+    from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
+    spec = EvaluatorSpec(criteria=[CriterionSpec(name="non_empty", gate=True)])
+    ev = QAEvaluatedEvent(
+        session_id="s", task_id="t", agent_id="a",
+        success=True, score=1.0, reason="ok",
+        criteria_results={"non_empty": True}, spec=spec,
+    )
+    roundtrip = QAEvaluatedEvent.model_validate_json(ev.model_dump_json())
+    assert roundtrip.spec == spec
+
+
+def test_qa_evaluated_event_spec_defaults_none():
+    from aaosa.tracing.events import QAEvaluatedEvent
+    ev = QAEvaluatedEvent(
+        session_id="s", task_id="t", agent_id="a",
+        success=True, score=1.0, reason="ok", criteria_results={},
+    )
+    assert ev.spec is None

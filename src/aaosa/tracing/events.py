@@ -4,6 +4,7 @@ from typing import Annotated, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 from aaosa.qa.judge import JudgeBreakdown
+from aaosa.qa.spec import EvaluatorSpec
 from aaosa.schemas.output import LLMMetadata
 
 
@@ -55,6 +56,7 @@ class QAEvaluatedEvent(_BaseEvent):
     reason: str
     criteria_results: dict[str, bool] = Field(default_factory=dict)
     judge: JudgeBreakdown | None = None
+    spec: EvaluatorSpec | None = None
 
 
 class EloUpdatedEvent(_BaseEvent):
