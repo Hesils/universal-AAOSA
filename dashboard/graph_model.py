@@ -204,24 +204,6 @@ class GraphModel(BaseModel):
     steps: list[GraphStep]
 
 
-def _segment_runs(task_events: list[ClaimEvent]) -> list[ClaimEvent]:
-    """Keeps only the last run for a given task_id.
-
-    A new run starts when a Phase1FilteredEvent appears after a non-Phase1FilteredEvent.
-    No-op in session (1 run), keeps last of N runs in health check.
-    """
-    runs: list[list[ClaimEvent]] = []
-    current: list[ClaimEvent] = []
-    for e in task_events:
-        if isinstance(e, Phase1FilteredEvent) and current and not isinstance(current[-1], Phase1FilteredEvent):
-            runs.append(current)
-            current = []
-        current.append(e)
-    if current:
-        runs.append(current)
-    return runs[-1] if runs else []
-
-
 def _agent_ids(events: list[ClaimEvent]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
@@ -288,13 +270,6 @@ def _build_edges(nodes: list[GraphNode], events: list[ClaimEvent]) -> list[Graph
     return edges
 
 
-def _events_by_task(events: list[ClaimEvent]) -> dict[str, list[ClaimEvent]]:
-    out: dict[str, list[ClaimEvent]] = {}
-    for e in events:
-        out.setdefault(e.task_id, []).append(e)
-    return out
-
-
 def _meta_record(session_meta: SessionMeta | None, task_id: str) -> SessionTaskRecord | None:
     if session_meta is None:
         return None
@@ -302,17 +277,6 @@ def _meta_record(session_meta: SessionMeta | None, task_id: str) -> SessionTaskR
         if rec.id == task_id:
             return rec
     return None
-
-
-def _order_task_ids(events: list[ClaimEvent], session_meta: SessionMeta | None) -> list[str]:
-    present = {e.task_id for e in events}
-    if session_meta is not None:
-        return [rec.id for rec in session_meta.tasks if rec.id in present]
-    first_ts: dict[str, object] = {}
-    for e in events:
-        if e.task_id not in first_ts:
-            first_ts[e.task_id] = e.timestamp
-    return sorted(first_ts, key=lambda tid: first_ts[tid])
 
 
 def _make_input_detail(meta_record: SessionTaskRecord | None, task_id: str) -> InputDetail:
@@ -324,7 +288,16 @@ def _make_input_detail(meta_record: SessionTaskRecord | None, task_id: str) -> I
     return InputDetail(task_id=task_id, description=task_id)
 
 
-def _agent_detail(aid, phase1_by_agent, phase2_by_agent, winner_id, executed, elo_ev, tag_evs, tool_calls):
+def _agent_detail(
+    aid: str,
+    phase1_by_agent: dict[str, Phase1FilteredEvent],
+    phase2_by_agent: dict[str, Phase2ClaimedEvent],
+    winner_id: str | None,
+    executed: ExecutedEvent | None,
+    elo_ev: EloUpdatedEvent | None,
+    tag_evs: list[TagAcquiredEvent],
+    tool_calls: list[ToolCalledEvent],
+) -> AgentDetail:
     p1 = phase1_by_agent.get(aid)
     claim = phase2_by_agent.get(aid)
     is_winner = aid == winner_id
@@ -524,7 +497,10 @@ def _tool_milestones(run: "_SubTaskRun", input_detail_owner: StepDetail, acc: _E
     for group in _tool_groups(winner_tools):
         tname = group[0].tool_name
         tool_node = _tool_node_id(tname)
-        # detail scopé tool pour ce jalon (réutilise le StepDetail de la sous-tâche, surcharge .tool)
+        # detail scopé tool pour ce jalon (réutilise le StepDetail de la sous-tâche, surcharge .tool).
+        # Copie superficielle volontaire : `.tool` est le seul champ qui diverge par jalon.
+        # NE PAS muter detail.agents / detail.dispatch / detail.evaluator après ce point
+        # (objets partagés entre jalons frères → mutation corromprait les voisins).
         detail = input_detail_owner.model_copy()
         detail.tool = ToolDetail(
             agent_id=winner, tool_name=tname,
