@@ -21,7 +21,9 @@ Les skills `/prime` et `/save` viennent du master `.claude/` — disponibles san
 
 **V2c complète — 588 tests total** (commits `39d46ce` → `aa356d5`, 2026-06-01). 6 épiques (01-05) + refonte graphique (06). Dashboard d'observabilité opérationnel : couche data persistée (`runs/`) + app Flask `dashboard/` (`create_app`, cache on-demand, 4 collectors, API REST) + `build_graph` pur + frontend vanilla JS/SVG (4 tabs). Contrat data validé end-to-end sur app live. **Refonte graphique « wireframe instrument » portée + validée navigateur** (`DESIGN.md`/`PRODUCT.md`, plan `v2c-06`) ; follow-ups XSS + `infra.agent_count` résorbés ; `design-lab/` supprimé. **V2c bouclée → V3.**
 
-**V3 — chemin critique A+B complet — 669 tests total** (commits `68cf426` → `4bd52d9`, 2026-06-02). A1, B1, A3, A4, B2, B3, A5 implémentés en TDD. Nature A (généricité) et nature B (auto-amélioration) terminées. Reste **C** (doc/présentation, non démarrée).
+**V3 — chemin critique A+B complet — 669 tests total** (commits `68cf426` → `4bd52d9`, 2026-06-02). A1, B1, A3, A4, B2, B3, A5 implémentés en TDD. Nature A (généricité) et nature B (auto-amélioration) terminées.
+
+**V3 — observabilité end-to-end vague 1 — 690 tests total** (commits `5f55420` → `6c5c2bf`, 2026-06-02). Pipeline + events câblés pour démontrer le chemin critique end-to-end avec LLM réel : dette B1 résorbée, `AdaptiveSpecEvaluator` (spec LLM paresseuse par tâche), events enrichis (`QAResult.spec_used`, `QAEvaluatedEvent.spec`, `TaskDividedEvent.sub_tasks`), runner propage le tracer à `execute`, toolbox stubbée + 2 scripts démo (`run_demo_v3`, `run_health_check_v3`). **Validé LLM réel** : run divisé → 6 sous-tâches, 16 tool calls, 6 QA avec spec, 1 agrégation, persisté. Reste **C** (doc/présentation, non démarrée).
 
 V2 découpée en 3 sous-parties :
 - **V2a** (complète) : ELO mechanics + dual QA protocol
@@ -38,7 +40,9 @@ V3 = runtime générique par config + boucle auto-améliorante (QA générée pa
 - **Nature B** (auto-amélioration) — **terminée** : B1 evaluator émis par LLM (`llm_check`, `build_llm_spec`) ✓ · B2 triage auto-attribution (`qa/triage.py`) ✓ · B3 TaskSpecGenerator (`qa/task_spec_generator.py`) ✓. Boucle complète : échec → triage → correction tâche → re-triage → health check (orchestration côté caller).
 - **Nature C** (doc/présentation) : en dernier, reflète A+B réels. **Non démarrée, pas encore deep-divée.**
 
-**Dette ouverte (B1)** : `SpecEvaluator.evaluate` n'injecte pas le client dans les params des critères → une spec contenant `llm_check` lève en runtime réel. À câbler dans une épique d'intégration ultérieure (cf. daily 2026-06-02).
+**Dette B1 — RÉSORBÉE** (vague 1, `ad959f3`) : `SpecEvaluator.__init__` exige désormais un client si un `judge` **ou** un `llm_check` est présent, et `evaluate` injecte `self.client` dans les params des critères (`{**c.params, "client": self.client}`) aux deux sites d'appel. `QAResult.spec_used` est renseigné. Une spec contenant `llm_check` tourne en runtime réel. `AdaptiveSpecEvaluator(client)` génère la spec via `build_llm_spec` dans `evaluate` (zéro changement de signature runner).
+
+**Caveat ouvert (vague 1)** : au run réel du health check, le triage (B2) a classé les 3 cas seedés en `agent` (aucun `task_spec`) → la branche B3 a tourné sans rien corriger. Le seed `run_health_check_v3` a besoin d'une tâche réellement ambiguë pour exercer B3 end-to-end (B3 lui-même couvert par ses tests unitaires). Tuning de seed à faire (ou à laisser pour le brainstorm frontend vague 2).
 
 **Déferrés (2026-06-02, hors chemin critique)** : **B4 sidecar advisory + B5 canal bidirectionnel** — le `SystemAdvisory` chevauche largement l'ELO (déjà la boucle de feedback comportemental) ; B4 sans B5 = infra sans consommateur. Valeur non acquise → à réévaluer si le besoin émerge sur runs réels. Aussi hors chemin : B6 (spike ELO 3 signaux), B7 (live mode). Deep-dive `v3-b4-*.md` gardé sur disque ; **B5 n'a pas de fichier**. Cf. `decisions/log.md` 2026-06-02.
 
@@ -49,15 +53,15 @@ V3 = runtime générique par config + boucle auto-améliorante (QA générée pa
 ```
 src/aaosa/
 ├── schemas/        task.py (+4 champs V3-A3) · claim.py · output.py (+tool_calls_count V3-A5) · elo.py
-├── core/           agent.py (claim + execute avec boucle tool-use V3-A5) · tool.py  # tool.py = V3-A5
-├── claiming/       scoring.py · phase1.py · phase2.py · prompts.py · dispatch.py (+dependency_failed V3-A3)
+├── core/           agent.py (claim + execute avec boucle tool-use V3-A5) · tool.py (MAX_TOOL_ROUNDS=20)  # tool.py = V3-A5
+├── claiming/       scoring.py · phase1.py · phase2.py · prompts.py · dispatch.py (+dependency_failed A3, +execution_failed vague1)
 ├── config/         loader.py  # V3-A1 (load_agents YAML)
-├── runtime/        llm_client.py · runner.py (+run_chain V3-A3, +run_divided_task V3-A4) · divider.py · aggregator.py  # divider/aggregator = V3-A4
-├── tracing/        events.py (+ToolCalled/TaskDivided/TaskAggregated V3) · tracer.py · analysis.py · formatter.py · store.py  # store.py = V2c
-├── demo/           agents.py (loader A1) · agents.yaml · tasks.py · run_demo.py (+run divisé A4) · run_health_check.py
+├── runtime/        llm_client.py · runner.py (+run_chain V3-A3, +run_divided_task V3-A4, containment vague1) · divider.py (hérite tags parent vague1) · aggregator.py  # divider/aggregator = V3-A4
+├── tracing/        events.py (+ToolCalled/TaskDivided/TaskAggregated V3, +DividedSubTask & QAEvaluatedEvent.spec vague1) · tracer.py · analysis.py · formatter.py · store.py  # store.py = V2c
+├── demo/           agents.py (loader A1) · agents.yaml · tasks.py · run_demo.py (+run divisé A4) · run_health_check.py · tools.py (toolbox stubbée vague1) · run_demo_v3.py · run_health_check_v3.py  # *_v3 = vague1
 ├── elo/            formula.py · updater.py · persistence.py          # V2a (implémenté)
-└── qa/             protocol.py · rule_based.py · health_check.py     # V2a (implémenté)
-                    criteria.py (+llm_check V3-B1) · spec.py · judge.py · spec_evaluator.py · test_set.py · lifecycle.py · adaptive.py (+build_llm_spec V3-B1)  # V2b
+└── qa/             protocol.py (+QAResult.spec_used vague1) · rule_based.py · health_check.py     # V2a (implémenté)
+                    criteria.py (+llm_check V3-B1) · spec.py · judge.py · spec_evaluator.py (+AdaptiveSpecEvaluator & inject client vague1) · test_set.py · lifecycle.py · adaptive.py (+build_llm_spec V3-B1)  # V2b
                     triage.py · task_spec_generator.py  # V3-B2 / V3-B3
 
 dashboard/          # V2c (implémenté) — app web d'observabilité
@@ -82,8 +86,9 @@ docs/superpowers/specs/  design specs · plans/  plans d'implémentation · epic
 **Pipeline V2** : `... → agent.execute → [QA evaluate] → [ELO update] → Output | QAFailure | DispatchResult`
 - `evaluator=None` → V1 behavior (pas de QA, pas d'ELO update)
 
-**Pipeline V3 (chaîne A3)** : `run_chain([sub_tasks]) → tri topologique Kahn → run_task par tâche, required_outputs injectés depuis les deps réussies`
+**Pipeline V3 (chaîne A3)** : `run_chain([sub_tasks]) → tri topologique Kahn → run_task par tâche, required_outputs injectés depuis les deps réussies`. **Containment (vague1)** : une exception de `run_task` (ex: `MAX_TOOL_ROUNDS`) est attrapée → `DispatchResult(status="execution_failed")`, la chaîne continue, les sous-tâches réussies restent agrégeables.
 **Pipeline V3 (graphe émergent A4)** : `run_divided_task → divider.divide (LLM) → run_chain → aggregator.aggregate (LLM) | fallback successful[-1] | DispatchResult(unassigned)`
+**Démo end-to-end V3 (vague1)** : `run_demo_v3.py` (incident divisé + tools + `AdaptiveSpecEvaluator`) · `run_health_check_v3.py` (seed unattributed → triage B2 → fix B3 → re-triage → `run_health_check`). Lancer : `.venv\Scripts\python src\aaosa\demo\run_demo_v3.py` (requiert `OPENAI_API_KEY`).
 **Boucle auto-amélioration V3 (B1-B3)** : `échec runtime → failure_to_test_case → triage_unattributed (B2) → fix_task_spec_cases (B3) → triage (B2) → active_cases → run_health_check` (orchestration côté caller)
 
 ## Stack et commandes
@@ -191,5 +196,6 @@ Dashboard web d'observabilité remplaçant `print_timeline`. Constat : la donné
 - **Le graphe émerge** : aucune découpe hardcodée — `divider.divide` est un appel LLM. Une sous-tâche avec un tag inconnu → unassigned = signal de gap roster, pas un bug
 - Triage (B2) et TaskSpecGenerator (B3) = **batch, hors chemin runtime** — jamais appelés dans `run_task`. `triage_case`/`fix_task_spec` retournent `None` sur échec LLM (jamais d'exception propagée), ne mutent jamais l'input (nouveau `TestSet`)
 - B3 reset l'attribution à `"unattributed"` (repasse par B2), conserve `task.id`/`role`/`wrong_output`. Orchestration B2↔B3 **côté caller**, zéro couplage entre modules
-- `EvaluatorSpec` reste une **donnée** (B1 ne change que le producteur : `build_adaptive_spec` déterministe → `build_llm_spec` LLM, format inchangé). `llm_check` préservé par `_filter_unknown_criteria`
-- Boucle tool-use (A5) : tout `finish_reason != "tool_calls"` est terminal · cap `MAX_TOOL_ROUNDS=10` → `RuntimeError` · `ToolCalledEvent` émis seulement si `tracer` fourni
+- `EvaluatorSpec` reste une **donnée** (B1 ne change que le producteur : `build_adaptive_spec` déterministe → `build_llm_spec` LLM, format inchangé). `llm_check` préservé par `_filter_unknown_criteria`. **`AdaptiveSpecEvaluator` (vague1)** satisfait le Protocol `QAEvaluator` et génère la spec dans `evaluate` — le runtime injecte un évaluateur, ne génère jamais la spec lui-même (séparation V2b préservée)
+- Boucle tool-use (A5) : tout `finish_reason != "tool_calls"` est terminal · cap `MAX_TOOL_ROUNDS=20` (relevé de 10 en vague1 pour laisser gpt-4o-mini converger) → `RuntimeError`, **contenu par `run_chain`** (jamais propagé jusqu'à tuer un run divisé) · `ToolCalledEvent` émis seulement si `tracer` fourni · `run_task` propage le `tracer` à `execute` (vague1, sinon les tool calls runtime restaient invisibles)
+- **`SpecEvaluator` (vague1)** : le client est requis dès qu'un `judge` **ou** un `llm_check` est présent (garde constructeur), injecté dans les params des critères à l'évaluation. `QAResult.spec_used` porte la spec utilisée → recopiée sur `QAEvaluatedEvent.spec`
