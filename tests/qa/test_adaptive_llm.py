@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from aaosa.qa.adaptive import (
     _LLMCriterion,
@@ -146,12 +147,12 @@ class TestBuildLLMSpec:
 
     def test_llm_criterion_rejects_gate_field(self):
         # Le LLM ne peut plus déclarer de gate : seul non_empty en est un (invariant V2b).
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _LLMCriterion(name="min_length", gate=True)
 
     def test_llm_judge_rejects_weight_field(self):
         # Le LLM ne contrôle plus le poids du judge (jamais signal primaire, V2b).
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _LLMJudge(rubric=["correctness"], weight=1.0)
 
     def test_judge_weight_always_03(self):
