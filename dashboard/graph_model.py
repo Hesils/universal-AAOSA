@@ -16,6 +16,7 @@ from aaosa.tracing.events import (
     TagAcquiredEvent,
     TaskAggregatedEvent,
     TaskDividedEvent,
+    ToolCalledEvent,
     UnassignedEvent,
 )
 from aaosa.tracing.store import SessionMeta, SessionTaskRecord
@@ -232,6 +233,23 @@ def _agent_ids(events: list[ClaimEvent]) -> list[str]:
     return ordered
 
 
+def _tool_node_id(tool_name: str) -> str:
+    return "tool:" + tool_name
+
+
+def _distinct_tools(events: list[ClaimEvent]) -> list[tuple[str, str]]:
+    """(agent_id, tool_name) distincts, dans l'ordre d'apparition."""
+    seen: set[tuple[str, str]] = set()
+    ordered: list[tuple[str, str]] = []
+    for e in events:
+        if isinstance(e, ToolCalledEvent):
+            key = (e.agent_id, e.tool_name)
+            if key not in seen:
+                seen.add(key)
+                ordered.append(key)
+    return ordered
+
+
 def _build_nodes(events: list[ClaimEvent]) -> list[GraphNode]:
     nodes = [
         GraphNode(id="input", layer="top", type="input", label="Input"),
@@ -245,10 +263,15 @@ def _build_nodes(events: list[ClaimEvent]) -> list[GraphNode]:
         nodes.append(GraphNode(id="aggregator", layer="center", type="aggregator", label="Aggregator"))
     for aid in _agent_ids(events):
         nodes.append(GraphNode(id=aid, layer="bottom", type="agent", label=aid))
+    seen_tools: set[str] = set()
+    for _aid, tname in _distinct_tools(events):
+        if tname not in seen_tools:
+            seen_tools.add(tname)
+            nodes.append(GraphNode(id=_tool_node_id(tname), layer="tools", type="tool", label=tname))
     return nodes
 
 
-def _build_edges(nodes: list[GraphNode]) -> list[GraphEdge]:
+def _build_edges(nodes: list[GraphNode], events: list[ClaimEvent]) -> list[GraphEdge]:
     agent_ids = [n.id for n in nodes if n.type == "agent"]
     edges = [GraphEdge(from_node="input", to="dispatch")]
     edges += [GraphEdge(from_node="dispatch", to=aid) for aid in agent_ids]
@@ -256,6 +279,8 @@ def _build_edges(nodes: list[GraphNode]) -> list[GraphEdge]:
     edges += [GraphEdge(from_node=aid, to="output") for aid in agent_ids]
     edges.append(GraphEdge(from_node="evaluator", to="output"))
     edges.append(GraphEdge(from_node="evaluator", to="testset"))
+    for aid, tname in _distinct_tools(events):
+        edges.append(GraphEdge(from_node=aid, to=_tool_node_id(tname)))
     if any(n.id == "divider" for n in nodes):
         edges.append(GraphEdge(from_node="input", to="divider"))
         edges.append(GraphEdge(from_node="divider", to="aggregator"))
@@ -426,7 +451,7 @@ def _build_step(task_id: str, run: list[ClaimEvent], meta_record: SessionTaskRec
 
 def build_graph(events: list[ClaimEvent], session_meta: SessionMeta | None = None) -> GraphModel:
     nodes = _build_nodes(events)
-    edges = _build_edges(nodes)
+    edges = _build_edges(nodes, events)
     by_task = _events_by_task(events)
     steps = [
         _build_step(tid, _segment_runs(by_task[tid]), _meta_record(session_meta, tid))
