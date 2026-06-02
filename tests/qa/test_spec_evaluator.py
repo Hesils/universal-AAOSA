@@ -217,3 +217,26 @@ class TestLLMCheckIntegration:
                              success_threshold=0.5)
         r = SpecEvaluator(spec).evaluate(make_task(), make_output("hello"))
         assert r.spec_used == spec
+
+
+from aaosa.qa.spec_evaluator import AdaptiveSpecEvaluator
+
+
+class TestAdaptiveSpecEvaluator:
+    def test_satisfies_protocol(self):
+        assert isinstance(AdaptiveSpecEvaluator(client=object()), QAEvaluator)
+
+    def test_evaluate_builds_spec_per_task_and_delegates(self, monkeypatch):
+        known = EvaluatorSpec(criteria=[CriterionSpec(name="non_empty", gate=True)],
+                              success_threshold=0.5)
+        calls = {"n": 0}
+        def fake_build(task, client):
+            calls["n"] += 1
+            return known
+        monkeypatch.setattr(se_module, "build_llm_spec", fake_build)
+
+        ev = AdaptiveSpecEvaluator(client=object())
+        r = ev.evaluate(make_task(), make_output("hello world"))
+        assert calls["n"] == 1
+        assert r.success is True
+        assert r.spec_used == known

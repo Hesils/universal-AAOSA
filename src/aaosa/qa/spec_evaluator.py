@@ -1,5 +1,6 @@
 from openai import OpenAI
 
+from aaosa.qa.adaptive import build_llm_spec
 from aaosa.qa.criteria import get_criterion
 from aaosa.qa.judge import JudgeBreakdown, run_judge
 from aaosa.qa.protocol import QAResult
@@ -89,3 +90,19 @@ def from_spec(
     reference: str | None = None,
 ) -> SpecEvaluator:
     return SpecEvaluator(spec, client=client, reference=reference)
+
+
+class AdaptiveSpecEvaluator:
+    """Evaluator paresseux : génère la spec par tâche (B1) dans evaluate.
+
+    Satisfait le Protocol QAEvaluator. La spec construite par build_llm_spec est
+    interprétée par un SpecEvaluator (qui injecte le client dans llm_check et
+    renseigne QAResult.spec_used). Aucun changement de signature côté runner.
+    """
+
+    def __init__(self, client: OpenAI):
+        self.client = client
+
+    def evaluate(self, task: Task, output: Output) -> QAResult:
+        spec = build_llm_spec(task, self.client)
+        return SpecEvaluator(spec, client=self.client).evaluate(task, output)
