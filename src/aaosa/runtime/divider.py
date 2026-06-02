@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aaosa.core.agent import Agent
 from aaosa.schemas.task import Task
-from aaosa.tracing.events import TaskDividedEvent
+from aaosa.tracing.events import DividedSubTask, TaskDividedEvent
 from aaosa.tracing.tracer import Tracer
 
 
@@ -94,6 +94,9 @@ class TaskDivider:
             tracer.emit(TaskDividedEvent(
                 session_id=tracer.session_id,
                 task_id=task.id,
-                sub_task_ids=[st.id for st in sub_tasks],
+                sub_tasks=[
+                    DividedSubTask(id=st.id, description=st.description, depends_on=list(st.depends_on))
+                    for st in sub_tasks
+                ],
             ))
         return sub_tasks

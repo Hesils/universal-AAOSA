@@ -1,4 +1,5 @@
 from aaosa.tracing.events import (
+    DividedSubTask,
     ExecutedEvent,
     Phase1FilteredEvent,
     Phase2ClaimedEvent,
@@ -16,7 +17,8 @@ SUB1 = "sub-1"
 def _divided_events():
     """A parent task that was divided, plus one sub-task that ran normally."""
     return [
-        TaskDividedEvent(session_id=SID, task_id=PARENT, sub_task_ids=[SUB1]),
+        TaskDividedEvent(session_id=SID, task_id=PARENT,
+                         sub_tasks=[DividedSubTask(id=SUB1, description="sub", depends_on=[])]),
         Phase1FilteredEvent(session_id=SID, task_id=SUB1, agent_id="ag-1", passed=True, fit_score=0.9),
         Phase2ClaimedEvent(session_id=SID, task_id=SUB1, agent_id="ag-1", decision="claim", justification="mine"),
         DispatchedEvent(session_id=SID, task_id=SUB1, agent_id="ag-1", reason="sole claimer"),

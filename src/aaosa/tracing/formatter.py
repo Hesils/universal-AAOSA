@@ -76,7 +76,7 @@ def format_timeline(events: list[ClaimEvent]) -> str:
             lines.append(line)
 
         elif isinstance(event, TaskDividedEvent):
-            line = f"[{time_str}] DIVIDED -> {len(event.sub_task_ids)} sub-tasks"
+            line = f"[{time_str}] DIVIDED -> {len(event.sub_tasks)} sub-tasks"
             lines.append(line)
 
         elif isinstance(event, TaskAggregatedEvent):

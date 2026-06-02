@@ -15,6 +15,13 @@ class _BaseEvent(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class DividedSubTask(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    description: str
+    depends_on: list[str] = Field(default_factory=list)
+
+
 class Phase1FilteredEvent(_BaseEvent):
     type: Literal["phase1_filtered"] = "phase1_filtered"
     agent_id: str
@@ -84,7 +91,7 @@ class ToolCalledEvent(_BaseEvent):
 class TaskDividedEvent(_BaseEvent):
     type: Literal["task_divided"] = "task_divided"
     task_id: str                    # parent task ID
-    sub_task_ids: list[str]         # IDs des sous-tâches générées
+    sub_tasks: list[DividedSubTask]  # sous-tâches générées (id + description + depends_on)
 
 
 class TaskAggregatedEvent(_BaseEvent):

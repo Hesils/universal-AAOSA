@@ -93,7 +93,11 @@ class TestTaskDivider:
         result = DivisionResult(
             sub_tasks=[
                 SubTaskSpec(description="a", required_tags=[TagSpec(tag="python", elo=60)]),
-                SubTaskSpec(description="b", required_tags=[TagSpec(tag="python", elo=60)]),
+                SubTaskSpec(
+                    description="b",
+                    required_tags=[TagSpec(tag="python", elo=60)],
+                    depends_on_indices=[0],
+                ),
             ]
         )
         tracer = Tracer(session_id="sess-1")
@@ -103,7 +107,10 @@ class TestTaskDivider:
         events = [e for e in tracer.events if isinstance(e, TaskDividedEvent)]
         assert len(events) == 1
         assert events[0].task_id == task.id
-        assert events[0].sub_task_ids == [st.id for st in sub_tasks]
+        emitted = events[0].sub_tasks
+        assert [s.id for s in emitted] == [st.id for st in sub_tasks]
+        assert [s.description for s in emitted] == ["a", "b"]
+        assert emitted[1].depends_on == [sub_tasks[0].id]
 
     def test_divide_requires_at_least_one_subtask(self):
         with pytest.raises(ValueError, match="sub_tasks cannot be empty"):
