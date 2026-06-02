@@ -91,7 +91,12 @@ function renderAgent(agentId, step, runAgents) {
   if (a.output_content) f.append(longField("Output", a.output_content));
   if (a.llm_metadata) {
     const m = a.llm_metadata;
-    f.append(field("Métriques", `latence ${m.latency_ms} ms · in ${m.tokens_in} · out ${m.tokens_out}`));
+    const tc = m.tool_calls_count != null ? ` · ${m.tool_calls_count} tool calls` : "";
+    f.append(field("Métriques", `latence ${m.latency_ms} ms · in ${m.tokens_in} · out ${m.tokens_out}${tc}`));
+  }
+  if (a.tool_calls && a.tool_calls.length) {
+    const lines = a.tool_calls.map(c => `${c.tool_name} (${c.latency_ms} ms)`);
+    f.append(fieldLines("Appels d'outils", lines));
   }
   const deltas = Object.entries(a.elo_deltas).map(([t, d]) => `${t} ${d >= 0 ? "+" : ""}${d}`).join(" · ");
   if (deltas) f.append(field("ELO deltas (ce run)", deltas));
@@ -106,6 +111,12 @@ function renderEvaluator(e) {
   const critLines = Object.entries(e.criteria_results || {}).map(([k, v]) => `${k} : ${v ? "✓" : "✗"}`);
   if (critLines.length) f.append(fieldLines("Critères / gates", critLines));
   if (e.judge) f.append(field("Judge", `${e.judge.mode} · ${e.judge.overall != null ? e.judge.overall.toFixed(2) : "—"}`));
+  if (e.spec) {
+    const specLines = e.spec.criteria.map(c => `${c.name}${c.gate ? " [gate]" : ""} · poids ${c.weight}` + (c.params && Object.keys(c.params).length ? ` · ${JSON.stringify(c.params)}` : ""));
+    f.append(fieldLines("Spec générée (critères)", specLines.length ? specLines : ["—"]));
+    f.append(field("Seuil de succès", String(e.spec.success_threshold)));
+    if (e.spec.judge) f.append(field("Judge spec", `${e.spec.judge.mode} · poids ${e.spec.judge.weight}`));
+  }
   if (e.reason) f.append(longField("Raison", e.reason));
   return f;
 }
@@ -139,6 +150,37 @@ function renderTestSet(t) {
   return f;
 }
 
+function renderDivider(d) {
+  const f = document.createDocumentFragment();
+  if (!d.divided) { f.append(field("Divider", "non déclenché")); return f; }
+  d.sub_tasks.forEach((st, i) => {
+    const deps = st.depends_on.length ? ` (dépend de ${st.depends_on.length})` : "";
+    f.append(longField(`Sous-tâche ${i + 1}${deps}`, st.description));
+  });
+  return f;
+}
+
+function renderAggregator(a) {
+  const f = document.createDocumentFragment();
+  if (!a.aggregated) { f.append(field("Aggregator", "non exécuté")); return f; }
+  f.append(field("Sous-tâches agrégées", String(a.sub_task_ids.length)));
+  if (a.output_summary) f.append(longField("Résumé", a.output_summary));
+  if (a.output_content) f.append(longField("Output synthétisé", a.output_content));
+  return f;
+}
+
+function renderTool(t) {
+  const f = document.createDocumentFragment();
+  if (!t) { f.append(field("Tool", "non actif à cette étape")); return f; }
+  f.append(field("Tool", t.tool_name + (t.calls.length > 1 ? ` ×${t.calls.length}` : "")));
+  t.calls.forEach((c, i) => {
+    f.append(field(`Appel ${i + 1} · args`, JSON.stringify(c.arguments)));
+    f.append(longField(`Appel ${i + 1} · résultat`, c.result));
+    f.append(field(`Appel ${i + 1} · latence`, `${c.latency_ms} ms`));
+  });
+  return f;
+}
+
 // node = {id, type, label} ; step = GraphStep courant ; runAgents = agents du run (B1)
 export function openNodeModal(node, step, runAgents) {
   if (!step) return;
@@ -155,6 +197,9 @@ export function openNodeModal(node, step, runAgents) {
     case "input": body = renderInput(step.detail.input); break;
     case "output": body = renderOutput(step.detail.output); break;
     case "testset": body = renderTestSet(step.detail.testset); break;
+    case "divider": body = renderDivider(step.detail.divider); break;
+    case "aggregator": body = renderAggregator(step.detail.aggregator); break;
+    case "tool": body = renderTool(step.detail.tool); break;
     default: return;
   }
 
