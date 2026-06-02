@@ -37,7 +37,7 @@ def run_task(
 
     agent_map = {agent.id: agent for agent in candidate_agents}
     winner = agent_map[result.agent_id]
-    output = winner.execute(task, client)
+    output = winner.execute(task, client, tracer)
 
     if tracer is not None:
         tracer.emit(ExecutedEvent(
@@ -64,6 +64,7 @@ def run_task(
             reason=qa_result.reason,
             criteria_results=qa_result.criteria_results,
             judge=qa_result.judge,
+            spec=qa_result.spec_used,
         ))
 
     elo_result = update_agent_elo(winner, task, success=qa_result.success)

@@ -452,3 +452,46 @@ def test_run_task_qa_event_carries_criteria_and_judge():
     assert qa_events[0].criteria_results == {"non_empty": True}
     assert qa_events[0].judge is not None
     assert qa_events[0].judge.overall == 0.9
+
+
+def test_run_task_passes_tracer_to_execute():
+    """run_task propage le tracer à execute (prérequis ToolCalledEvent)."""
+    task = make_task()
+    agent = make_agent("AgentA", 80)
+    claim = make_claim(agent, task, "claim")
+    output = make_output(agent, task)
+    tracer = Tracer(session_id="s1")
+
+    with patch.object(Agent, "claim", return_value=claim):
+        with patch.object(Agent, "execute", return_value=output) as ex:
+            run_task(task, [agent], MagicMock(), tracer=tracer)
+
+    args, kwargs = ex.call_args
+    passed = kwargs.get("tracer", args[2] if len(args) > 2 else None)
+    assert passed is tracer
+
+
+def test_run_task_qa_event_carries_spec():
+    """L'event QA porte la spec issue de qa_result.spec_used."""
+    from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
+    task = make_task()
+    agent = make_agent("AgentA", 80)
+    claim = make_claim(agent, task, "claim")
+    output = make_output(agent, task)
+    tracer = Tracer(session_id="s1")
+    spec = EvaluatorSpec(criteria=[CriterionSpec(name="non_empty", gate=True)])
+
+    class _SpecEvaluator:
+        def evaluate(self, t, o):
+            return QAResult(
+                task_id=t.id, agent_id=o.agent_id, success=True, score=1.0,
+                reason="ok", criteria_results={"non_empty": True}, spec_used=spec,
+            )
+
+    with patch.object(Agent, "claim", return_value=claim):
+        with patch.object(Agent, "execute", return_value=output):
+            run_task(task, [agent], MagicMock(), tracer=tracer, evaluator=_SpecEvaluator())
+
+    qa_events = [e for e in tracer.events if isinstance(e, QAEvaluatedEvent)]
+    assert len(qa_events) == 1
+    assert qa_events[0].spec == spec

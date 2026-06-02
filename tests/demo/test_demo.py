@@ -222,7 +222,7 @@ class TestDemoV2:
         def fake_claim(self, task, client):
             return Claim(agent_id=self.id, task_id=task.id, decision="claim", justification="ok")
 
-        def fake_execute(self, task, client):
+        def fake_execute(self, task, client, tracer=None):
             tags_str = " ".join(task.required_tags.keys())
             return Output(
                 task_id=task.id,
@@ -245,7 +245,7 @@ class TestDemoV2:
         def fake_claim(self, task, client):
             return Claim(agent_id=self.id, task_id=task.id, decision="claim", justification="ok")
 
-        def fake_execute(self, task, client):
+        def fake_execute(self, task, client, tracer=None):
             return Output(
                 task_id=task.id,
                 agent_id=self.id,
@@ -269,7 +269,7 @@ class TestDemoV2:
         def fake_claim(self, task, client):
             return Claim(agent_id=self.id, task_id=task.id, decision="claim", justification="ok")
 
-        def fake_execute(self, task, client):
+        def fake_execute(self, task, client, tracer=None):
             tags_str = " ".join(task.required_tags.keys())
             return Output(
                 task_id=task.id,

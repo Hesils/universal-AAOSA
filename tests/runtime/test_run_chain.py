@@ -34,7 +34,7 @@ def _claim_for(agent):
 
 
 def _recording_execute(recorded):
-    def fake_execute(self, task, client):
+    def fake_execute(self, task, client, tracer=None):
         recorded[task.id] = list(task.required_outputs)
         return Output(
             task_id=task.id,
