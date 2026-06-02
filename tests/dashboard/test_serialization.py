@@ -31,3 +31,17 @@ def test_error_response():
     assert resp.status_code == 404
     assert resp.headers["Cache-Control"] == "no-store"
     assert json.loads(resp.get_data(as_text=True)) == {"error": "session x not found"}
+
+
+def test_divided_graph_serializes_with_aliases():
+    from tests.dashboard.test_build_graph_milestones import _divided_events, _divided_meta
+    from dashboard.graph_model import build_graph
+    graph = build_graph(_divided_events(), _divided_meta("parent", "incident"))
+    dumped = graph.model_dump(by_alias=True, mode="json")
+    # arêtes : alias 'from'
+    assert all("from" in e for e in dumped["edges"])
+    # un jalon tool porte son détail
+    tool_step = next(s for s in dumped["steps"] if s["milestone_type"] == "tool")
+    assert tool_step["detail"]["tool"]["tool_name"] == "grep"
+    # todo présent sur chaque jalon
+    assert all("todo" in s for s in dumped["steps"])

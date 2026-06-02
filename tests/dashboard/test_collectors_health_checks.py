@@ -44,12 +44,16 @@ def test_case_graph_active(runs_root):
     active = [c for c in run_detail(runs_root, rid).cases if c.graphable][0]
     graph = case_graph(runs_root, rid, active.task_id)
     assert graph is not None
-    assert len(graph.steps) == 1
-    step = graph.steps[0]
-    assert step.outcome == "qa_pass"
+    # Modèle jalons : un cas single-task se rejoue en jalons (input → dispatch → ... ).
+    types = [s.milestone_type for s in graph.steps]
+    assert types[0] == "input"
+    assert "dispatch" in types
+    assert "evaluator" in types
+    assert any(s.outcome == "qa_pass" for s in graph.steps)
     # _synth_meta remplit l'overlay Input depuis le TestSet (sinon vide)
-    assert step.detail.input.description == active.description
-    assert step.detail.input.required_tags == active.required_tags
+    inp = graph.steps[0]
+    assert inp.detail.input.description == active.description
+    assert inp.detail.input.required_tags == active.required_tags
 
 
 def test_case_graph_quarantined_returns_none(runs_root):

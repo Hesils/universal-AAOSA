@@ -56,7 +56,7 @@ def test_session_graph_edges_use_alias(runs_root):
     r = c.get(f"/api/sessions/{sid}/graph")
     assert r.status_code == 200
     g = r.get_json()
-    assert len(g["steps"]) == 2
+    assert g["steps"][0]["milestone_type"] == "input"  # modèle jalons
     assert all(("from" in e and "to" in e) for e in g["edges"])  # by_alias
 
 
@@ -91,7 +91,7 @@ def test_health_check_graph_default_first_graphable(runs_root):
     rid = c.get("/api/health-checks").get_json()["runs"][0]["id"]
     r = c.get(f"/api/health-checks/{rid}/graph")  # sans task_id -> 1er cas graphable (S4-B)
     assert r.status_code == 200
-    assert len(r.get_json()["steps"]) == 1
+    assert r.get_json()["steps"][0]["milestone_type"] == "input"  # modèle jalons
 
 
 def test_health_check_graph_explicit_task(runs_root):

@@ -17,10 +17,13 @@ def test_session_detail_graph(runs_root):
     sid = list_sessions(runs_root).sessions[0].session_id
     view = session_detail(runs_root, sid)
     assert view is not None
-    assert len(view.graph.steps) == 2
-    outcomes = {st.outcome for st in view.graph.steps}
-    assert "qa_pass" in outcomes
-    assert "unassigned" in outcomes
+    # Modèle jalons : le graphe rejoue le run primaire de la session (1 run/graphe).
+    # Une session multi-tâches indépendantes ne rend que sa 1re tâche (limitation assumée).
+    types = [st.milestone_type for st in view.graph.steps]
+    assert types[0] == "input"
+    assert "dispatch" in types
+    assert types[-1] == "output"
+    assert any(st.outcome == "qa_pass" for st in view.graph.steps)
 
 
 def test_session_detail_not_found(runs_root):
