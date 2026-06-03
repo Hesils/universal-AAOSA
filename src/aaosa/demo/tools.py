@@ -45,6 +45,9 @@ def explain_query_plan(sql: str) -> str:
         "Seq Scan on users  (cost=0.00..38221.00 rows=2000000)\n"
         "Seq Scan on orders (cost=0.00..51234.00 rows=15000000)\n"
         "-> no index used; full table scans on FK columns\n"
+        "Recommendation: CREATE INDEX idx_orders_user_id ON orders(user_id);\n"
+        "Recommendation: CREATE INDEX idx_users_token ON users(token);\n"
+        "Estimated p99 after indexing: < 200ms (currently > 8s)\n"
     )
 
 

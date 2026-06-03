@@ -20,7 +20,8 @@ class _LLMCriterion(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str
     weight: float = 1.0
-    gate: bool = False
+    # Pas de champ `gate` : seul "non_empty" peut être un gate (invariant V2b),
+    # injecté par _ensure_non_empty_gate. Le LLM ne propose que des critères scorés.
     # params possibles, aplatis (un critère n'en utilise qu'un sous-ensemble) :
     min_chars: int | None = None          # min_length
     description: str | None = None        # llm_check
@@ -37,17 +38,18 @@ class _LLMCriterion(BaseModel):
             params["keywords"] = self.keywords
         if self.kind is not None:
             params["kind"] = self.kind
-        return CriterionSpec(name=self.name, params=params, weight=self.weight, gate=self.gate)
+        return CriterionSpec(name=self.name, params=params, weight=self.weight)
 
 
 class _LLMJudge(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["rubric", "reference_based"] = "rubric"
     rubric: list[str]
-    weight: float = 0.3
+    # Pas de champ `weight` : le judge n'est jamais le signal primaire (invariant
+    # V2b). Poids verrouillé à 0.3 via le défaut JudgeSpec — le LLM ne le contrôle pas.
 
     def to_judge(self) -> JudgeSpec:
-        return JudgeSpec(mode=self.mode, rubric=self.rubric, weight=self.weight)
+        return JudgeSpec(mode=self.mode, rubric=self.rubric)
 
 
 class _LLMEvaluatorSpec(BaseModel):
@@ -119,7 +121,7 @@ def _build_prompt(task: Task) -> str:
         'Exemple : {"name": "llm_check", "params": {"description": "La réponse doit inclure '
         'des exemples de code avec explications"}, "weight": 1.5}\n\n'
         "# Règles\n"
-        '- Toujours inclure "non_empty" comme gate=True\n'
+        '- "non_empty" est ajouté automatiquement comme unique gate — ne le déclare pas\n'
         '- Ajouter "min_length" si la tâche attend une réponse détaillée\n'
         '- Utiliser "llm_check" pour des critères qualitatifs propres à cette tâche\n'
         '- Ajouter un judge (mode "rubric") si la tâche est complexe ou ambiguë\n'
