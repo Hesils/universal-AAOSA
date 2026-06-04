@@ -18,3 +18,8 @@ ELO_FLOOR = 1
 ELO_CEILING = ELO_EXPERT_MAX  # 95
 ELO_K = 5
 ELO_MAX_DELTA = 10
+
+# V3 — Tag loss mechanic (mirror of acquisition):
+# on failure, if the raw post-delta ELO drops strictly below this threshold
+# (the floor is deliberately ignored), the agent loses the tag entirely.
+ELO_TAG_LOSS_THRESHOLD = 0

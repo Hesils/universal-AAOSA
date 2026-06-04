@@ -2,7 +2,7 @@ import pytest
 from aaosa.elo.updater import EloUpdateResult, update_agent_elo
 from aaosa.core.agent import Agent
 from aaosa.schemas.task import Task
-from aaosa.schemas.elo import ELO_FLOOR, ELO_CEILING
+from aaosa.schemas.elo import ELO_FLOOR, ELO_CEILING, ELO_TAG_LOSS_THRESHOLD
 
 
 def make_agent(tags: dict[str, int], name: str = "TestAgent") -> Agent:
@@ -63,14 +63,15 @@ class TestUpdateAgentEloFailure:
         assert result.elo_after == {"python": 45}
         assert agent.tags_with_elo["python"] == 45
 
-    def test_failure_floor_clamp(self):
-        """Echec qui pousserait en dessous de 1 -> clampe a 1."""
+    def test_failure_far_below_zero_loses_tag(self):
+        """Echec qui pousse l'ELO sous 0 (req bas) -> tag perdu (V3, plus de clamp floor)."""
         agent = make_agent({"python": 3})
         task = make_task({"python": 1})
         result = update_agent_elo(agent, task, success=False)
-        # delta = round(-5 * 3/1) = -15, clampe a -10. 3 + (-10) = -7 -> floor = 1
-        assert agent.tags_with_elo["python"] == ELO_FLOOR
-        assert result.elo_after["python"] == ELO_FLOOR
+        # delta = round(-5 * 3/1) = -15, clampe a -10. 3 + (-10) = -7 < 0 -> tag perdu
+        assert "python" not in agent.tags_with_elo
+        assert "python" not in result.elo_after
+        assert result.lost_tags == {"python": 3}
 
 
 class TestUpdateAgentEloAcquisition:
@@ -114,13 +115,81 @@ class TestUpdateAgentEloAcquisition:
         assert agent.tags_with_elo["python"] == 45
         assert agent.tags_with_elo["docker"] == 22
 
-    def test_failure_existing_acquirable_floor_clamp(self):
-        """Echec + acquirable tag present avec ELO tres bas -> clampe au floor global (1)."""
+    def test_failure_existing_acquirable_below_zero_lost(self):
+        """Echec + acquirable tag present a ELO tres bas (req bas) -> tag perdu (V3)."""
         agent = make_agent({"python": 50, "docker": 3})
         task = make_task({"python": 50}, acquirable={"docker": 1})
         result = update_agent_elo(agent, task, success=False)
-        # docker: compute_delta(3, 1, False) = round(-5 * 3/1) = -15 -> clamp -10. 3 + (-10) = -7 -> floor = 1
-        assert agent.tags_with_elo["docker"] == ELO_FLOOR
+        # docker: compute_delta(3, 1, False) = round(-5 * 3/1) = -15 -> clamp -10. 3 + (-10) = -7 < 0 -> perdu
+        assert "docker" not in agent.tags_with_elo
+        assert result.lost_tags == {"docker": 3}
+
+
+class TestUpdateAgentEloTagLoss:
+    def test_failure_below_zero_loses_required_tag(self):
+        """Echec qui ferait passer l'ELO sous 0 (floor ignore) -> tag retire."""
+        agent = make_agent({"python": 5})
+        task = make_task({"python": 2})
+        result = update_agent_elo(agent, task, success=False)
+        # delta = round(clamp(-5 * 5/2, -10, 10)) = round(-12.5 -> -10) = -10
+        # raw = 5 + (-10) = -5 < 0 -> tag perdu (PAS de clamp au floor)
+        assert "python" not in agent.tags_with_elo
+        assert result.lost_tags == {"python": 5}
+        assert result.deltas["python"] == -10
+        assert "python" not in result.elo_after
+
+    def test_failure_raw_exactly_zero_keeps_tag_at_floor(self):
+        """raw == 0 n'est PAS sous 0 -> tag conserve, clampe au floor."""
+        agent = make_agent({"python": 10})
+        task = make_task({"python": 5})
+        result = update_agent_elo(agent, task, success=False)
+        # delta = round(clamp(-5 * 10/5, -10, 10)) = -10 ; raw = 10 - 10 = 0
+        # 0 n'est pas < 0 -> conserve, clamp floor
+        assert agent.tags_with_elo["python"] == ELO_FLOOR
+        assert result.lost_tags == {}
+        assert "python" not in result.lost_tags
+
+    def test_failure_above_zero_keeps_tag(self):
+        """raw entre 0 et le floor reste conserve (clamp floor), pas de perte."""
+        agent = make_agent({"python": 3})
+        task = make_task({"python": 1})
+        result = update_agent_elo(agent, task, success=False)
+        # delta = round(clamp(-5 * 3/1, -10, 10)) = -10 ; raw = 3 - 10 = -7 < 0 -> perdu
+        # (ce cas verifie surtout la coherence: -7 < 0 donc perte)
+        assert "python" not in agent.tags_with_elo
+        assert result.lost_tags == {"python": 3}
+
+    def test_failure_below_zero_loses_held_acquirable_tag(self):
+        """Tag acquirable deja detenu, echec sous 0 -> retire aussi (symetrie)."""
+        agent = make_agent({"python": 50, "docker": 5})
+        task = make_task({"python": 50}, acquirable={"docker": 2})
+        result = update_agent_elo(agent, task, success=False)
+        # python (required): compute_delta(50,50,False) = -5 -> 45 (conserve)
+        # docker (acquirable detenu): delta = -10, raw = 5-10 = -5 < 0 -> perdu
+        assert agent.tags_with_elo["python"] == 45
+        assert "docker" not in agent.tags_with_elo
+        assert result.lost_tags == {"docker": 5}
+
+    def test_success_never_loses_tag(self):
+        """Le succes ne retire jamais un tag, meme a ELO tres bas."""
+        agent = make_agent({"python": 1})
+        task = make_task({"python": 95})
+        result = update_agent_elo(agent, task, success=True)
+        assert "python" in agent.tags_with_elo
+        assert result.lost_tags == {}
+
+    def test_no_loss_when_failure_stays_positive(self):
+        """Echec normal restant > 0 -> lost_tags vide."""
+        agent = make_agent({"python": 50})
+        task = make_task({"python": 50})
+        result = update_agent_elo(agent, task, success=False)
+        assert result.lost_tags == {}
+        assert agent.tags_with_elo["python"] == 45
+
+    def test_threshold_constant_is_zero(self):
+        """Le seuil de perte est 0 (et non le floor=1)."""
+        assert ELO_TAG_LOSS_THRESHOLD == 0
+        assert ELO_TAG_LOSS_THRESHOLD < ELO_FLOOR
 
 
 class TestUpdateAgentEloMetadata:

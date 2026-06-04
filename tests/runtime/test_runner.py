@@ -20,7 +20,7 @@ from aaosa.schemas.claim import Claim
 from aaosa.schemas.output import Output, LLMMetadata
 from aaosa.schemas.task import Task
 from aaosa.claiming.dispatch import DispatchResult
-from aaosa.tracing.events import ExecutedEvent, QAEvaluatedEvent, EloUpdatedEvent, TagAcquiredEvent
+from aaosa.tracing.events import ExecutedEvent, QAEvaluatedEvent, EloUpdatedEvent, TagAcquiredEvent, TagLostEvent
 from aaosa.tracing.tracer import Tracer
 
 
@@ -369,6 +369,58 @@ class TestRunTaskV2TagAcquisition:
         assert len(acq_events) == 1
         assert acq_events[0].tag == "docker"
         assert acq_events[0].initial_elo == 20
+
+
+# ---------------------------------------------------------------------------
+# V3 Tests — Tag loss (mirror of acquisition)
+# ---------------------------------------------------------------------------
+
+class TestRunTaskV3TagLoss:
+    def test_qa_fail_below_zero_emits_tag_lost(self):
+        """Echec qui fait passer l'ELO sous 0 -> TagLostEvent emis, tag retire."""
+        task = Task(
+            description="Build API",
+            required_tags={"python": 2},
+        )
+        agent = Agent(
+            name="A",
+            tags_with_elo={"python": 5},
+            system_prompt="test",
+        )
+        claim = make_claim(agent, task, "claim")
+        output = make_output(agent, task)
+        evaluator = AlwaysFailEvaluator()
+        tracer = Tracer(session_id="s1")
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                run_task(task, [agent], MagicMock(), evaluator=evaluator, tracer=tracer)
+        lost_events = [e for e in tracer.events if isinstance(e, TagLostEvent)]
+        assert len(lost_events) == 1
+        assert lost_events[0].tag == "python"
+        assert lost_events[0].agent_id == agent.id
+        assert lost_events[0].last_elo == 5
+        assert "python" not in agent.tags_with_elo
+
+    def test_qa_fail_staying_positive_emits_no_tag_lost(self):
+        """Echec normal restant > 0 -> aucun TagLostEvent."""
+        task = Task(
+            description="Build API",
+            required_tags={"python": 60},
+        )
+        agent = Agent(
+            name="A",
+            tags_with_elo={"python": 80},
+            system_prompt="test",
+        )
+        claim = make_claim(agent, task, "claim")
+        output = make_output(agent, task)
+        evaluator = AlwaysFailEvaluator()
+        tracer = Tracer(session_id="s1")
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                run_task(task, [agent], MagicMock(), evaluator=evaluator, tracer=tracer)
+        lost_events = [e for e in tracer.events if isinstance(e, TagLostEvent)]
+        assert lost_events == []
 
 
 # ---------------------------------------------------------------------------

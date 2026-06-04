@@ -10,6 +10,7 @@ from aaosa.tracing.events import (
     QAEvaluatedEvent,
     EloUpdatedEvent,
     TagAcquiredEvent,
+    TagLostEvent,
 )
 from aaosa.tracing.formatter import format_timeline, print_timeline
 
@@ -423,6 +424,17 @@ class TestFormatTimelineTagAcquired:
         )
         result = format_timeline([event])
         assert "[10:30:05] ACQUIRED Fullstack -> docker: 20 (new tag)" in result
+
+
+class TestFormatTimelineTagLost:
+    def test_tag_lost(self):
+        event = TagLostEvent(
+            session_id="s1", task_id="t1",
+            agent_id="Fullstack", tag="docker", last_elo=3,
+            timestamp=datetime(2026, 5, 27, 10, 30, 5, tzinfo=timezone.utc),
+        )
+        result = format_timeline([event])
+        assert "[10:30:05] LOST Fullstack -> docker: 3 (tag removed)" in result
 
 
 class TestFormatTimelineMixedV1V2:

@@ -10,7 +10,7 @@ from aaosa.elo.updater import update_agent_elo
 from aaosa.qa.protocol import QAEvaluator, QAFailure
 from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
-from aaosa.tracing.events import ExecutedEvent, QAEvaluatedEvent, EloUpdatedEvent, TagAcquiredEvent
+from aaosa.tracing.events import ExecutedEvent, QAEvaluatedEvent, EloUpdatedEvent, TagAcquiredEvent, TagLostEvent
 from aaosa.tracing.tracer import Tracer
 
 if TYPE_CHECKING:
@@ -89,6 +89,14 @@ def run_task(
                     agent_id=winner.id,
                     tag=tag,
                     initial_elo=elo,
+                ))
+            for tag, elo in elo_result.lost_tags.items():
+                tracer.emit(TagLostEvent(
+                    session_id=tracer.session_id,
+                    task_id=task.id,
+                    agent_id=winner.id,
+                    tag=tag,
+                    last_elo=elo,
                 ))
 
         if qa_result.success:

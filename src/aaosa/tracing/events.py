@@ -80,6 +80,13 @@ class TagAcquiredEvent(_BaseEvent):
     initial_elo: int
 
 
+class TagLostEvent(_BaseEvent):
+    type: Literal["tag_lost"] = "tag_lost"
+    agent_id: str
+    tag: str
+    last_elo: int  # ELO the agent held on this tag just before losing it
+
+
 class ToolCalledEvent(_BaseEvent):
     type: Literal["tool_called"] = "tool_called"
     agent_id: str
@@ -114,6 +121,7 @@ ClaimEvent = Annotated[
         QAEvaluatedEvent,
         EloUpdatedEvent,
         TagAcquiredEvent,
+        TagLostEvent,
         ToolCalledEvent,
         TaskDividedEvent,
         TaskAggregatedEvent,
