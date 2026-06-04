@@ -2,6 +2,7 @@
 
 import pytest
 from pydantic import ValidationError
+
 from aaosa.claiming.dispatch import DispatchResult
 from aaosa.schemas.claim import Claim
 
@@ -115,3 +116,14 @@ def test_dispatch_result_extra_fields_forbidden():
             reason="test",
             priority=1
         )
+
+
+def test_dispatch_result_accepts_roster_gap_status():
+    """DispatchResult should accept status='roster_gap' with agent_id=None."""
+    r = DispatchResult(
+        status="roster_gap",
+        agent_id=None,
+        reason="no agent covers: ['quantum']"
+    )
+    assert r.status == "roster_gap"
+    assert r.agent_id is None
