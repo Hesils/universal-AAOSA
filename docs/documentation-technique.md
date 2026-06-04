@@ -115,13 +115,13 @@ Le droit est tranché par `passes_filter(agent, task)` (`claiming/scoring.py`). 
 L'adéquation est mesurée par `fit_score(agent, task)`, dans le même module. Le score rapporte la compétence cumulée de l'agent au besoin de la tâche :
 
 ```
-fit_score = somme des ELO de l'agent sur (tags requis ∪ tags acquérables)
-          / somme des niveaux requis de ces mêmes tags
+fit_score = somme des ELO de l'agent sur (tags requis + tags acquérables qu'il possède)
+          / somme des niveaux de ces mêmes tags
 ```
 
-Un tag absent compte zéro au numérateur. Le score peut donc dépasser 1 quand l'agent est surqualifié, ou rester en dessous quand il couvre tout juste le minimum. C'est ce nombre qui servira à départager en cas de conflit (§3.3), jamais à décider seul.
+Le score peut dépasser 1 quand l'agent est surqualifié, ou rester juste au-dessus du minimum sinon (l'agent a passé le filtre, donc il possède tous les tags requis). C'est ce nombre qui servira à départager en cas de conflit (§3.3), jamais à décider seul.
 
-Les **tags acquérables** se distinguent des tags requis : ils n'apparaissent pas dans `required_tags`, donc `passes_filter` ne les teste pas. Ils ne ferment aucune porte ; ils ne font que nourrir le `fit_score` (bonus si l'agent les possède, aucune pénalité sinon). Par convention, un tag dont le niveau requis est faible (seuil défini dans `schemas/elo.py`, `ELO_ACQUIRABLE_THRESHOLD`) est traité comme acquérable plutôt que comme barrière : un agent peut prendre la tâche sans l'avoir, et le gagner s'il réussit.
+Les **tags acquérables** se distinguent des tags requis : ils n'apparaissent pas dans `required_tags`, donc `passes_filter` ne les teste pas. Ils ne ferment aucune porte, et ne comptent dans le `fit_score` **que si l'agent les possède** : les avoir est un bonus, ne pas les avoir est neutre (le tag n'entre alors ni au numérateur ni au dénominateur, donc ne pénalise pas). Par convention, un tag dont le niveau requis est faible (seuil défini dans `schemas/elo.py`, `ELO_ACQUIRABLE_THRESHOLD`) est traité comme acquérable plutôt que comme barrière : un agent peut prendre la tâche sans l'avoir, et le gagner s'il réussit.
 
 `filter_candidates` (`claiming/phase1.py`) orchestre le tout : pour chaque agent, il calcule le score et applique le filtre, puis renvoie la liste des `(agent, fit_score)` retenus. Cette liste est la seule entrée de la Phase 2.
 
@@ -308,11 +308,18 @@ succès : delta = +K · (niveau requis / niveau de l'agent)
 
 avec `K = 5`, un delta borné à ±10 par mise à jour, et l'ELO résultant maintenu entre un plancher (1) et un plafond (95).
 
-L'**asymétrie** de ces deux formules est le cœur du mécanisme. Un agent n'exécute que s'il a passé le filtre : sur les tags requis, son niveau est donc supérieur ou égal au niveau exigé. Dans ce régime, le rapport `requis / agent` est inférieur ou égal à 1, et `agent / requis` supérieur ou égal à 1. Conséquence : **confirmer une compétence qu'on possède déjà ne rapporte presque rien, mais échouer sur une tâche qu'on aurait dû tenir coûte cher.** Le barème est exigeant par construction. Il ne récompense pas la routine, il sanctionne la défaillance.
+L'**asymétrie** de ces deux formules est le cœur du mécanisme. Un agent n'exécute que s'il a passé le filtre : sur les tags requis, son niveau est donc supérieur ou égal au niveau exigé. Dans ce régime, le rapport `requis / agent` est inférieur ou égal à 1, et `agent / requis` supérieur ou égal à 1. Conséquence : **confirmer une compétence qu'on possède déjà ne rapporte presque rien, mais échouer sur une tâche qu'on aurait dû tenir coûte cher.** Le barème est exigeant par construction. Il ne récompense pas la routine, il sanctionne la défaillance. L'arrondi entier du delta accentue encore l'effet : pour un agent très surqualifié sur un tag à faible barre, le gain d'un succès peut tomber à zéro une fois arrondi, là où une perte pèse toujours au moins `K`. C'est une conséquence assumée de la discrétisation, dans le sens du barème.
 
 Les tags **acquérables** suivent une règle à part. Sur un succès, un agent qui ne possédait pas le tag l'**acquiert** au niveau requis ; s'il l'avait déjà, il est mis à jour normalement. Sur un échec, le tag n'évolue que s'il était déjà présent. On ne gagne donc une nouvelle compétence qu'en la démontrant, jamais en la ratant.
 
 Cette évolution ferme une **boucle comportementale**. Le verdict QA modifie l'ELO ; l'ELO conditionne la Phase 1 du run suivant (filtre et score d'adéquation, §3.1). Un agent qui revendique au-dessus de ses moyens et échoue voit son ELO chuter vite, jusqu'à repasser sous le seuil des tâches qu'il ne tient pas : le filtre l'écarte de lui-même. Personne n'a recalibré le roster à la main. La topologie d'exécution se corrige toute seule, run après run. C'est cette boucle, jointe à la boucle de correction de 5.3, qui porte la thèse d'un système qui dure parce qu'il s'auto-corrige.
+
+Cette mise à jour est **immédiate**. Dans un run divisé, un agent qui remporte une sous-tâche voit son ELO bouger avant que les sous-tâches suivantes ne rejouent leur Phase 1 : celles-ci claiment donc sur un track-record déjà actualisé par le run en cours. C'est l'apprentissage immédiat poussé à l'intérieur d'un même run, et l'effet reste borné par le plafond de delta.
+
+> **Décision — l'ELO s'applique immédiatement, y compris en cours de run divisé.**
+> *Problème* : dans un run divisé, faut-il que toutes les sous-tâches voient le même ELO (un instantané figé au départ), ou l'ELO peut-il évoluer au fil des sous-tâches ?
+> *Choix* : l'ELO est mis à jour immédiatement après chaque verdict, sans instantané. Une sous-tâche tardive claime sur l'ELO déjà modifié par les sous-tâches antérieures du même run.
+> *Pourquoi* : c'est l'apprentissage immédiat, cohérent avec le run. Figer un instantané imposerait un mode « ELO différé » dans `run_task` pour un effet borné par le plafond de delta. La reproductibilité sous-tâche par sous-tâche est sacrifiée sciemment au profit de la simplicité.
 
 > **Décision — un barème d'ELO asymétrique.**
 > *Problème* : un barème symétrique récompenserait la confirmation autant qu'il punirait l'échec, et laisserait survivre des agents peu fiables tant qu'ils réussissent de temps en temps.
@@ -532,6 +539,7 @@ Cette annexe rassemble les **défauts de conception repérés en auditant chaque
 *Problème* : `fit_score` divise la compétence cumulée de l'agent par la somme des niveaux de **tous** les tags, requis et acquérables. Un agent qui ne possède pas un tag acquérable ajoute 0 au numérateur, mais son niveau s'ajoute quand même au dénominateur. Or §3.1 présente l'acquérable comme « un bonus si l'agent le possède, aucune pénalité sinon ».
 *Conséquence* : ajouter un tag acquérable à une tâche **abaisse** le `fit_score` de tout agent qui ne le possède pas, par rapport à la même tâche sans ce tag. Ce n'est pas « aucune pénalité » : c'est un bonus pour ceux qui l'ont, payé par une dilution pour ceux qui ne l'ont pas. Le classement réel peut diverger de l'intuition que la doc donne.
 *Piste* : soit aligner la doc sur la mécanique (l'acquérable dilue le score de qui ne l'a pas), soit changer la formule pour que l'acquérable n'entre au dénominateur que lorsque l'agent le possède (un vrai bonus pur).
+*Statut* : ✅ résolu (2026-06-04). Formule corrigée (vrai bonus pur) : un tag acquérable n'entre dans le calcul que si l'agent le possède. §3.1 mis à jour ; le test qui figeait l'ancienne pénalité est réécrit pour l'invariant « aucune pénalité ».
 
 ### §4 — De la décision à l'exécution
 
@@ -555,11 +563,13 @@ Cette annexe rassemble les **défauts de conception repérés en auditant chaque
 *Problème* : `update_agent_elo` modifie l'agent en place, et dans une chaîne le même agent peut gagner plusieurs sous-tâches. Chaque verdict QA déplace son ELO immédiatement, avant que les sous-tâches suivantes ne rejouent leur Phase 1.
 *Conséquence* : le claiming d'une sous-tâche tardive voit un ELO déjà bougé par les sous-tâches antérieures du **même** run. La topologie d'un run divisé dépend en partie de ses propres résultats intermédiaires, ce qui la rend sensible à l'ordre et non rejouable sous-tâche par sous-tâche en isolation. Cela peut être voulu (« apprentissage immédiat »), mais ce n'est ni documenté ni tranché.
 *Piste* : décider explicitement. Soit assumer et documenter la dérive intra-run comme une propriété, soit figer un instantané de l'ELO au début du run divisé et n'appliquer les mises à jour qu'à la fin.
+*Statut* : ✅ résolu (2026-06-04, par documentation). Choix : assumer l'application immédiate, y compris intra-run (apprentissage immédiat, effet borné par le plafond de delta). §5.2 documente le comportement + une décision dédiée.
 
 **Gap 6 — L'arrondi entier annule les gains de confirmation, en silence.**
 *Problème* : le delta d'ELO est arrondi à l'entier. Pour un agent très surqualifié sur un tag à faible barre, le gain de succès tombe sous 0,5 et s'arrondit à 0 ; les pertes, elles, valent toujours au moins `K` et ne s'annulent jamais.
 *Conséquence* : un succès peut ne rien rapporter du tout (delta exactement nul, enregistré comme tel). Cela renforce l'asymétrie que §5.2 décrit, mais comme un effet de bord de l'arrondi, pas comme un mécanisme conçu et nommé.
 *Piste* : si l'asymétrie « confirmer ne rapporte presque rien » est voulue, l'assumer dans la doc comme une conséquence de la discrétisation ; sinon, garder l'ELO en flottant pour préserver les petits gains.
+*Statut* : ✅ résolu (2026-06-04, par documentation). Choix : assumer. L'ELO reste entier ; §5.2 documente l'arrondi comme un renfort assumé de l'asymétrie du barème.
 
 ### §5.3 — Se corriger
 
