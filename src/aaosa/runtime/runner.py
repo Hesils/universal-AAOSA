@@ -1,5 +1,3 @@
-from typing import TYPE_CHECKING
-
 from openai import OpenAI
 
 from aaosa.claiming.dispatch import DispatchResult, dispatch
@@ -8,14 +6,32 @@ from aaosa.claiming.phase2 import run_phase2
 from aaosa.core.agent import Agent
 from aaosa.elo.updater import update_agent_elo
 from aaosa.qa.protocol import QAEvaluator, QAFailure
+from aaosa.runtime.context import RunContext
+from aaosa.runtime.divider import DivisionResult
+from aaosa.runtime.tagger import EmptyTaggingError
+from aaosa.schemas.elo import DEFAULT_REQUIRED_ELO
 from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
-from aaosa.tracing.events import ExecutedEvent, QAEvaluatedEvent, EloUpdatedEvent, TagAcquiredEvent, TagLostEvent
+from aaosa.tracing.events import (
+    DividedSubTask,
+    EloUpdatedEvent,
+    ExecutedEvent,
+    QAEvaluatedEvent,
+    RosterGapEvent,
+    TagAcquiredEvent,
+    TagLostEvent,
+    TaskDividedEvent,
+)
 from aaosa.tracing.tracer import Tracer
 
-if TYPE_CHECKING:
-    from aaosa.runtime.aggregator import TaskAggregator
-    from aaosa.runtime.divider import TaskDivider
+MAX_RECOVERY_DEPTH = 3
+
+
+def _roster_gap(task: Task, agents: list[Agent]) -> set[str]:
+    """Tags requis qu'AUCUN agent du roster ne porte. Compare la présence du tag,
+    pas son niveau d'ELO (un ELO insuffisant n'est pas un trou de roster)."""
+    roster = {tag for a in agents for tag in a.tags_with_elo}
+    return set(task.required_tags) - roster
 
 
 def run_task(
@@ -146,21 +162,13 @@ def _topological_order(tasks: list[Task]) -> list[Task]:
     return order
 
 
-def run_chain(
-    tasks: list[Task],
-    agents: list[Agent],
-    client: OpenAI,
-    tracer: Tracer | None = None,
-    evaluator: QAEvaluator | None = None,
-) -> list[Output | DispatchResult | QAFailure]:
-    """Exécute une liste de sous-tâches ordonnée par leur graphe de dépendances.
+def run_chain(sub_tasks: list[Task], ctx: RunContext, depth: int) -> list[Output | DispatchResult | QAFailure]:
+    """Exécute une liste de sous-tâches ordonnée par leur graphe de dépendances (Kahn).
 
-    Chaque tâche reçoit dans `required_outputs` uniquement les outputs réussis des
-    tâches déclarées dans son `depends_on`. Une tâche dont une dépendance n'a pas
-    produit d'output réussi est marquée `DispatchResult(status="dependency_failed")`
-    sans être exécutée. L'input n'est pas muté (copie via model_copy).
-    """
-    order = _topological_order(tasks)
+    Recovery-aware (D1) : l'exécuteur par nœud est `run_with_recovery` (était `run_task`).
+    Le reste est identique à A3 — required_outputs des deps réussies injectés, cascade
+    dependency_failed, input non muté (model_copy)."""
+    order = _topological_order(sub_tasks)
     outputs: dict[str, Output] = {}
     results: list[Output | DispatchResult | QAFailure] = []
 
@@ -173,13 +181,9 @@ def run_chain(
                 reason=f"unresolved dependencies: {unmet}",
             ))
             continue
-
         resolved = [outputs[dep] for dep in task.depends_on]
         task_to_run = task.model_copy(update={"required_outputs": resolved})
-        # Containment assuré par run_task (frontière unique) : il renvoie
-        # DispatchResult(execution_failed) sur erreur d'exécution, ne lève jamais.
-        # La chaîne relaie son résultat ; les sous-tâches réussies restent agrégeables.
-        result = run_task(task_to_run, agents, client, tracer, evaluator)
+        result = run_with_recovery(task_to_run, ctx, depth)
         results.append(result)
         if isinstance(result, Output):
             outputs[task.id] = result
@@ -187,40 +191,117 @@ def run_chain(
     return results
 
 
-def run_divided_task(
-    task: Task,
-    agents: list[Agent],
-    client: OpenAI,
-    divider: "TaskDivider",
-    aggregator: "TaskAggregator",
-    tracer: Tracer | None = None,
-    evaluator: QAEvaluator | None = None,
-) -> Output | DispatchResult | QAFailure:
-    """Divise une tâche, exécute la chaîne de sous-tâches, puis agrège.
+def build_sub_tasks(parent_task: Task, division: DivisionResult, ctx: RunContext) -> list[Task]:
+    """Transforme les sous-specs structurelles du divider en Task taguées.
 
-    Stratégie B (LLM Aggregator) primaire. Fallback C : si aggregate() lève une
-    exception, retourne le dernier Output réussi de la chaîne (qui peut être une
-    sous-tâche de synthèse si le divider en a inclus une). Aucun output réussi →
-    DispatchResult(status="unassigned").
+    Tague CHAQUE sous-tâche depuis sa propre description (pas d'héritage parent), pose la
+    barre uniforme DEFAULT_REQUIRED_ELO, résout les deps indices→IDs, et émet le
+    TaskDividedEvent (avec les vrais tags). Lève EmptyTaggingError si une sous-spec ne
+    produit aucun tag (clean-crash géré par run_with_recovery)."""
+    sub_tasks: list[Task] = []
+    for i, spec in enumerate(division.sub_tasks):
+        tags = ctx.tagger.tag(spec.description, ctx.agents, ctx.client)
+        if not tags:
+            raise EmptyTaggingError(spec.description)
+        sub_tasks.append(Task(
+            description=spec.description,
+            required_tags={t: DEFAULT_REQUIRED_ELO for t in tags},
+            parent_task_id=parent_task.id,
+            order_index=i,
+        ))
+    for i, spec in enumerate(division.sub_tasks):
+        sub_tasks[i].depends_on = [sub_tasks[j].id for j in spec.depends_on_indices]
 
-    Containment du diviseur : si divide() lève, on retombe sur un run simple
-    (run_task sur la tâche d'origine) au lieu de tuer le run.
-    """
+    if ctx.tracer is not None:
+        ctx.tracer.emit(TaskDividedEvent(
+            session_id=ctx.tracer.session_id,
+            task_id=parent_task.id,
+            sub_tasks=[
+                DividedSubTask(
+                    id=st.id, description=st.description,
+                    depends_on=list(st.depends_on), required_tags=dict(st.required_tags),
+                )
+                for st in sub_tasks
+            ],
+        ))
+    return sub_tasks
+
+
+def run_with_recovery(task: Task, ctx: RunContext, depth: int = 0) -> Output | DispatchResult | QAFailure:
+    """Cœur récursif D1. Tente la tâche à plat ; ne divise que sur `unassigned`,
+    récursivement (mutuellement récursif avec run_chain). `task` est TOUJOURS taguée."""
+    missing = _roster_gap(task, ctx.agents)
+    if missing:
+        if ctx.tracer is not None:
+            ctx.tracer.emit(RosterGapEvent(
+                session_id=ctx.tracer.session_id,
+                task_id=task.id,
+                missing_tags=sorted(missing),
+            ))
+        return DispatchResult(
+            status="roster_gap",
+            agent_id=None,
+            reason=f"no agent covers required tags: {sorted(missing)}",
+        )
+
+    result = run_task(task, ctx.agents, ctx.client, ctx.tracer, ctx.evaluator)
+    if not (isinstance(result, DispatchResult) and result.status == "unassigned"):
+        return result
+
+    if depth >= MAX_RECOVERY_DEPTH:
+        return result
+
     try:
-        sub_tasks = divider.divide(task, agents, client, tracer)
+        division = ctx.divider.divide(task, ctx.client)
     except Exception:
-        return run_task(task, agents, client, tracer, evaluator)
-    sub_results = run_chain(sub_tasks, agents, client, tracer, evaluator)
-    successful = [r for r in sub_results if isinstance(r, Output)]
+        return DispatchResult(
+            status="execution_failed",
+            agent_id=None,
+            reason="divider raised an exception",
+        )
+    if division.is_atomic:
+        return result
 
+    try:
+        sub_tasks = build_sub_tasks(task, division, ctx)
+    except EmptyTaggingError:
+        return DispatchResult(
+            status="execution_failed",
+            agent_id=None,
+            reason="tagging produced no tags",
+        )
+
+    sub_results = run_chain(sub_tasks, ctx, depth + 1)
+    successful = [r for r in sub_results if isinstance(r, Output)]
     if not successful:
         return DispatchResult(
             status="unassigned",
             agent_id=None,
-            reason="no sub-tasks succeeded",
+            reason="no sub-tasks recovered",
         )
 
     try:
-        return aggregator.aggregate(task, successful, client, tracer)
+        return ctx.aggregator.aggregate(task, successful, ctx.client, ctx.tracer)
     except Exception:
-        return successful[-1]  # fallback C : dernier output réussi
+        return successful[-1]
+
+
+def run_recovery(
+    description: str,
+    ctx: RunContext,
+    pinned_tags: dict[str, int] | None = None,
+) -> Output | DispatchResult | QAFailure:
+    """Entrée publique D1 (remplace run_divided_task). Tague la racine SEULEMENT si le
+    caller n'a pas épinglé de tags ; une racine déjà taguée n'est pas re-taguée (§2)."""
+    if pinned_tags:
+        task = Task(description=description, required_tags=pinned_tags)
+    else:
+        tags = ctx.tagger.tag(description, ctx.agents, ctx.client)
+        if not tags:
+            return DispatchResult(
+                status="execution_failed",
+                agent_id=None,
+                reason="tagging produced no tags",
+            )
+        task = Task(description=description, required_tags={t: DEFAULT_REQUIRED_ELO for t in tags})
+    return run_with_recovery(task, ctx, depth=0)

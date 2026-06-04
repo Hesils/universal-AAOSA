@@ -87,6 +87,11 @@ class TagLostEvent(_BaseEvent):
     last_elo: int  # ELO the agent held on this tag just before losing it
 
 
+class RosterGapEvent(_BaseEvent):
+    type: Literal["roster_gap"] = "roster_gap"
+    missing_tags: list[str]
+
+
 class ToolCalledEvent(_BaseEvent):
     type: Literal["tool_called"] = "tool_called"
     agent_id: str
@@ -122,6 +127,7 @@ ClaimEvent = Annotated[
         EloUpdatedEvent,
         TagAcquiredEvent,
         TagLostEvent,
+        RosterGapEvent,
         ToolCalledEvent,
         TaskDividedEvent,
         TaskAggregatedEvent,

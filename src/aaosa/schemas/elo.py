@@ -13,6 +13,8 @@ ELO_BASIC_MAX = 25
 # agents can pass the filter without having them, and may gain them on task success (V2).
 ELO_ACQUIRABLE_THRESHOLD = ELO_BASIC_MAX
 
+DEFAULT_REQUIRED_ELO = ELO_COMPETENT_MIN  # 30 — barre uniforme D1
+
 # V2 — Dynamic ELO update constants
 ELO_FLOOR = 1
 ELO_CEILING = ELO_EXPERT_MAX  # 95

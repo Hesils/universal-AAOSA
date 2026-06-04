@@ -9,6 +9,7 @@ from aaosa.tracing.events import (
     ExecutedEvent,
     Phase1FilteredEvent,
     QAEvaluatedEvent,
+    RosterGapEvent,
     TagAcquiredEvent,
 )
 
@@ -263,3 +264,16 @@ def test_qa_evaluated_event_spec_defaults_none():
         success=True, score=1.0, reason="ok", criteria_results={},
     )
     assert ev.spec is None
+
+
+def test_roster_gap_event_fields_and_discriminator():
+    e = RosterGapEvent(session_id="s", task_id="t", missing_tags=["quantum"])
+    assert e.type == "roster_gap"
+    assert e.missing_tags == ["quantum"]
+
+
+def test_roster_gap_event_in_claim_event_union():
+    e = RosterGapEvent(session_id="s", task_id="t", missing_tags=["x"])
+    dumped = e.model_dump()
+    restored = TypeAdapter(ClaimEvent).validate_python(dumped)
+    assert isinstance(restored, RosterGapEvent)

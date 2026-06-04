@@ -5,7 +5,11 @@ import pytest
 
 from aaosa.claiming.dispatch import DispatchResult
 from aaosa.core.agent import Agent
+from aaosa.runtime.aggregator import TaskAggregator
+from aaosa.runtime.context import RunContext
+from aaosa.runtime.divider import TaskDivider
 from aaosa.runtime.runner import run_chain, run_task
+from aaosa.runtime.tagger import Tagger
 from aaosa.schemas.claim import Claim
 from aaosa.schemas.output import LLMMetadata, Output
 from aaosa.schemas.task import Task
@@ -45,6 +49,15 @@ def _recording_execute(recorded):
     return fake_execute
 
 
+def _ctx_for_chain(agents):
+    return RunContext(
+        agents=agents, client=MagicMock(),
+        divider=TaskDivider(system_prompt="d"),
+        aggregator=TaskAggregator(system_prompt="a"),
+        tagger=Tagger(system_prompt="t"),
+    )
+
+
 class TestRunChain:
     def test_no_deps(self):
         a = make_agent()
@@ -52,7 +65,7 @@ class TestRunChain:
         recorded = {}
         with patch.object(Agent, "claim", _claim_for(a)):
             with patch.object(Agent, "execute", _recording_execute(recorded)):
-                results = run_chain([t1, t2, t3], [a], MagicMock())
+                results = run_chain([t1, t2, t3], _ctx_for_chain([a]), 1)
         assert [r.task_id for r in results] == [t1.id, t2.id, t3.id]
         assert all(isinstance(r, Output) for r in results)
 
@@ -64,7 +77,7 @@ class TestRunChain:
         recorded = {}
         with patch.object(Agent, "claim", _claim_for(a)):
             with patch.object(Agent, "execute", _recording_execute(recorded)):
-                run_chain([t3, t2, t1], [a], MagicMock())  # unordered input
+                run_chain([t3, t2, t1], _ctx_for_chain([a]), 1)  # unordered input
         assert [o.task_id for o in recorded[t2.id]] == [t1.id]
         assert [o.task_id for o in recorded[t3.id]] == [t2.id]
 
@@ -77,7 +90,7 @@ class TestRunChain:
         recorded = {}
         with patch.object(Agent, "claim", _claim_for(a)):
             with patch.object(Agent, "execute", _recording_execute(recorded)):
-                run_chain([t_a, t_b, t_c, t_d], [a], MagicMock())
+                run_chain([t_a, t_b, t_c, t_d], _ctx_for_chain([a]), 1)
         assert {o.task_id for o in recorded[t_d.id]} == {t_b.id, t_c.id}
 
     def test_zero_deps_receives_no_outputs(self):
@@ -86,7 +99,7 @@ class TestRunChain:
         recorded = {}
         with patch.object(Agent, "claim", _claim_for(a)):
             with patch.object(Agent, "execute", _recording_execute(recorded)):
-                run_chain([t1], [a], MagicMock())
+                run_chain([t1], _ctx_for_chain([a]), 1)
         assert recorded[t1.id] == []
 
     def test_execution_error_is_contained(self):
@@ -107,7 +120,7 @@ class TestRunChain:
 
         with patch.object(Agent, "claim", _claim_for(a)):
             with patch.object(Agent, "execute", exploding_execute):
-                results = run_chain([t1, t2, t3], [a], MagicMock())
+                results = run_chain([t1, t2, t3], _ctx_for_chain([a]), 1)
 
         assert isinstance(results[0], DispatchResult) and results[0].status == "execution_failed"
         assert isinstance(results[1], Output) and results[1].task_id == t2.id
@@ -122,7 +135,7 @@ class TestRunChain:
         recorded = {}
         with patch.object(Agent, "claim", _claim_for(a)):
             with patch.object(Agent, "execute", _recording_execute(recorded)):
-                results = run_chain([t1, t_b, t_c], [a], MagicMock())
+                results = run_chain([t1, t_b, t_c], _ctx_for_chain([a]), 1)
         by_id = {getattr(r, "task_id", None): r for r in results}
         # C must be dependency_failed and never executed
         c_result = next(r for r in results if isinstance(r, DispatchResult) and r.status == "dependency_failed")
@@ -136,13 +149,13 @@ class TestRunChain:
         t1.depends_on = [t2.id]
         t2.depends_on = [t1.id]
         with pytest.raises(ValueError, match="cycle"):
-            run_chain([t1, t2], [a], MagicMock())
+            run_chain([t1, t2], _ctx_for_chain([a]), 1)
 
     def test_unknown_dependency_raises(self):
         a = make_agent()
         t1 = make_task("A", depends_on=["does-not-exist"])
         with pytest.raises(ValueError, match="unknown dependency"):
-            run_chain([t1], [a], MagicMock())
+            run_chain([t1], _ctx_for_chain([a]), 1)
 
     def test_run_task_unchanged_with_depends_on(self):
         # run_task alone on a Task carrying depends_on behaves like V2 (ignores depends_on)
