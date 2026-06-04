@@ -37,62 +37,74 @@ def run_task(
 
     agent_map = {agent.id: agent for agent in candidate_agents}
     winner = agent_map[result.agent_id]
-    output = winner.execute(task, client, tracer)
 
-    if tracer is not None:
-        tracer.emit(ExecutedEvent(
-            session_id=tracer.session_id,
-            task_id=task.id,
-            agent_id=winner.id,
-            output_summary=output.content[:100],
-            output_content=output.content,
-            llm_metadata=output.llm_metadata,
-        ))
+    # Frontière de containment : execute() et evaluate() font des appels LLM (boucle
+    # d'outils, juge) qui peuvent lever. run_task ne propage jamais ces erreurs ; il
+    # renvoie DispatchResult(execution_failed). Simple et divisé se dégradent pareil
+    # (run_chain s'appuie sur ce contrat, il n'a plus son propre try).
+    try:
+        output = winner.execute(task, client, tracer)
 
-    if evaluator is None:
-        return output
-
-    qa_result = evaluator.evaluate(task, output)
-
-    if tracer is not None:
-        tracer.emit(QAEvaluatedEvent(
-            session_id=tracer.session_id,
-            task_id=task.id,
-            agent_id=winner.id,
-            success=qa_result.success,
-            score=qa_result.score,
-            reason=qa_result.reason,
-            criteria_results=qa_result.criteria_results,
-            judge=qa_result.judge,
-            spec=qa_result.spec_used,
-        ))
-
-    elo_result = update_agent_elo(winner, task, success=qa_result.success)
-
-    if tracer is not None:
-        tracer.emit(EloUpdatedEvent(
-            session_id=tracer.session_id,
-            task_id=task.id,
-            agent_id=winner.id,
-            deltas=elo_result.deltas,
-        ))
-        for tag, elo in elo_result.acquired_tags.items():
-            tracer.emit(TagAcquiredEvent(
+        if tracer is not None:
+            tracer.emit(ExecutedEvent(
                 session_id=tracer.session_id,
                 task_id=task.id,
                 agent_id=winner.id,
-                tag=tag,
-                initial_elo=elo,
+                output_summary=output.content[:100],
+                output_content=output.content,
+                llm_metadata=output.llm_metadata,
             ))
 
-    if qa_result.success:
-        return output
-    return QAFailure(
-        task_id=task.id,
-        agent_id=winner.id,
-        output=output,
-        qa_result=qa_result,
-    )
+        if evaluator is None:
+            return output
+
+        qa_result = evaluator.evaluate(task, output)
+
+        if tracer is not None:
+            tracer.emit(QAEvaluatedEvent(
+                session_id=tracer.session_id,
+                task_id=task.id,
+                agent_id=winner.id,
+                success=qa_result.success,
+                score=qa_result.score,
+                reason=qa_result.reason,
+                criteria_results=qa_result.criteria_results,
+                judge=qa_result.judge,
+                spec=qa_result.spec_used,
+            ))
+
+        elo_result = update_agent_elo(winner, task, success=qa_result.success)
+
+        if tracer is not None:
+            tracer.emit(EloUpdatedEvent(
+                session_id=tracer.session_id,
+                task_id=task.id,
+                agent_id=winner.id,
+                deltas=elo_result.deltas,
+            ))
+            for tag, elo in elo_result.acquired_tags.items():
+                tracer.emit(TagAcquiredEvent(
+                    session_id=tracer.session_id,
+                    task_id=task.id,
+                    agent_id=winner.id,
+                    tag=tag,
+                    initial_elo=elo,
+                ))
+
+        if qa_result.success:
+            return output
+        return QAFailure(
+            task_id=task.id,
+            agent_id=winner.id,
+            output=output,
+            qa_result=qa_result,
+        )
+    except Exception as exc:
+        return DispatchResult(
+            status="execution_failed",
+            agent_id=None,
+            reason=f"execution raised: {type(exc).__name__}: {exc}",
+        )
 
 
 def _topological_order(tasks: list[Task]) -> list[Task]:
@@ -156,17 +168,10 @@ def run_chain(
 
         resolved = [outputs[dep] for dep in task.depends_on]
         task_to_run = task.model_copy(update={"required_outputs": resolved})
-        try:
-            result = run_task(task_to_run, agents, client, tracer, evaluator)
-        except Exception as exc:
-            # Containment : l'échec d'exécution d'une sous-tâche (ex: MAX_TOOL_ROUNDS)
-            # ne doit pas tuer la chaîne. Les sous-tâches réussies restent agrégeables.
-            results.append(DispatchResult(
-                status="execution_failed",
-                agent_id=None,
-                reason=f"execution raised: {type(exc).__name__}: {exc}",
-            ))
-            continue
+        # Containment assuré par run_task (frontière unique) : il renvoie
+        # DispatchResult(execution_failed) sur erreur d'exécution, ne lève jamais.
+        # La chaîne relaie son résultat ; les sous-tâches réussies restent agrégeables.
+        result = run_task(task_to_run, agents, client, tracer, evaluator)
         results.append(result)
         if isinstance(result, Output):
             outputs[task.id] = result
@@ -182,15 +187,21 @@ def run_divided_task(
     aggregator: "TaskAggregator",
     tracer: Tracer | None = None,
     evaluator: QAEvaluator | None = None,
-) -> Output | DispatchResult:
+) -> Output | DispatchResult | QAFailure:
     """Divise une tâche, exécute la chaîne de sous-tâches, puis agrège.
 
     Stratégie B (LLM Aggregator) primaire. Fallback C : si aggregate() lève une
     exception, retourne le dernier Output réussi de la chaîne (qui peut être une
     sous-tâche de synthèse si le divider en a inclus une). Aucun output réussi →
     DispatchResult(status="unassigned").
+
+    Containment du diviseur : si divide() lève, on retombe sur un run simple
+    (run_task sur la tâche d'origine) au lieu de tuer le run.
     """
-    sub_tasks = divider.divide(task, agents, client, tracer)
+    try:
+        sub_tasks = divider.divide(task, agents, client, tracer)
+    except Exception:
+        return run_task(task, agents, client, tracer, evaluator)
     sub_results = run_chain(sub_tasks, agents, client, tracer, evaluator)
     successful = [r for r in sub_results if isinstance(r, Output)]
 
