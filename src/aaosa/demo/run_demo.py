@@ -10,9 +10,11 @@ from aaosa.qa.adaptive import build_adaptive_spec
 from aaosa.qa.protocol import QAFailure
 from aaosa.qa.spec_evaluator import from_spec
 from aaosa.runtime.aggregator import TaskAggregator
+from aaosa.runtime.context import RunContext
 from aaosa.runtime.divider import TaskDivider
 from aaosa.runtime.llm_client import create_client
-from aaosa.runtime.runner import run_divided_task, run_task
+from aaosa.runtime.runner import run_recovery, run_task
+from aaosa.runtime.tagger import Tagger
 from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
 from aaosa.tracing.formatter import print_timeline
@@ -64,7 +66,7 @@ def run_demo() -> None:
         ))
         print()
 
-    # --- A4 : run divisé (TaskDivider + Aggregateur émergent) ---
+    # --- D1 : run divisé (TaskDivider + Tagger + Aggregateur émergent) ---
     divider = TaskDivider(system_prompt=(
         "You are a task decomposer. Break a task into the minimal set of ordered "
         "sub-tasks needed to fully resolve it. Prefer few, well-scoped sub-tasks."
@@ -73,6 +75,14 @@ def run_demo() -> None:
         "You are a synthesizer. Merge the sub-task results into one coherent, "
         "complete answer to the original task."
     ))
+    tagger = Tagger(system_prompt=(
+        "You assign capability tags to a task description. Use the roster vocabulary "
+        "when it fits; name a real capability even if absent. Return at least one tag."
+    ))
+    ctx = RunContext(
+        agents=DEMO_AGENTS, client=client, divider=divider, aggregator=aggregator,
+        tagger=tagger, tracer=tracer,
+    )
     divided_task = Task(
         description=(
             "Build a small REST API with a Python backend, a database layer, "
@@ -81,8 +91,8 @@ def run_demo() -> None:
         required_tags={"python": 70, "backend": 70},
     )
     print(f"Divided task: {divided_task.description}")
-    divided_result = run_divided_task(
-        divided_task, DEMO_AGENTS, client, divider, aggregator, tracer=tracer
+    divided_result = run_recovery(
+        divided_task.description, ctx, pinned_tags=divided_task.required_tags
     )
     if isinstance(divided_result, Output):
         print("  -> Aggregated output produced (divided)")

@@ -2,135 +2,56 @@ from types import SimpleNamespace
 
 import pytest
 
-from aaosa.core.agent import Agent
-from aaosa.runtime.divider import (
-    DivisionResult,
-    SubTaskSpec,
-    TagSpec,
-    TaskDivider,
-)
-from aaosa.schemas.task import Task
-from aaosa.tracing.events import TaskDividedEvent
-from aaosa.tracing.tracer import Tracer
+from aaosa.runtime.divider import DivisionResult, SubTaskSpec, TaskDivider
 
 
-def make_agent(name="AgentA", elo=80) -> Agent:
-    return Agent(
-        name=name,
-        tags_with_elo={"python": elo, "backend": elo},
-        system_prompt=f"You are {name}.",
-    )
-
-
-def make_task(description="build a thing") -> Task:
-    return Task(description=description, required_tags={"python": 60})
-
-
-def _client_returning(division_result: DivisionResult):
-    """Mock OpenAI client whose beta.chat.completions.parse returns division_result."""
-    parsed = SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(parsed=division_result))]
-    )
+def _client_returning(division_result):
+    parsed = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=division_result))])
     return SimpleNamespace(
-        beta=SimpleNamespace(
-            chat=SimpleNamespace(
-                completions=SimpleNamespace(parse=lambda **kw: parsed)
-            )
-        )
+        beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=lambda **kw: parsed)))
     )
+
+
+class TestDivisionResult:
+    def test_non_atomic_requires_subtasks(self):
+        with pytest.raises(ValueError, match="non-atomic"):
+            DivisionResult(is_atomic=False, sub_tasks=[])
+
+    def test_atomic_forbids_subtasks(self):
+        with pytest.raises(ValueError, match="atomic"):
+            DivisionResult(is_atomic=True, sub_tasks=[SubTaskSpec(description="x")])
+
+    def test_atomic_ok_with_no_subtasks(self):
+        d = DivisionResult(is_atomic=True, sub_tasks=[])
+        assert d.is_atomic is True
+
+    def test_subtaskspec_has_no_tags(self):
+        spec = SubTaskSpec(description="x", depends_on_indices=[0])
+        assert not hasattr(spec, "required_tags")
 
 
 class TestTaskDivider:
-    def test_divide_returns_subtasks_with_parent_id(self):
-        task = make_task()
-        result = DivisionResult(
-            sub_tasks=[
-                SubTaskSpec(description="step one", required_tags=[TagSpec(tag="python", elo=60)]),
-                SubTaskSpec(description="step two", required_tags=[TagSpec(tag="backend", elo=60)]),
-            ]
-        )
-        divider = TaskDivider(system_prompt="You split tasks.")
-        sub_tasks = divider.divide(task, [make_agent()], _client_returning(result))
+    def test_divide_returns_division_result(self):
+        from aaosa.schemas.task import Task
+        result = DivisionResult(sub_tasks=[
+            SubTaskSpec(description="a"),
+            SubTaskSpec(description="b", depends_on_indices=[0]),
+        ])
+        divider = TaskDivider(system_prompt="split")
+        out = divider.divide(Task(description="t", required_tags={"python": 30}), _client_returning(result))
+        assert isinstance(out, DivisionResult)
+        assert [s.description for s in out.sub_tasks] == ["a", "b"]
+        assert out.sub_tasks[1].depends_on_indices == [0]
 
-        assert len(sub_tasks) == 2
-        assert all(st.parent_task_id == task.id for st in sub_tasks)
-        assert sub_tasks[0].required_tags == {"python": 60}
+    def test_divide_passes_through_atomic_verdict(self):
+        from aaosa.schemas.task import Task
+        result = DivisionResult(is_atomic=True, sub_tasks=[])
+        divider = TaskDivider(system_prompt="split")
+        out = divider.divide(Task(description="t", required_tags={"python": 30}), _client_returning(result))
+        assert out.is_atomic is True
 
-    def test_divide_subtask_without_tags_inherits_parent_tags(self):
-        # Le LLM peut renvoyer une sous-tâche sans required_tags (ex: synthèse) ;
-        # Task interdit required_tags vide → on hérite des tags du parent.
-        task = make_task()  # required_tags={"python": 60}
-        result = DivisionResult(
-            sub_tasks=[
-                SubTaskSpec(description="investigate", required_tags=[TagSpec(tag="backend", elo=70)]),
-                SubTaskSpec(description="synthesize", required_tags=[]),
-            ]
-        )
-        divider = TaskDivider(system_prompt="You split tasks.")
-        sub_tasks = divider.divide(task, [make_agent()], _client_returning(result))
-
-        assert sub_tasks[0].required_tags == {"backend": 70}
-        assert sub_tasks[1].required_tags == {"python": 60}  # hérité du parent
-
-    def test_divide_resolves_depends_on_indices(self):
-        task = make_task()
-        result = DivisionResult(
-            sub_tasks=[
-                SubTaskSpec(description="first", required_tags=[TagSpec(tag="python", elo=60)]),
-                SubTaskSpec(
-                    description="second",
-                    required_tags=[TagSpec(tag="backend", elo=60)],
-                    depends_on_indices=[0],
-                ),
-            ]
-        )
-        divider = TaskDivider(system_prompt="You split tasks.")
-        sub_tasks = divider.divide(task, [make_agent()], _client_returning(result))
-
-        assert sub_tasks[0].depends_on == []
-        assert sub_tasks[1].depends_on == [sub_tasks[0].id]
-
-    def test_divide_sets_order_index(self):
-        task = make_task()
-        result = DivisionResult(
-            sub_tasks=[
-                SubTaskSpec(description="a", required_tags=[TagSpec(tag="python", elo=60)]),
-                SubTaskSpec(description="b", required_tags=[TagSpec(tag="python", elo=60)]),
-                SubTaskSpec(description="c", required_tags=[TagSpec(tag="python", elo=60)]),
-            ]
-        )
-        divider = TaskDivider(system_prompt="You split tasks.")
-        sub_tasks = divider.divide(task, [make_agent()], _client_returning(result))
-
-        assert [st.order_index for st in sub_tasks] == [0, 1, 2]
-
-    def test_divide_emits_task_divided_event(self):
-        task = make_task()
-        result = DivisionResult(
-            sub_tasks=[
-                SubTaskSpec(description="a", required_tags=[TagSpec(tag="python", elo=60)]),
-                SubTaskSpec(
-                    description="b",
-                    required_tags=[TagSpec(tag="python", elo=60)],
-                    depends_on_indices=[0],
-                ),
-            ]
-        )
-        tracer = Tracer(session_id="sess-1")
-        divider = TaskDivider(system_prompt="You split tasks.")
-        sub_tasks = divider.divide(task, [make_agent()], _client_returning(result), tracer)
-
-        events = [e for e in tracer.events if isinstance(e, TaskDividedEvent)]
-        assert len(events) == 1
-        assert events[0].task_id == task.id
-        emitted = events[0].sub_tasks
-        assert [s.id for s in emitted] == [st.id for st in sub_tasks]
-        assert [s.description for s in emitted] == ["a", "b"]
-        assert emitted[1].depends_on == [sub_tasks[0].id]
-        # required_tags par sous-tâche émis dans l'event (sinon le dashboard ne les voit pas)
-        assert emitted[0].required_tags == {"python": 60}
-        assert emitted[1].required_tags == {"python": 60}
-
-    def test_divide_requires_at_least_one_subtask(self):
-        with pytest.raises(ValueError, match="sub_tasks cannot be empty"):
-            DivisionResult(sub_tasks=[])
+    def test_divide_raises_on_none_parsed(self):
+        from aaosa.schemas.task import Task
+        divider = TaskDivider(system_prompt="split")
+        with pytest.raises(ValueError, match="no parsed"):
+            divider.divide(Task(description="t", required_tags={"python": 30}), _client_returning(None))

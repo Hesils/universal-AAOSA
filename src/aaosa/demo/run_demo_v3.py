@@ -13,8 +13,11 @@ from aaosa.demo.tools import attach_tools
 from aaosa.elo.persistence import save_snapshot
 from aaosa.qa.spec_evaluator import AdaptiveSpecEvaluator
 from aaosa.runtime.aggregator import TaskAggregator
+from aaosa.runtime.context import RunContext
 from aaosa.runtime.divider import TaskDivider
 from aaosa.runtime.llm_client import create_client
+from aaosa.runtime.runner import run_recovery
+from aaosa.runtime.tagger import Tagger
 from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
 from aaosa.tracing.formatter import print_timeline
@@ -73,13 +76,20 @@ def run_demo_v3() -> None:
         "You are a synthesizer. Merge the sub-task results into one coherent, complete "
         "answer to the original incident."
     ))
+    tagger = Tagger(system_prompt=(
+        "You assign capability tags to a task description. Use the roster vocabulary "
+        "when it fits; name a real capability even if absent. Return at least one tag."
+    ))
+    ctx = RunContext(
+        agents=agents, client=client, divider=divider, aggregator=aggregator,
+        tagger=tagger, tracer=tracer, evaluator=evaluator,
+    )
 
     task = build_incident_task()
     print("=== AAOSA Demo V3 — divided incident run ===\n")
     print(f"Input: {task.description}\n")
 
-    from aaosa.runtime.runner import run_divided_task
-    result = run_divided_task(task, agents, client, divider, aggregator, tracer, evaluator)
+    result = run_recovery(task.description, ctx, pinned_tags=task.required_tags)
     outcome = "divided" if isinstance(result, Output) else "unassigned"
     print(f"  -> {outcome}\n")
 
