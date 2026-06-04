@@ -18,6 +18,13 @@ if TYPE_CHECKING:
     from aaosa.runtime.divider import TaskDivider
 
 
+def _roster_gap(task: Task, agents: list[Agent]) -> set[str]:
+    """Tags requis qu'AUCUN agent du roster ne porte. Compare la présence du tag,
+    pas son niveau d'ELO (un ELO insuffisant n'est pas un trou de roster)."""
+    roster = {tag for a in agents for tag in a.tags_with_elo}
+    return set(task.required_tags) - roster
+
+
 def run_task(
     task: Task,
     agents: list[Agent],

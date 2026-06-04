@@ -594,3 +594,25 @@ class TestRunTaskContainment:
                 result = run_task(task, [agent], MagicMock(), evaluator=_ExplodingEvaluator())
         assert isinstance(result, DispatchResult)
         assert result.status == "execution_failed"
+
+
+# ---------------------------------------------------------------------------
+# D1 — Helper pur _roster_gap
+# ---------------------------------------------------------------------------
+
+def test_roster_gap_detects_missing_tags():
+    from aaosa.runtime.runner import _roster_gap
+    agents = [Agent(name="A", tags_with_elo={"python": 80}, system_prompt="x")]
+    task = Task(description="t", required_tags={"python": 30, "quantum": 30})
+    assert _roster_gap(task, agents) == {"quantum"}
+
+
+def test_roster_gap_empty_when_all_covered():
+    from aaosa.runtime.runner import _roster_gap
+    agents = [
+        Agent(name="A", tags_with_elo={"python": 5}, system_prompt="x"),
+        Agent(name="B", tags_with_elo={"sql": 5}, system_prompt="x"),
+    ]
+    task = Task(description="t", required_tags={"python": 30, "sql": 30})
+    # presence of tag in roster suffices — insufficient ELO is NOT a roster_gap
+    assert _roster_gap(task, agents) == set()
