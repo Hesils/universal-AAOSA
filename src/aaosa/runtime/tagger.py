@@ -14,6 +14,11 @@ class TagSet(BaseModel):
     tags: list[str] = Field(min_length=1)
 
 
+class EmptyTaggingError(Exception):
+    """Raised when tag generation fails or returns an empty set."""
+    pass
+
+
 class Tagger:
     """Génère un ensemble de tags pour une description donnée.
 
