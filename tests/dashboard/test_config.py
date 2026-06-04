@@ -9,7 +9,7 @@ def test_defaults():
     c = DashboardConfig()
     assert c.runs_root == Path("runs")
     assert c.host == "127.0.0.1"
-    assert c.port == 5000
+    assert c.port == 5001  # 5000 réservé au dashboard AIOS
 
 
 def test_override():
