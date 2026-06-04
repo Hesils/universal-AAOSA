@@ -9,6 +9,7 @@ from aaosa.runtime.context import RunContext
 from aaosa.runtime.divider import DivisionResult, SubTaskSpec
 from aaosa.runtime.runner import build_sub_tasks, run_recovery, run_with_recovery
 from aaosa.runtime.tagger import EmptyTaggingError
+from aaosa.schemas.elo import DEFAULT_REQUIRED_ELO
 from aaosa.schemas.output import LLMMetadata, Output
 from aaosa.schemas.task import Task
 from aaosa.tracing.events import RosterGapEvent, TaskDividedEvent
@@ -150,6 +151,19 @@ class TestRunWithRecovery:
         assert result.status == "execution_failed"
         assert result.reason == "tagging produced no tags"
 
+    def test_divider_exception_returns_execution_failed(self):
+        class _ExplodingDivider:
+            def divide(self, task, client):
+                raise RuntimeError("LLM timeout")
+
+        ctx = _ctx(_ExplodingDivider())
+        task = Task(description="t", required_tags={"python": 30})
+        unassigned = DispatchResult(status="unassigned", agent_id=None, reason="no claim")
+        with patch("aaosa.runtime.runner.run_task", return_value=unassigned):
+            result = run_with_recovery(task, ctx)
+        assert result.status == "execution_failed"
+        assert "divider" in result.reason
+
 
 class TestBuildSubTasks:
     def test_tags_each_subtask_with_uniform_elo_and_resolves_deps(self):
@@ -171,7 +185,7 @@ class TestBuildSubTasks:
         build_sub_tasks(parent, _two_subtask_division(), ctx)
         events = [e for e in tracer.events if isinstance(e, TaskDividedEvent)]
         assert len(events) == 1
-        assert events[0].sub_tasks[0].required_tags == {"python": 30}
+        assert events[0].sub_tasks[0].required_tags == {"python": DEFAULT_REQUIRED_ELO}
 
     def test_raises_empty_tagging_error_on_empty(self):
         ctx = _ctx(_StaticDivider(_two_subtask_division()), tagger=_FakeTagger(default=()))

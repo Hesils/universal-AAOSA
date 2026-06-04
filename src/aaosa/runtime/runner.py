@@ -251,7 +251,14 @@ def run_with_recovery(task: Task, ctx: RunContext, depth: int = 0) -> Output | D
     if depth >= MAX_RECOVERY_DEPTH:
         return result
 
-    division = ctx.divider.divide(task, ctx.client)
+    try:
+        division = ctx.divider.divide(task, ctx.client)
+    except Exception:
+        return DispatchResult(
+            status="execution_failed",
+            agent_id=None,
+            reason="divider raised an exception",
+        )
     if division.is_atomic:
         return result
 
