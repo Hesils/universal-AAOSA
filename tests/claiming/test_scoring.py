@@ -117,12 +117,17 @@ def test_fit_score_multiple_tags_weighted():
     assert fit_score(agent, task) == 1.4
 
 
-def test_fit_score_acquirable_tag_missing_penalizes():
-    """Acquirable tag missing from agent contributes 0 to numerator."""
+def test_fit_score_acquirable_tag_missing_no_penalty():
+    """Acquirable tag the agent lacks is ignored: vrai bonus pur, aucune penalite (Gap 2).
+
+    Lacking the acquirable tag doit donner le meme score qu'une tache sans ce tag.
+    """
     agent = make_agent({"python": 60})
-    task = Task(description="Test", required_tags={"python": 50}, acquirable_tags={"docker": 10})
-    # (60 + 0) / (50 + 10) = 60 / 60 = 1.0
-    assert fit_score(agent, task) == 1.0
+    with_acq = Task(description="Test", required_tags={"python": 50}, acquirable_tags={"docker": 10})
+    without_acq = Task(description="Test", required_tags={"python": 50})
+    # docker absent de l'agent -> non compte -> 60 / 50 = 1.2, identique a la tache sans docker
+    assert fit_score(agent, with_acq) == 1.2
+    assert fit_score(agent, with_acq) == fit_score(agent, without_acq)
 
 
 def test_fit_score_acquirable_tag_present_improves():

@@ -78,6 +78,11 @@ class _ExplodingAggregator:
         raise RuntimeError("LLM exploded")
 
 
+class _ExplodingDivider:
+    def divide(self, task, agents, client, tracer=None):
+        raise RuntimeError("divider LLM exploded")
+
+
 class TestRunDividedTask:
     def test_run_divided_task_returns_output(self):
         task = make_task()
@@ -110,6 +115,19 @@ class TestRunDividedTask:
             result = run_divided_task(task, [make_agent()], object(), _FakeDivider(), _ExplodingAggregator())
         assert isinstance(result, Output)
         assert result.task_id == "s2"  # last successful output (fallback C)
+
+    def test_run_divided_task_divide_raises_falls_back_to_simple_run(self):
+        """divide() qui lève -> run_divided_task retombe sur un run simple
+        (run_task sur la tâche d'origine) au lieu de tuer le run (Gap 1)."""
+        task = make_task()
+        sentinel = make_output(task.id, "simple-run-result")
+        with patch("aaosa.runtime.runner.run_task", return_value=sentinel) as rt:
+            with patch("aaosa.runtime.runner.run_chain") as rc:
+                result = run_divided_task(task, [make_agent()], object(), _ExplodingDivider(), _RecordingAggregator())
+        assert result is sentinel
+        rc.assert_not_called()
+        rt.assert_called_once()
+        assert rt.call_args.args[0] is task
 
     def test_run_divided_task_tracer_event_order(self):
         task = make_task()

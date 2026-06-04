@@ -495,3 +495,50 @@ def test_run_task_qa_event_carries_spec():
     qa_events = [e for e in tracer.events if isinstance(e, QAEvaluatedEvent)]
     assert len(qa_events) == 1
     assert qa_events[0].spec == spec
+
+
+# ---------------------------------------------------------------------------
+# Gap 3 — run_task est la frontière de containment (erreurs execute/evaluate)
+# ---------------------------------------------------------------------------
+
+class TestRunTaskContainment:
+    def test_execute_raises_returns_execution_failed(self):
+        """execute() qui lève (ex: MAX_TOOL_ROUNDS, outil qui plante) -> run_task
+        renvoie DispatchResult(execution_failed) au lieu de propager l'exception."""
+        task = make_task()
+        agent = make_agent("A", 80)
+        claim = make_claim(agent, task, "claim")
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", side_effect=RuntimeError("max tool rounds exceeded")):
+                result = run_task(task, [agent], MagicMock())
+        assert isinstance(result, DispatchResult)
+        assert result.status == "execution_failed"
+
+    def test_execute_raises_no_elo_update(self):
+        """execute() qui lève -> aucun ELO update (pas d'output à juger)."""
+        task = make_task()
+        agent = make_agent("A", 80)
+        before = dict(agent.tags_with_elo)
+        claim = make_claim(agent, task, "claim")
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", side_effect=RuntimeError("boom")):
+                run_task(task, [agent], MagicMock(), evaluator=AlwaysPassEvaluator())
+        assert agent.tags_with_elo == before
+
+    def test_evaluate_raises_returns_execution_failed(self):
+        """evaluator.evaluate() qui lève -> run_task renvoie execution_failed au lieu
+        de propager (run_task ne lève jamais : frontière unique de containment)."""
+        task = make_task()
+        agent = make_agent("A", 80)
+        claim = make_claim(agent, task, "claim")
+        output = make_output(agent, task)
+
+        class _ExplodingEvaluator:
+            def evaluate(self, t, o):
+                raise RuntimeError("judge LLM exploded")
+
+        with patch.object(Agent, "claim", return_value=claim):
+            with patch.object(Agent, "execute", return_value=output):
+                result = run_task(task, [agent], MagicMock(), evaluator=_ExplodingEvaluator())
+        assert isinstance(result, DispatchResult)
+        assert result.status == "execution_failed"
