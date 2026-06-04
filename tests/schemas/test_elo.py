@@ -6,6 +6,7 @@ from aaosa.schemas.elo import (
     ELO_COMPETENT_MAX,
     ELO_BASIC_MIN,
     ELO_BASIC_MAX,
+    DEFAULT_REQUIRED_ELO,
 )
 
 
@@ -53,3 +54,8 @@ def test_elo_hierarchy_holds():
     """ELO tiers should not overlap: Basic < Competent < Expert."""
     assert ELO_BASIC_MAX < ELO_COMPETENT_MIN
     assert ELO_COMPETENT_MAX < ELO_EXPERT_MIN
+
+
+def test_default_required_elo_is_competent_floor():
+    """DEFAULT_REQUIRED_ELO should equal ELO_COMPETENT_MIN."""
+    assert DEFAULT_REQUIRED_ELO == ELO_COMPETENT_MIN == 30
