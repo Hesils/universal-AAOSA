@@ -8,6 +8,7 @@ class SubTaskSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
     description: str
     depends_on_indices: list[int] = Field(default_factory=list)
+    context: str | None = None  # D3 — contexte distillé pour CETTE sous-tâche
 
 
 class DivisionResult(BaseModel):

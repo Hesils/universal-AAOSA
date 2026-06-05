@@ -218,6 +218,7 @@ def build_sub_tasks(parent_task: Task, division: DivisionResult, ctx: RunContext
             required_tags={t: DEFAULT_REQUIRED_ELO for t in tags},
             parent_task_id=parent_task.id,
             order_index=i,
+            context=spec.context,
         ))
     for i, spec in enumerate(division.sub_tasks):
         sub_tasks[i].depends_on = [sub_tasks[j].id for j in spec.depends_on_indices]
