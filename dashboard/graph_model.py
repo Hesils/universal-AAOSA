@@ -253,7 +253,10 @@ def _build_nodes(events: list[ClaimEvent]) -> list[GraphNode]:
         nodes.append(GraphNode(id="testset", layer="top", type="testset", label="TestSet"))
     if any(isinstance(e, TaskDividedEvent) for e in events):
         nodes.append(GraphNode(id="divider", layer="center", type="divider", label="Divider"))
-        nodes.append(GraphNode(id="aggregator", layer="center", type="aggregator", label="Aggregator"))
+        # l'aggregator n'apparaît que s'il y a eu une vraie agrégation (≥2 sinks).
+        # Single-sink (court-circuit) -> aucun TaskAggregatedEvent -> pas de nœud aggregator.
+        if any(isinstance(e, TaskAggregatedEvent) for e in events):
+            nodes.append(GraphNode(id="aggregator", layer="center", type="aggregator", label="Aggregator"))
     for aid in _agent_ids(events):
         nodes.append(GraphNode(id=aid, layer="bottom", type="agent", label=aid))
     seen_tools: set[str] = set()
@@ -268,11 +271,13 @@ def _build_edges(nodes: list[GraphNode], events: list[ClaimEvent]) -> list[Graph
     """Arêtes statiques = la pipeline réelle (mêmes arêtes que le backbone/fan-out des jalons).
 
     Simple : input→dispatch→agents→evaluator→output.
-    Divisé : input→divider→dispatch→agents→evaluator→aggregator→output.
+    Divisé sans agrégation : input→divider→dispatch→agents→evaluator→output.
+    Divisé+agrégé : input→divider→dispatch→agents→evaluator→aggregator→output.
     Tools en canopée (agent→tool). testset (fork) seulement sur échec QA.
     """
     agent_ids = [n.id for n in nodes if n.type == "agent"]
     divided = any(n.id == "divider" for n in nodes)
+    aggregated = any(n.id == "aggregator" for n in nodes)
     edges: list[GraphEdge] = []
     if divided:
         edges.append(GraphEdge(from_node="input", to="divider"))
@@ -283,7 +288,7 @@ def _build_edges(nodes: list[GraphNode], events: list[ClaimEvent]) -> list[Graph
     edges += [GraphEdge(from_node=aid, to="evaluator") for aid in agent_ids]
     for aid, tname in _distinct_tools(events):
         edges.append(GraphEdge(from_node=aid, to=_tool_node_id(tname)))
-    if divided:
+    if aggregated:
         edges.append(GraphEdge(from_node="evaluator", to="aggregator"))
         edges.append(GraphEdge(from_node="aggregator", to="output"))
     else:

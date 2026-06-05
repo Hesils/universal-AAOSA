@@ -42,11 +42,17 @@ class TestNodes:
         assert all(n.layer == "tools" for n in tool_nodes)
         assert {n.label for n in tool_nodes} == {"grep", "read"}
 
-    def test_divider_aggregator_nodes_only_when_divided(self):
+    def test_divider_node_when_divided_aggregator_only_when_aggregated(self):
         assert "divider" not in {n.id for n in _build_nodes([])}
+        # divisé mais sans agrégation (court-circuit single-sink) -> divider, PAS d'aggregator
         divided = [TaskDividedEvent(session_id=SID, task_id="p", sub_tasks=[DividedSubTask(id="s1", description="x")])]
         ids = {n.id for n in _build_nodes(divided)}
-        assert "divider" in ids and "aggregator" in ids
+        assert "divider" in ids and "aggregator" not in ids
+        # divisé + agrégé -> les deux nœuds
+        agg = divided + [TaskAggregatedEvent(session_id=SID, task_id="p", sub_task_ids=["s1"],
+                                             output_summary="o", output_content="o")]
+        ids2 = {n.id for n in _build_nodes(agg)}
+        assert "divider" in ids2 and "aggregator" in ids2
 
 
 class TestEdges:
@@ -57,18 +63,28 @@ class TestEdges:
         pairs = {(e.from_node, e.to) for e in edges}
         assert ("ag", _tool_node_id("grep")) in pairs
 
-    def test_divider_backbone_edges(self):
+    def test_divider_backbone_edges_single_sink(self):
+        # divisé sans event d'agrégation -> backbone evaluator->output, aucun aggregator
         divided = [TaskDividedEvent(session_id=SID, task_id="p", sub_tasks=[DividedSubTask(id="s1", description="x")])]
         nodes = _build_nodes(divided)
         edges = _build_edges(nodes, divided)
         pairs = {(e.from_node, e.to) for e in edges}
-        # pipeline réelle : input→divider→dispatch ... →evaluator→aggregator→output
         assert ("input", "divider") in pairs
         assert ("divider", "dispatch") in pairs
+        assert ("evaluator", "output") in pairs
+        assert ("evaluator", "aggregator") not in pairs
+        assert ("input", "dispatch") not in pairs
+
+    def test_divider_backbone_edges_multi_sink(self):
+        events = [
+            TaskDividedEvent(session_id=SID, task_id="p", sub_tasks=[DividedSubTask(id="s1", description="x")]),
+            TaskAggregatedEvent(session_id=SID, task_id="p", sub_task_ids=["s1"], output_summary="o", output_content="o"),
+        ]
+        nodes = _build_nodes(events)
+        edges = _build_edges(nodes, events)
+        pairs = {(e.from_node, e.to) for e in edges}
         assert ("evaluator", "aggregator") in pairs
         assert ("aggregator", "output") in pairs
-        # arêtes hors-pipeline qui parasitaient le graphe (corrigées)
-        assert ("input", "dispatch") not in pairs
         assert ("divider", "aggregator") not in pairs
 
 
