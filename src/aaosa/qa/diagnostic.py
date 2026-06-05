@@ -30,3 +30,69 @@ class DiagnosticResult(BaseModel):
     attribution: Literal["agent", "evaluator", "task_spec", "unattributed"]
     consignes: str | None = None   # présent si l'agent peut réessayer avec des clarifications
     reason: str                    # alimente FailureContext.diagnostic_reason
+
+
+def _build_diagnostic_prompt(task: Task, output: Output, qa_result: QAResult) -> str:
+    """Construit le prompt pour `diagnose_failure`."""
+    failed = [name for name, ok in qa_result.criteria_results.items() if not ok]
+    context_section = f"Contexte domaine:\n{task.context}\n\n" if task.context else ""
+    return (
+        "Une réponse d'agent vient d'échouer au QA sur un run live. Décide quoi faire "
+        "MAINTENANT pour récupérer.\n\n"
+        f"Description de la tâche:\n{task.description}\n\n"
+        f"{context_section}"
+        f"Réponse produite par l'agent:\n{output.content}\n\n"
+        f"Verdict QA (score={qa_result.score:.2f}): {qa_result.reason}\n"
+        f"Critères ratés: {', '.join(failed) or 'aucun critère scoré nommé'}\n\n"
+        "Attribue la cause à exactement une valeur :\n"
+        '- "agent": la réponse est objectivement faible, l\'agent peut réessayer avec '
+        "des clarifications\n"
+        '- "evaluator": les critères d\'évaluation sont inadaptés (trop stricts, mauvais '
+        "critères) — la réponse est probablement correcte\n"
+        '- "task_spec": la description de la tâche est ambiguë et doit être décomposée/clarifiée\n'
+        '- "unattributed": cause indéterminée\n\n'
+        'Si "agent" ou "evaluator", fournis des "consignes" courtes et actionnables que '
+        "l'agent suivra à sa prochaine tentative. Sinon laisse consignes vide.\n"
+        'Donne aussi un "reason" bref expliquant ton attribution.'
+    )
+
+
+def diagnose_failure(
+    task: Task,
+    output: Output,
+    qa_result: QAResult,
+    client: OpenAI,
+) -> DiagnosticResult | None:
+    """Diagnostique un qa_fail. Retourne None si le LLM échoue (caller → unattributed)."""
+    prompt = _build_diagnostic_prompt(task, output, qa_result)
+
+    # Structured output (SDK 2.x)
+    try:
+        response = client.beta.chat.completions.parse(
+            model="gpt-4o-mini",
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+            response_format=DiagnosticResult,
+        )
+        parsed = response.choices[0].message.parsed
+        if parsed is not None:
+            return parsed
+    except Exception:
+        pass  # structured output indisponible — fallback JSON
+
+    # Fallback : completion brute + parse JSON
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.choices[0].message.content or ""
+        data = json.loads(raw)
+        return DiagnosticResult(
+            attribution=data["attribution"],
+            consignes=data.get("consignes"),
+            reason=data["reason"],
+        )
+    except Exception:
+        return None  # diagnostic échoue → caller traite comme unattributed
