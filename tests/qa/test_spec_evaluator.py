@@ -275,3 +275,49 @@ class TestAdaptiveSpecEvaluatorFailureContext:
             make_task(), make_output("x")
         )
         assert captured["fc"] is fc
+
+
+from aaosa.qa.criteria import CRITERIA_REGISTRY, CriterionOutcome
+
+
+class TestDistinctKeys:
+    def test_single_name_not_suffixed(self):
+        spec = EvaluatorSpec(
+            criteria=[CriterionSpec(name="min_length", weight=1.0)],
+            success_threshold=0.0,
+        )
+        r = SpecEvaluator(spec).evaluate(make_task(), make_output("x" * 100))
+        assert "min_length" in r.criteria_results
+        assert "min_length#1" not in r.criteria_results
+
+    def test_duplicate_names_get_distinct_keys(self, monkeypatch):
+        # deux critères de même name → deux clés distinctes, les deux scorés
+        def stub(task, output, params):
+            return CriterionOutcome(name="dup", passed=True, score=1.0, detail="ok")
+
+        monkeypatch.setitem(CRITERIA_REGISTRY, "dup", stub)
+        spec = EvaluatorSpec(
+            criteria=[
+                CriterionSpec(name="dup", weight=1.0),
+                CriterionSpec(name="dup", weight=1.0),
+            ],
+            success_threshold=0.0,
+        )
+        r = SpecEvaluator(spec).evaluate(make_task(), make_output("hello"))
+        assert "dup#1" in r.criteria_results
+        assert "dup#2" in r.criteria_results
+
+    def test_duplicate_gate_keys_distinct(self, monkeypatch):
+        def stub(task, output, params):
+            return CriterionOutcome(name="g", passed=True, score=1.0, detail="ok")
+
+        monkeypatch.setitem(CRITERIA_REGISTRY, "g", stub)
+        spec = EvaluatorSpec(
+            criteria=[
+                CriterionSpec(name="g", gate=True),
+                CriterionSpec(name="g", gate=True),
+            ],
+            success_threshold=0.0,
+        )
+        r = SpecEvaluator(spec).evaluate(make_task(), make_output("hello"))
+        assert "g#1" in r.criteria_results and "g#2" in r.criteria_results

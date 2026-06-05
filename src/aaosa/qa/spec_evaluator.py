@@ -10,6 +10,22 @@ from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
 
 
+def _criteria_keys(criteria) -> list[str]:
+    """Clé unique par critère : `name` si unique, `name#k` (k ordinal) si homonymes."""
+    totals: dict[str, int] = {}
+    for c in criteria:
+        totals[c.name] = totals.get(c.name, 0) + 1
+    seen: dict[str, int] = {}
+    keys: list[str] = []
+    for c in criteria:
+        if totals[c.name] == 1:
+            keys.append(c.name)
+        else:
+            seen[c.name] = seen.get(c.name, 0) + 1
+            keys.append(f"{c.name}#{seen[c.name]}")
+    return keys
+
+
 class SpecEvaluator:
     def __init__(
         self,
@@ -28,13 +44,15 @@ class SpecEvaluator:
 
     def evaluate(self, task: Task, output: Output) -> QAResult:
         criteria_results: dict[str, bool] = {}
+        keys = _criteria_keys(self.spec.criteria)
+        keyed = list(zip(self.spec.criteria, keys))
 
         # 1. Gates (ordre de la spec)
-        for c in self.spec.criteria:
+        for c, key in keyed:
             if not c.gate:
                 continue
             outcome = get_criterion(c.name)(task, output, {**c.params, "client": self.client})
-            criteria_results[outcome.name] = outcome.passed
+            criteria_results[key] = outcome.passed
             if not outcome.passed:
                 return QAResult(
                     task_id=task.id, agent_id=output.agent_id,
@@ -44,13 +62,13 @@ class SpecEvaluator:
                 )
 
         # 2. Critères scorés
-        scored = [c for c in self.spec.criteria if not c.gate]
+        scored = [(c, key) for c, key in keyed if not c.gate]
         if scored:
-            total_weight = sum(c.weight for c in scored)
+            total_weight = sum(c.weight for c, _ in scored)
             weighted = 0.0
-            for c in scored:
+            for c, key in scored:
                 outcome = get_criterion(c.name)(task, output, {**c.params, "client": self.client})
-                criteria_results[outcome.name] = outcome.passed
+                criteria_results[key] = outcome.passed
                 weighted += outcome.score * c.weight
             det_score = weighted / total_weight if total_weight > 0 else 1.0
         else:
