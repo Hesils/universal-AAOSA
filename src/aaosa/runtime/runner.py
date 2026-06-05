@@ -305,6 +305,70 @@ def _divide_and_recover(
         return sinks[-1]
 
 
+def _qa_failed(task: Task, attribution: str, consignes_tried: bool) -> DispatchResult:
+    return DispatchResult(
+        status="qa_failed", agent_id=None,
+        reason=f"qa failed (attribution={attribution})",
+        attribution=attribution, consignes_tried=consignes_tried,
+    )
+
+
+def _retry_with_consignes(
+    task: Task,
+    consignes: str | None,
+    ctx: RunContext,
+    attribution: str,
+) -> "Output | DispatchResult | QAFailure":
+    """Retry agent UNE fois, consignes injectées dans task.context. Output → succès ;
+    sinon DispatchResult(qa_failed, consignes_tried=True)."""
+    if consignes:
+        base = task.context or ""
+        new_context = f"{base}\n\n# Consignes de correction\n{consignes}".strip()
+        retry_task = task.model_copy(update={"context": new_context})
+    else:
+        retry_task = task
+    result = run_task(retry_task, ctx.agents, ctx.client, ctx.tracer, ctx.evaluator)
+    if isinstance(result, Output):
+        return result
+    return _qa_failed(task, attribution=attribution, consignes_tried=True)
+
+
+def _route_diagnostic(
+    task: Task,
+    failure: "QAFailure",
+    ctx: RunContext,
+    depth: int,
+    chained_context: list[Task] | None,
+) -> "Output | DispatchResult | QAFailure":
+    diagnostic = diagnose_failure(task, failure.output, failure.qa_result, ctx.client)
+    if diagnostic is None:
+        return _qa_failed(task, attribution="unattributed", consignes_tried=False)
+
+    if diagnostic.attribution == "agent":
+        return _retry_with_consignes(task, diagnostic.consignes, ctx, attribution="agent")
+
+    if diagnostic.attribution == "evaluator":
+        new_evaluator = AdaptiveSpecEvaluator(ctx.client)
+        qa2 = new_evaluator.evaluate(task, failure.output)
+        if qa2.success:
+            return failure.output   # l'output original passe avec le nouvel evaluator
+        return _retry_with_consignes(task, diagnostic.consignes, ctx, attribution="evaluator")
+
+    if diagnostic.attribution == "task_spec":
+        failure_ctx = FailureContext(
+            failed_output=failure.output,
+            qa_result=failure.qa_result,
+            diagnostic_reason=diagnostic.reason,
+        )
+        return _divide_and_recover(
+            task, ctx, depth, chained_context,
+            failure_context=failure_ctx,
+            atomic_fallback=_qa_failed(task, attribution="task_spec", consignes_tried=False),
+        )
+
+    return _qa_failed(task, attribution="unattributed", consignes_tried=False)
+
+
 def run_with_recovery(
     task: Task,
     ctx: RunContext,
@@ -335,6 +399,9 @@ def run_with_recovery(
             task, ctx, depth, chained_context,
             failure_context=None, atomic_fallback=result,
         )
+
+    if isinstance(result, QAFailure):
+        return _route_diagnostic(task, result, ctx, depth, chained_context)
 
     return result
 
