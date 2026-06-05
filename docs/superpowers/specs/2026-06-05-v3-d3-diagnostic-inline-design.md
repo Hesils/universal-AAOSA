@@ -32,13 +32,15 @@ un run live, orienté recovery immédiat.
 
 ## 2. Périmètre
 
-D3 introduit trois composants :
+D3 introduit quatre composants :
 
 1. **Agent de diagnostic unifié** (`diagnose_failure`) — 1 LLM call, retourne attribution +
    consignes
 2. **Routes déterministes dans `run_with_recovery`** — branchement code sur l'attribution
-3. **Refonte du divider** — reçoit un `chained_context` optionnel (path root→tâche) et un
-   `FailureContext` optionnel
+3. **Refonte du divider** — reçoit un `chained_context` optionnel (path root→tâche), un
+   `FailureContext` optionnel, et génère un `context` focalisé par sous-tâche
+4. **`Task.context`** — nouveau champ premier rang sur le schema `Task`, propagé et
+   spécialisé par le divider à chaque niveau de l'arbre
 
 Hors périmètre :
 - `execution_failed` : auto-détecté mécaniquement, pas de diagnostic (inchangé)
@@ -135,7 +137,28 @@ def diagnose_failure(
 Prompt : fournit la description de la tâche, l'output produit, les critères QA ratés, et
 demande : attribution + consignes courtes si l'agent peut réessayer avec des clarifications.
 
-### 4.4 Refonte du divider (`runtime/divider.py`)
+### 4.4 `Task.context` (`schemas/task.py`)
+
+```python
+class Task(BaseModel):
+    ...
+    context: str | None = None   # contexte domaine focalisé sur cette tâche
+```
+
+Champ premier rang, `None` par défaut — rétrocompat totale avec les 761 tests existants.
+
+**Rôle** : porter le contexte domaine pertinent pour cette tâche spécifique (ex : "système
+HIPAA, PostgreSQL 14, contrainte temps réel < 200ms"). Distinct de `description` (ce qu'il
+faut faire) et de `previous_outputs` (ce qui a déjà été produit).
+
+**Consommateurs** :
+- `agent.execute` : injecte `task.context` dans le user content (formalise le pattern
+  `task.metadata.get("context")` existant en V2c — migration transparente)
+- `AdaptiveSpecEvaluator.evaluate` : use context pour générer une spec d'évaluation
+  adaptée au domaine
+- `diagnose_failure` : use context pour affiner le diagnostic
+
+### 4.5 Refonte du divider (`runtime/divider.py`)
 
 Signature actuelle :
 ```python
@@ -162,16 +185,19 @@ Construit par `run_with_recovery` à partir de `task.parent_task_id` en remontan
 l'output raté, le résultat QA, et l'explication du diagnostic. Révèle où se trouve
 l'ambiguïté dans la spec.
 
-Le prompt du divider est enrichi avec ces deux contextes quand ils sont présents. L'objectif
-est que le divider produise des specs de sous-tâches non ambiguës — le `chained_context`
-seul devrait suffire dans la majorité des cas ; le `failure_context` est un signal
-complémentaire à faible coût.
+**Génération de `context` par sous-tâche** : le divider génère déjà les descriptions de
+sous-tâches via un LLM call. Ce même call produit un `context: str | None` par sous-tâche
+dans son structured output — contexte distillé depuis `task.context` + `chained_context`,
+focalisé sur ce que la sous-tâche doit savoir. Coût additionnel : tokens supplémentaires
+dans le call existant, pas de call LLM supplémentaire.
 
-**Rétrocompat** : les deux paramètres sont optionnels avec `None` par défaut. D1 passe
-`chained_context` seul (pas de `failure_context`). Les appels existants passent les deux à
-`None`.
+Principe : chaque sous-tâche reçoit un contexte taillé pour elle, pas une copie du parent.
+À mesure que l'arbre s'approfondit, le contexte se distille — pas de context rot.
 
-### 4.5 `DispatchResult` — nouveaux champs
+**Rétrocompat** : tous les paramètres nouveaux sont optionnels avec `None` par défaut.
+D1 passe `chained_context` seul. Les appels existants passent tout à `None`.
+
+### 4.6 `DispatchResult` — nouveaux champs
 
 ```python
 class DispatchResult(BaseModel):
@@ -183,7 +209,7 @@ class DispatchResult(BaseModel):
 Ces champs sont renseignés uniquement depuis les routes D3. Rétrocompat : `None`/`False`
 par défaut.
 
-### 4.6 `run_with_recovery` étendu (`runtime/runner.py`)
+### 4.7 `run_with_recovery` étendu (`runtime/runner.py`)
 
 Point d'orchestration unique des routes D3. Reçoit en paramètre optionnel :
 - `chained_context: list[Task] | None` — passé au divider si route `task_spec`
@@ -227,12 +253,16 @@ else:  # unattributed
   indépendant.
 - **`diagnose_failure` est pur** : prend des données en entrée, retourne un `DiagnosticResult`.
   Pas d'accès au runtime, au store, ni à l'historique.
-- **Le divider reste pur** : `chained_context` et `failure_context` sont des données en
-  entrée, pas des accès au runtime. Le divider ne sait pas d'où viennent ces données.
+- **Le divider reste pur** : `chained_context`, `failure_context`, et la génération de
+  `context` par sous-tâche sont des données en entrée/sortie. Le divider ne sait pas d'où
+  viennent ces données ni qui les consomme.
 - **`run_with_recovery` est le seul point d'orchestration** : la logique de branchement D3
   vit exclusivement là. Ni `run_task`, ni `run_chain` ne savent qu'un diagnostic a eu lieu.
 - **Récursion D3 via D1** : la route `task_spec` produit des sous-tâches via D1 (division
   émergente). D3 ne court-circuite pas D1, il l'alimente avec plus de contexte.
+- **`Task.context` est une donnée, pas du comportement** : le runtime ne décide jamais du
+  contenu du contexte. C'est le caller (à la racine) ou le divider (aux nœuds internes)
+  qui écrit `context`. L'agent et l'evaluator le lisent sans le modifier.
 
 ---
 
@@ -268,12 +298,21 @@ dans son scope.
 - Route `task_spec` : produit des sous-tâches et les exécute (intégration D1)
 - Route `unattributed` : `DispatchResult` immédiat, pas de retry
 
+### `Task.context`
+
+- `task.context=None` : comportement identique à aujourd'hui (rétrocompat)
+- `task.context` défini : injecté dans `agent.execute` et `AdaptiveSpecEvaluator.evaluate`
+- Migration V2c : `task.metadata.get("context")` remplacé par `task.context` dans les
+  demos et le dashboard — même valeur, champ premier rang
+
 ### Divider contextualisé
 
 - `chained_context=None` : comportement identique à aujourd'hui (rétrocompat)
 - `chained_context=[task_parent]` : context ancêtre inclus dans le prompt divider
 - `failure_context` présent : output raté + QA reason inclus dans le prompt divider
 - `failure_context=None` : prompt divider inchangé (rétrocompat)
+- Chaque sous-tâche produite porte un `context` distillé — non vide si `task.context` ou
+  `chained_context` sont présents
 
 ### Récursion `task_spec`
 
