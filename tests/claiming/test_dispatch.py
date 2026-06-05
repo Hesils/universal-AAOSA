@@ -127,3 +127,21 @@ def test_dispatch_result_accepts_roster_gap_status():
     )
     assert r.status == "roster_gap"
     assert r.agent_id is None
+
+
+def test_qa_failed_status_allows_none_agent_and_d3_fields():
+    """DispatchResult should accept status='qa_failed' with agent_id=None and D3 diagnostic fields."""
+    r = DispatchResult(
+        status="qa_failed", agent_id=None, reason="qa failed after retry",
+        attribution="agent", consignes_tried=True,
+    )
+    assert r.status == "qa_failed"
+    assert r.attribution == "agent"
+    assert r.consignes_tried is True
+
+
+def test_d3_fields_default_to_none_and_false():
+    """D3 fields (attribution, consignes_tried) should default to None and False."""
+    r = DispatchResult(status="unassigned", agent_id=None, reason="no claim")
+    assert r.attribution is None
+    assert r.consignes_tried is False

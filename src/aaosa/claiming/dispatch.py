@@ -20,13 +20,17 @@ class DispatchResult(BaseModel):
         reason: Explanation for the dispatch decision.
         all_claims: All claims received for this task.
         fit_scores: Fit scores for each agent (agent_id -> score).
+        attribution: (D3) cause diagnostiquée d'un qa_fail, si applicable.
+        consignes_tried: (D3) True si un retry avec consignes a été tenté.
     """
 
-    status: Literal["assigned", "unassigned", "dependency_failed", "execution_failed", "roster_gap"]
+    status: Literal["assigned", "unassigned", "dependency_failed", "execution_failed", "roster_gap", "qa_failed"]
     agent_id: str | None
     reason: str
     all_claims: list[Claim] = Field(default_factory=list)
     fit_scores: dict[str, float] = Field(default_factory=dict)
+    attribution: Literal["agent", "evaluator", "task_spec", "unattributed"] | None = None
+    consignes_tried: bool = False
 
     model_config = ConfigDict(extra="forbid")
 
