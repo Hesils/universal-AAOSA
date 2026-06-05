@@ -111,6 +111,31 @@ def build_adaptive_spec(task: Task) -> EvaluatorSpec:
     return EvaluatorSpec(criteria=criteria, judge=judge, success_threshold=_derive_threshold(task))
 
 
+_MAX_LLM_CHECK = 4
+_MAX_SCORED = 6
+
+
+def _apply_caps(criteria: list[CriterionSpec]) -> list[CriterionSpec]:
+    """Troncature déterministe : ≤ 4 llm_check, ≤ 6 critères scorés au total.
+
+    Tri par importance (weight) décroissant, tri stable → ordre d'émission
+    préservé à importance égale. Les gates ne sont pas concernés (placés en tête,
+    non comptés). On coupe d'abord l'excès de llm_check, puis le total à 6.
+    """
+    gates = [c for c in criteria if c.gate]
+    scored = [c for c in criteria if not c.gate]
+    ordered = sorted(scored, key=lambda c: -c.weight)  # stable
+    kept: list[CriterionSpec] = []
+    llm_seen = 0
+    for c in ordered:
+        if c.name == "llm_check":
+            if llm_seen >= _MAX_LLM_CHECK:
+                continue
+            llm_seen += 1
+        kept.append(c)
+    return gates + kept[:_MAX_SCORED]
+
+
 def _filter_unknown_criteria(spec: EvaluatorSpec, task: Task) -> EvaluatorSpec:
     """Retire les CriterionSpec dont le name est inconnu de CRITERIA_REGISTRY.
 

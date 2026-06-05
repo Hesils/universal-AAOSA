@@ -8,12 +8,55 @@ from aaosa.qa.adaptive import (
     _LLMCriterion,
     _LLMEvaluatorSpec,
     _LLMJudge,
+    _apply_caps,
     build_adaptive_spec,
     build_llm_spec,
 )
-from aaosa.qa.spec import EvaluatorSpec
+from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
 from aaosa.qa.spec_evaluator import SpecEvaluator
 from aaosa.schemas.task import Task
+
+
+class TestApplyCaps:
+    def test_caps_total_scored_to_six(self):
+        crit = [
+            CriterionSpec(name="min_length", weight=2.0) for _ in range(8)
+        ]
+        kept = _apply_caps(crit)
+        assert len(kept) == 6
+
+    def test_caps_llm_check_to_four(self):
+        crit = [CriterionSpec(name="llm_check", params={"description": str(i)}, weight=2.0)
+                for i in range(6)]
+        kept = _apply_caps(crit)
+        assert sum(c.name == "llm_check" for c in kept) == 4
+
+    def test_caps_keep_highest_importance_first(self):
+        crit = [
+            CriterionSpec(name="min_length", weight=1.0, rationale="mineur"),
+            CriterionSpec(name="references_tags", weight=3.0, rationale="critique"),
+            CriterionSpec(name="format_check", weight=2.0, rationale="normal"),
+        ]
+        # cap fictif : on garde tout (3 ≤ 6) mais l'ordre est trié par weight desc
+        kept = _apply_caps(crit)
+        assert [c.rationale for c in kept] == ["critique", "normal", "mineur"]
+
+    def test_caps_preserve_emission_order_within_importance(self):
+        crit = [
+            CriterionSpec(name="min_length", weight=2.0, rationale="first"),
+            CriterionSpec(name="references_tags", weight=2.0, rationale="second"),
+        ]
+        kept = _apply_caps(crit)
+        assert [c.rationale for c in kept] == ["first", "second"]
+
+    def test_caps_ignore_gates(self):
+        crit = [CriterionSpec(name="non_empty", gate=True)] + [
+            CriterionSpec(name="min_length", weight=2.0) for _ in range(6)
+        ]
+        kept = _apply_caps(crit)
+        # le gate est conservé en plus des 6 scorés, et placé en tête
+        assert kept[0].name == "non_empty" and kept[0].gate is True
+        assert sum(not c.gate for c in kept) == 6
 
 
 def make_task(required_tags=None, description="Build a login form") -> Task:
