@@ -21,6 +21,11 @@ class Task(BaseModel):
     depends_on: list[str] = Field(default_factory=list)         # IDs de tâches sœurs
     required_outputs: list[Output] = Field(default_factory=list)  # rempli par run_chain
 
+    # V3 (D3) — contexte domaine focalisé sur cette tâche. None par défaut (rétrocompat).
+    # Distinct de `description` (quoi faire) et `required_outputs` (ce qui précède).
+    # Écrit par le caller (racine) ou le divider (nœuds internes) ; lu sans mutation.
+    context: str | None = None
+
     @field_validator("required_tags")
     @classmethod
     def required_tags_not_empty(cls, v):

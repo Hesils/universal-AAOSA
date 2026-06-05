@@ -55,3 +55,15 @@ def test_task_required_tags_required():
     """Test that required_tags is required and omitting it raises ValidationError."""
     with pytest.raises(ValidationError):
         Task(description="Fix bug")
+
+
+def test_context_defaults_to_none():
+    """Test that context defaults to None when not provided."""
+    task = Task(description="do x", required_tags={"python": 50})
+    assert task.context is None
+
+
+def test_context_can_be_set():
+    """Test that context can be set with a string value."""
+    task = Task(description="do x", required_tags={"python": 50}, context="HIPAA, PostgreSQL 14")
+    assert task.context == "HIPAA, PostgreSQL 14"
