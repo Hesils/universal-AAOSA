@@ -67,3 +67,19 @@ class TestTaskAggregator:
         assert out.llm_metadata is not None
         assert out.llm_metadata.tokens_in == 10
         assert out.llm_metadata.tokens_out == 5
+
+    def test_prompt_frames_results_as_complementary(self):
+        captured = {}
+
+        def create(**kwargs):
+            captured["user"] = kwargs["messages"][-1]["content"]
+            return SimpleNamespace(
+                model="gpt-4o-mini",
+                choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+            )
+
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        agg = TaskAggregator(system_prompt="You synthesize.")
+        agg.aggregate(make_parent(), [make_output("a", "A"), make_output("b", "B")], client)
+        assert "complementary" in captured["user"].lower()

@@ -253,7 +253,10 @@ def _build_nodes(events: list[ClaimEvent]) -> list[GraphNode]:
         nodes.append(GraphNode(id="testset", layer="top", type="testset", label="TestSet"))
     if any(isinstance(e, TaskDividedEvent) for e in events):
         nodes.append(GraphNode(id="divider", layer="center", type="divider", label="Divider"))
-        nodes.append(GraphNode(id="aggregator", layer="center", type="aggregator", label="Aggregator"))
+        # l'aggregator n'apparaît que s'il y a eu une vraie agrégation (≥2 sinks).
+        # Single-sink (court-circuit) -> aucun TaskAggregatedEvent -> pas de nœud aggregator.
+        if any(isinstance(e, TaskAggregatedEvent) for e in events):
+            nodes.append(GraphNode(id="aggregator", layer="center", type="aggregator", label="Aggregator"))
     for aid in _agent_ids(events):
         nodes.append(GraphNode(id=aid, layer="bottom", type="agent", label=aid))
     seen_tools: set[str] = set()
@@ -268,11 +271,13 @@ def _build_edges(nodes: list[GraphNode], events: list[ClaimEvent]) -> list[Graph
     """Arêtes statiques = la pipeline réelle (mêmes arêtes que le backbone/fan-out des jalons).
 
     Simple : input→dispatch→agents→evaluator→output.
-    Divisé : input→divider→dispatch→agents→evaluator→aggregator→output.
+    Divisé sans agrégation : input→divider→dispatch→agents→evaluator→output.
+    Divisé+agrégé : input→divider→dispatch→agents→evaluator→aggregator→output.
     Tools en canopée (agent→tool). testset (fork) seulement sur échec QA.
     """
     agent_ids = [n.id for n in nodes if n.type == "agent"]
     divided = any(n.id == "divider" for n in nodes)
+    aggregated = any(n.id == "aggregator" for n in nodes)
     edges: list[GraphEdge] = []
     if divided:
         edges.append(GraphEdge(from_node="input", to="divider"))
@@ -283,7 +288,7 @@ def _build_edges(nodes: list[GraphNode], events: list[ClaimEvent]) -> list[Graph
     edges += [GraphEdge(from_node=aid, to="evaluator") for aid in agent_ids]
     for aid, tname in _distinct_tools(events):
         edges.append(GraphEdge(from_node=aid, to=_tool_node_id(tname)))
-    if divided:
+    if aggregated:
         edges.append(GraphEdge(from_node="evaluator", to="aggregator"))
         edges.append(GraphEdge(from_node="aggregator", to="output"))
     else:
@@ -551,6 +556,18 @@ def _todo_simple(record, tid, milestone, run) -> list[TodoItem]:
     return [TodoItem(id=tid, description=desc, state=state, is_root=True)]
 
 
+def _graph_sinks(divided_ev, sub_runs) -> list[str]:
+    """Sinks reconstruits côté dashboard, même règle qu'en runtime `_sinks` :
+    une sous-tâche qa_pass non consommée par une sous-tâche qa_pass. Pur."""
+    passed = {r.task_id for r in sub_runs if r.outcome == "qa_pass"}
+    consumed = {
+        dep
+        for st in divided_ev.sub_tasks if st.id in passed
+        for dep in st.depends_on if dep in passed
+    }
+    return [st.id for st in divided_ev.sub_tasks if st.id in passed and st.id not in consumed]
+
+
 def _milestones_divided(divided_ev, aggregated_ev, sub_runs, parent_record, parent_id) -> list[GraphStep]:
     parent_input = _make_input_detail(parent_record, parent_id)
     parent_desc = parent_input.description
@@ -576,8 +593,10 @@ def _milestones_divided(divided_ev, aggregated_ev, sub_runs, parent_record, pare
                            active_edges=acc.snapshot([]), outcome="divided", detail=div_detail,
                            todo=td("divider", None)))
 
-    # Récit progressif de collecte : l'aggregator s'allume à chaque sous-tâche validée.
-    total = len(sub_runs)
+    sink_ids = set(_graph_sinks(divided_ev, sub_runs))
+
+    # Récit progressif de collecte : l'aggregator s'allume à chaque sink validé.
+    total = len(sink_ids)   # le récit de collecte porte sur les sinks, pas toutes les sous-tâches
     collected = 0
 
     # Sous-tâches dans l'ordre d'émission (= ordre topologique de run_chain)
@@ -614,9 +633,10 @@ def _milestones_divided(divided_ev, aggregated_ev, sub_runs, parent_record, pare
             if run.outcome == "qa_fail":
                 fanq.append(("evaluator", "testset"))
                 nodes_q.append("testset")
-            elif run.outcome == "qa_pass":
-                # sortie validée → collectée par l'aggregator (qui s'allume, arête transitoire).
-                # shallow copy : on surcharge .aggregator sans muter le detail partagé des frères.
+            elif run.outcome == "qa_pass" and aggregated_ev is not None and run.task_id in sink_ids:
+                # seul un SINK validé est collecté par l'aggregator (les intermédiaires consommés
+                # sont déjà repliés dans leur dépendant). shallow copy : surcharge .aggregator
+                # sans muter le detail partagé des frères.
                 collected += 1
                 nodes_q.append("aggregator")
                 fanq.append(("evaluator", "aggregator"))
@@ -627,7 +647,7 @@ def _milestones_divided(divided_ev, aggregated_ev, sub_runs, parent_record, pare
                                    winner_agent_id=winner, outcome=run.outcome, detail=ev_detail,
                                    todo=td("evaluator", run.task_id)))
 
-    # AGGREGATOR
+    # AGGREGATOR / court-circuit single-sink
     if aggregated_ev is not None:
         acc.add_backbone("evaluator", "aggregator")
         agg_detail = StepDetail(input=parent_input, aggregator=AggregatorDetail(
@@ -647,6 +667,22 @@ def _milestones_divided(divided_ev, aggregated_ev, sub_runs, parent_record, pare
         steps.append(GraphStep(milestone_type="output", label="OUTPUT", active_nodes=["aggregator", "output"],
                                active_edges=acc.snapshot([]), outcome="divided", detail=agg_detail,
                                todo=td("output", None)))
+    elif len(sink_ids) == 1:
+        # court-circuit D2 : un seul sink, aucune agrégation. OUTPUT terminal depuis le sink
+        # (l'output réel de l'agent du sink) — image honnête : aucune synthèse n'a eu lieu.
+        sink_run = next((r for r in sub_runs if r.task_id in sink_ids), None)
+        if sink_run is not None and sink_run.executed is not None:
+            sink_input = InputDetail(
+                task_id=sink_run.task_id, description=_sub_desc(divided_ev, sink_run.task_id),
+                required_tags=_sub_tags(divided_ev, sink_run.task_id),
+            )
+            out_detail = _scope_detail(sink_input, sink_run)
+            acc.add_backbone("evaluator", "output")
+            steps.append(GraphStep(
+                milestone_type="output", label="OUTPUT", active_nodes=["output"],
+                active_edges=acc.snapshot([]), winner_agent_id=sink_run.winner_id,
+                outcome="divided", detail=out_detail, todo=td("output", None),
+            ))
     return steps
 
 

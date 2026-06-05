@@ -72,6 +72,31 @@ def _two_subtask_division():
     ])
 
 
+def _two_independent_division():
+    return DivisionResult(sub_tasks=[
+        SubTaskSpec(description="s1"),
+        SubTaskSpec(description="s2"),
+    ])
+
+
+def _router(task, agents, client, tracer=None, evaluator=None):
+    """run_task simulé : la racine (description "t") reste unassigned pour déclencher la
+    division ; chaque sous-tâche réussit avec un Output portant SON id (pour que _sinks
+    fonctionne sur les vrais ids générés par build_sub_tasks)."""
+    if task.description == "t":
+        return DispatchResult(status="unassigned", agent_id=None, reason="no claim")
+    return make_output(task.id, f"out-{task.description}")
+
+
+class _SpyAggregator:
+    def __init__(self):
+        self.called_with = None
+
+    def aggregate(self, parent_task, sub_outputs, client, tracer=None):
+        self.called_with = list(sub_outputs)
+        return make_output(parent_task.id, "agg")
+
+
 class TestRunWithRecovery:
     def test_flat_success_no_division(self):
         ctx = _ctx(_StaticDivider(_two_subtask_division()))
@@ -81,15 +106,26 @@ class TestRunWithRecovery:
         assert isinstance(result, Output)
         rt.assert_called_once()
 
-    def test_unassigned_triggers_division_then_aggregates(self):
-        ctx = _ctx(_StaticDivider(_two_subtask_division()))
+    def test_single_sink_short_circuits_without_aggregating(self):
+        # division en chaîne (s2 dépend de s1) -> 1 seul sink (s2) -> court-circuit
+        agg = _SpyAggregator()
+        ctx = _ctx(_StaticDivider(_two_subtask_division()), aggregator=agg)
         task = Task(description="t", required_tags={"python": 30})
-        unassigned = DispatchResult(status="unassigned", agent_id=None, reason="no claim")
-        with patch("aaosa.runtime.runner.run_task", return_value=unassigned):
-            with patch("aaosa.runtime.runner.run_chain", return_value=[make_output("s1"), make_output("s2")]):
-                result = run_with_recovery(task, ctx)
+        with patch("aaosa.runtime.runner.run_task", side_effect=_router):
+            result = run_with_recovery(task, ctx)
         assert isinstance(result, Output)
+        assert result.content == "out-s2"      # le sink, renvoyé tel quel
+        assert agg.called_with is None         # aucun appel LLM d'agrégation
+
+    def test_multi_sink_aggregates_sinks_only(self):
+        # division en branches indépendantes -> 2 sinks -> agrégation sur les sinks
+        agg = _SpyAggregator()
+        ctx = _ctx(_StaticDivider(_two_independent_division()), aggregator=agg)
+        task = Task(description="t", required_tags={"python": 30})
+        with patch("aaosa.runtime.runner.run_task", side_effect=_router):
+            result = run_with_recovery(task, ctx)
         assert result.content == "agg"
+        assert {o.content for o in agg.called_with} == {"out-s1", "out-s2"}
 
     def test_atomic_verdict_is_dead_end(self):
         ctx = _ctx(_StaticDivider(DivisionResult(is_atomic=True, sub_tasks=[])))
@@ -128,19 +164,17 @@ class TestRunWithRecovery:
         task = Task(description="t", required_tags={"python": 30})
         unassigned = DispatchResult(status="unassigned", agent_id=None, reason="no claim")
         with patch("aaosa.runtime.runner.run_task", return_value=unassigned):
-            with patch("aaosa.runtime.runner.run_chain", return_value=[unassigned, unassigned]):
+            with patch("aaosa.runtime.runner.run_chain", return_value={}):
                 result = run_with_recovery(task, ctx)
         assert result.status == "unassigned"
         assert result.reason == "no sub-tasks recovered"
 
-    def test_aggregator_exception_falls_back_to_last_output(self):
-        ctx = _ctx(_StaticDivider(_two_subtask_division()), aggregator=_ExplodingAggregator())
+    def test_aggregator_exception_falls_back_to_last_sink(self):
+        ctx = _ctx(_StaticDivider(_two_independent_division()), aggregator=_ExplodingAggregator())
         task = Task(description="t", required_tags={"python": 30})
-        unassigned = DispatchResult(status="unassigned", agent_id=None, reason="no claim")
-        with patch("aaosa.runtime.runner.run_task", return_value=unassigned):
-            with patch("aaosa.runtime.runner.run_chain", return_value=[make_output("s1"), make_output("s2")]):
-                result = run_with_recovery(task, ctx)
-        assert result.task_id == "s2"
+        with patch("aaosa.runtime.runner.run_task", side_effect=_router):
+            result = run_with_recovery(task, ctx)
+        assert result.content == "out-s2"   # fallback sur sinks[-1]
 
     def test_empty_tagging_is_clean_crash(self):
         ctx = _ctx(_StaticDivider(_two_subtask_division()), tagger=_FakeTagger(default=()))

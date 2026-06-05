@@ -22,13 +22,20 @@ class TaskAggregator:
         self.system_prompt = system_prompt
 
     def _build_aggregate_prompt(self, parent_task: Task, sub_outputs: list[Output]) -> str:
-        parts = [f"Original task: {parent_task.description}", "", "Results from sub-tasks:"]
+        parts = [
+            f"Original task: {parent_task.description}",
+            "",
+            "The results below are complementary: each covers a distinct part of the "
+            "original task. They are peers, not a sequence.",
+            "",
+            "Complementary results:",
+        ]
         for i, out in enumerate(sub_outputs, start=1):
             if i > 1:
                 parts.append("---")
-            parts.append(f"[sub-task {i}]: {out.content}")
+            parts.append(f"[result {i}]: {out.content}")
         parts.append("")
-        parts.append("Synthesize these results into a single coherent response.")
+        parts.append("Produce a single coherent response that covers all of them.")
         return "\n".join(parts)
 
     def aggregate(
