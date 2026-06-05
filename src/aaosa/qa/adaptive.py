@@ -13,32 +13,47 @@ logger = logging.getLogger(__name__)
 
 
 # --- Schémas LLM-facing (structured output) -------------------------------
-# OpenAI structured output interdit les dict ouverts (cf. divider.SubTaskSpec).
-# CriterionSpec.params est un dict → on ne peut PAS le passer en response_format.
-# On expose donc des paramètres explicites et on reconstruit le dict côté Python.
+# OpenAI structured output interdit les dict ouverts. On expose des params
+# explicites par type et on reconstruit le dict CriterionSpec.params côté Python.
+# `type` est le discriminant : to_criterion() ne copie que les params du type
+# (encode le lien name ↔ params — un min_length ne peut pas porter de keywords).
+_CriterionType = Literal[
+    "min_length", "keyword_presence", "llm_check", "format_check", "references_tags"
+]
+_Importance = Literal["critique", "normal", "mineur"]
+_IMPORTANCE_WEIGHT: dict[str, float] = {"critique": 3.0, "normal": 2.0, "mineur": 1.0}
+
+
 class _LLMCriterion(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    name: str
-    weight: float = 1.0
-    # Pas de champ `gate` : seul "non_empty" peut être un gate (invariant V2b),
-    # injecté par _ensure_non_empty_gate. Le LLM ne propose que des critères scorés.
-    # params possibles, aplatis (un critère n'en utilise qu'un sous-ensemble) :
+    type: _CriterionType
+    importance: _Importance = "normal"
+    rationale: str = ""
+    # Pas de `weight` (l'importance discrète le dérive) ni de `gate`
+    # (seul non_empty est gate, injecté par _ensure_non_empty_gate).
+    # params par type, aplatis ; gardés par type dans to_criterion :
     min_chars: int | None = None          # min_length
-    description: str | None = None        # llm_check
     keywords: list[str] | None = None     # keyword_presence
+    description: str | None = None        # llm_check
     kind: str | None = None               # format_check
 
     def to_criterion(self) -> CriterionSpec:
         params: dict = {}
-        if self.min_chars is not None:
+        if self.type == "min_length" and self.min_chars is not None:
             params["min_chars"] = self.min_chars
-        if self.description is not None:
-            params["description"] = self.description
-        if self.keywords is not None:
+        elif self.type == "keyword_presence" and self.keywords is not None:
             params["keywords"] = self.keywords
-        if self.kind is not None:
+        elif self.type == "llm_check" and self.description is not None:
+            params["description"] = self.description
+        elif self.type == "format_check" and self.kind is not None:
             params["kind"] = self.kind
-        return CriterionSpec(name=self.name, params=params, weight=self.weight)
+        # references_tags : aucun param
+        return CriterionSpec(
+            name=self.type,
+            params=params,
+            weight=_IMPORTANCE_WEIGHT[self.importance],
+            rationale=self.rationale,
+        )
 
 
 class _LLMJudge(BaseModel):
@@ -56,13 +71,12 @@ class _LLMEvaluatorSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
     criteria: list[_LLMCriterion]
     judge: _LLMJudge | None = None
-    success_threshold: float = 0.7
+    # Pas de success_threshold : dérivé déterministiquement de task.required_tags.
 
     def to_spec(self) -> EvaluatorSpec:
         return EvaluatorSpec(
             criteria=[c.to_criterion() for c in self.criteria],
             judge=self.judge.to_judge() if self.judge is not None else None,
-            success_threshold=self.success_threshold,
         )
 
 

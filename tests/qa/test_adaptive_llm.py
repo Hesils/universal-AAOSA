@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from aaosa.qa.adaptive import (
+    _IMPORTANCE_WEIGHT,
     _LLMCriterion,
     _LLMEvaluatorSpec,
     _LLMJudge,
@@ -46,133 +47,54 @@ class _RaisingClient:
         raise RuntimeError("LLM unavailable")
 
 
-class TestBuildLLMSpec:
-    def test_returns_evaluator_spec(self):
-        spec = _LLMEvaluatorSpec(
-            criteria=[
-                _LLMCriterion(name="non_empty"),
-                _LLMCriterion(name="min_length", min_chars=100, weight=1.0),
-            ],
-            success_threshold=0.8,
-        )
-        client = _FakeParseClient(spec)
-        result = build_llm_spec(make_task(), client)
-        assert isinstance(result, EvaluatorSpec)
-        assert result.success_threshold == 0.8
-        names = {c.name for c in result.criteria}
-        assert {"non_empty", "min_length"} <= names
+class TestLLMCriterionSchema:
+    def test_importance_maps_to_weight(self):
+        for importance, weight in [("critique", 3.0), ("normal", 2.0), ("mineur", 1.0)]:
+            c = _LLMCriterion(type="min_length", importance=importance, min_chars=10)
+            assert c.to_criterion().weight == weight
 
-    def test_response_format_is_closed_schema(self):
-        # Garde anti-régression : on ne doit JAMAIS repasser EvaluatorSpec (dict ouvert)
-        # en response_format — c'est ce qui faisait échouer le structured output.
-        client = _FakeParseClient(_LLMEvaluatorSpec(criteria=[_LLMCriterion(name="non_empty")]))
-        build_llm_spec(make_task(), client)
-        assert client.captured_kwargs["response_format"] is _LLMEvaluatorSpec
+    def test_importance_defaults_normal(self):
+        c = _LLMCriterion(type="references_tags")
+        assert c.to_criterion().weight == _IMPORTANCE_WEIGHT["normal"]
 
-    def test_min_chars_converted_to_params(self):
-        spec = _LLMEvaluatorSpec(criteria=[_LLMCriterion(name="min_length", min_chars=120)])
-        result = build_llm_spec(make_task(), _FakeParseClient(spec))
-        ml = next(c for c in result.criteria if c.name == "min_length")
-        assert ml.params == {"min_chars": 120}
+    def test_rationale_carried_to_criterion(self):
+        c = _LLMCriterion(type="llm_check", description="d", rationale="pourquoi")
+        assert c.to_criterion().rationale == "pourquoi"
 
-    def test_judge_converted(self):
-        spec = _LLMEvaluatorSpec(
-            criteria=[_LLMCriterion(name="non_empty")],
-            judge=_LLMJudge(mode="rubric", rubric=["correctness", "completeness"]),
-        )
-        result = build_llm_spec(make_task(), _FakeParseClient(spec))
-        assert result.judge is not None
-        assert result.judge.rubric == ["correctness", "completeness"]
-        assert result.judge.weight == 0.3
+    def test_type_becomes_criterion_name(self):
+        c = _LLMCriterion(type="format_check", kind="json")
+        assert c.to_criterion().name == "format_check"
 
-    def test_always_has_non_empty_gate(self):
-        # LLM omits non_empty entirely — invariant must re-add it as a gate.
-        spec = _LLMEvaluatorSpec(criteria=[_LLMCriterion(name="min_length", min_chars=50)])
-        client = _FakeParseClient(spec)
-        result = build_llm_spec(make_task(), client)
-        gates = [c for c in result.criteria if c.name == "non_empty" and c.gate]
-        assert len(gates) == 1
+    def test_params_gated_by_type(self):
+        # min_length avec des keywords parasites : seuls les params du type sont copiés
+        c = _LLMCriterion(type="min_length", min_chars=80, keywords=["x"], description="y")
+        assert c.to_criterion().params == {"min_chars": 80}
 
-    def test_injects_into_spec_evaluator(self):
-        spec = _LLMEvaluatorSpec(criteria=[_LLMCriterion(name="non_empty")])
-        client = _FakeParseClient(spec)
-        result = build_llm_spec(make_task(), client)
-        # judge is None -> SpecEvaluator accepts client=None without raising
-        SpecEvaluator(result, client=None)
+    def test_keyword_presence_params(self):
+        c = _LLMCriterion(type="keyword_presence", keywords=["a", "b"])
+        assert c.to_criterion().params == {"keywords": ["a", "b"]}
 
-    def test_fallback_on_exception(self):
-        task = make_task()
-        result = build_llm_spec(task, _RaisingClient())
-        assert result == build_adaptive_spec(task)
+    def test_references_tags_has_no_params(self):
+        c = _LLMCriterion(type="references_tags", min_chars=10)
+        assert c.to_criterion().params == {}
 
-    def test_filters_unknown_criteria(self):
-        spec = _LLMEvaluatorSpec(
-            criteria=[
-                _LLMCriterion(name="non_empty"),
-                _LLMCriterion(name="hallucinated_criterion", weight=2.0),
-                _LLMCriterion(name="min_length", min_chars=50),
-            ],
-        )
-        client = _FakeParseClient(spec)
-        result = build_llm_spec(make_task(), client)
-        names = {c.name for c in result.criteria}
-        assert "hallucinated_criterion" not in names
-        assert {"non_empty", "min_length"} <= names
-
-    def test_filters_all_unknown_falls_back(self):
-        task = make_task()
-        spec = _LLMEvaluatorSpec(
-            criteria=[
-                _LLMCriterion(name="totally_made_up"),
-                _LLMCriterion(name="also_fake"),
-            ],
-        )
-        client = _FakeParseClient(spec)
-        result = build_llm_spec(task, client)
-        assert result == build_adaptive_spec(task)
-
-    def test_llm_check_preserved_with_description(self):
-        spec = _LLMEvaluatorSpec(
-            criteria=[
-                _LLMCriterion(name="non_empty"),
-                _LLMCriterion(name="llm_check", description="must include code examples", weight=1.5),
-            ],
-        )
-        client = _FakeParseClient(spec)
-        result = build_llm_spec(make_task(), client)
-        llm = next((c for c in result.criteria if c.name == "llm_check"), None)
-        assert llm is not None
-        assert llm.params == {"description": "must include code examples"}
-        assert llm.weight == 1.5
-
-    def test_llm_criterion_rejects_gate_field(self):
-        # Le LLM ne peut plus déclarer de gate : seul non_empty en est un (invariant V2b).
+    def test_criterion_rejects_weight_field(self):
         with pytest.raises(ValidationError):
-            _LLMCriterion(name="min_length", gate=True)
+            _LLMCriterion(type="min_length", weight=2.0)
 
-    def test_llm_judge_rejects_weight_field(self):
-        # Le LLM ne contrôle plus le poids du judge (jamais signal primaire, V2b).
+    def test_criterion_rejects_gate_field(self):
         with pytest.raises(ValidationError):
-            _LLMJudge(rubric=["correctness"], weight=1.0)
+            _LLMCriterion(type="min_length", gate=True)
 
-    def test_judge_weight_always_03(self):
-        spec = _LLMEvaluatorSpec(
-            criteria=[_LLMCriterion(name="non_empty")],
-            judge=_LLMJudge(mode="rubric", rubric=["correctness"]),
-        )
-        result = build_llm_spec(make_task(), _FakeParseClient(spec))
-        assert result.judge is not None
-        assert result.judge.weight == 0.3
+    def test_criterion_rejects_unknown_type(self):
+        with pytest.raises(ValidationError):
+            _LLMCriterion(type="totally_made_up")
 
-    def test_only_non_empty_is_gate(self):
-        # Même si le LLM propose non_empty + min_length, le seul gate de sortie
-        # doit être non_empty (min_length reste scoré, gradué).
-        spec = _LLMEvaluatorSpec(
-            criteria=[
-                _LLMCriterion(name="non_empty"),
-                _LLMCriterion(name="min_length", min_chars=300),
-            ],
-        )
-        result = build_llm_spec(make_task(), _FakeParseClient(spec))
-        gated = [c.name for c in result.criteria if c.gate]
-        assert gated == ["non_empty"]
+    def test_evaluator_spec_has_no_threshold_field(self):
+        with pytest.raises(ValidationError):
+            _LLMEvaluatorSpec(criteria=[], success_threshold=0.9)
+
+    def test_to_spec_builds_evaluator_spec(self):
+        llm = _LLMEvaluatorSpec(criteria=[_LLMCriterion(type="min_length", min_chars=50)])
+        spec = llm.to_spec()
+        assert [c.name for c in spec.criteria] == ["min_length"]
