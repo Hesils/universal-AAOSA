@@ -1,4 +1,4 @@
-from aaosa.qa.adaptive import build_adaptive_spec
+from aaosa.qa.adaptive import build_adaptive_spec, _build_prompt
 from aaosa.qa.spec import EvaluatorSpec
 from aaosa.schemas.task import Task
 
@@ -37,3 +37,16 @@ class TestBuildAdaptiveSpec:
         assert build_adaptive_spec(task_with({"x": 85})).judge is not None
         # 84 → pas de judge
         assert build_adaptive_spec(task_with({"x": 84})).judge is None
+
+
+def test_build_prompt_includes_context_when_present():
+    task = Task(description="audit auth", required_tags={"security": 80},
+                context="HIPAA, secrets en clair interdits")
+    prompt = _build_prompt(task)
+    assert "HIPAA" in prompt
+
+
+def test_build_prompt_omits_context_section_when_absent():
+    task = Task(description="audit auth", required_tags={"security": 80})
+    prompt = _build_prompt(task)
+    assert "# Contexte" not in prompt

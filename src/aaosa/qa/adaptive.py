@@ -110,9 +110,11 @@ def _ensure_non_empty_gate(spec: EvaluatorSpec) -> EvaluatorSpec:
 
 def _build_prompt(task: Task) -> str:
     predefined = ", ".join(sorted(CRITERIA_REGISTRY))
+    context_section = f"# Contexte domaine\n{task.context}\n\n" if task.context else ""
     return (
         "Tu génères une EvaluatorSpec pour évaluer la réponse d'un agent à cette tâche.\n\n"
         f"# Tâche\n{task.description}\n\n"
+        f"{context_section}"
         f"# Tags requis\n{', '.join(task.required_tags)}\n\n"
         f"# Critères prédéfinis disponibles (suggestions)\n{predefined}\n\n"
         "# Critère adaptatif libre\n"
