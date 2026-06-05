@@ -76,7 +76,7 @@ class Agent(BaseModel):
             raise ValueError(f"Failed to parse claim from LLM response: {e!r}. Raw: {raw!r}") from e
 
     def _build_user_content(self, task: Task) -> str:
-        context = task.metadata.get("context", "")
+        context = task.context if task.context is not None else task.metadata.get("context", "")
         deps = ""
         if task.required_outputs:
             deps = "\n\n# Required context from previous steps\n" + "\n---\n".join(

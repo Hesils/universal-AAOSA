@@ -315,3 +315,21 @@ class TestAgentExecute:
         messages = call_args.kwargs.get("messages") or (call_args.args[0] if call_args.args else call_args.kwargs["messages"])
         user_msgs = [m for m in messages if m.get("role") == "user"]
         assert any(task.description in m["content"] for m in user_msgs)
+
+
+class TestBuildUserContent:
+    """Tests for Agent._build_user_content method."""
+
+    def test_build_user_content_uses_task_context(self):
+        """Test that _build_user_content includes task.context when present."""
+        agent = Agent(name="a", tags_with_elo={"python": 50}, system_prompt="sp")
+        task = Task(description="do x", required_tags={"python": 50}, context="DOMAIN CTX")
+        content = agent._build_user_content(task)
+        assert "DOMAIN CTX" in content
+
+    def test_build_user_content_falls_back_to_metadata_context(self):
+        """Test that _build_user_content falls back to metadata['context'] when task.context is None."""
+        agent = Agent(name="a", tags_with_elo={"python": 50}, system_prompt="sp")
+        task = Task(description="do x", required_tags={"python": 50}, metadata={"context": "META CTX"})
+        content = agent._build_user_content(task)
+        assert "META CTX" in content
