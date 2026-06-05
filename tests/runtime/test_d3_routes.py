@@ -4,6 +4,7 @@ import aaosa.runtime.runner as runner
 from aaosa.qa.diagnostic import DiagnosticResult
 from aaosa.qa.protocol import QAFailure, QAResult
 from aaosa.runtime.context import RunContext
+from aaosa.runtime.divider import DivisionResult, SubTaskSpec
 from aaosa.schemas.output import LLMMetadata, Output
 from aaosa.schemas.task import Task
 
@@ -113,3 +114,90 @@ def test_route_diagnostic_none_treated_as_unattributed(monkeypatch):
     out = runner.run_with_recovery(_task(), _ctx())
     assert out.status == "qa_failed"
     assert out.attribution == "unattributed"
+
+
+# ---------------------------------------------------------------------------
+# Route task_spec (D3) — récursion via D1 + terminaison
+# ---------------------------------------------------------------------------
+
+class _DividerStub:
+    def __init__(self, division):
+        self.division = division
+        self.calls = []
+
+    def divide(self, task, client, chained_context=None, failure_context=None):
+        self.calls.append(failure_context)
+        return self.division
+
+
+class _AggStub:
+    def aggregate(self, task, sinks, client, tracer=None):
+        return Output(task_id=task.id, agent_id="aggregator", content="aggregated",
+                      llm_metadata=LLMMetadata(model_name="m", tokens_in=1, tokens_out=1, latency_ms=1.0))
+
+
+class _TaggerStub:
+    def tag(self, description, agents, client):
+        return ["python"]
+
+
+def test_route_task_spec_divides_with_failure_context(monkeypatch):
+    # parent run_task → qa_fail ; diagnostic task_spec ; division en 2 sous-tâches
+    # indépendantes qui réussissent → 2 sinks → agrégation.
+    division = DivisionResult(sub_tasks=[
+        SubTaskSpec(description="clarified part A"),
+        SubTaskSpec(description="clarified part B"),
+    ])
+    divider = _DividerStub(division)
+
+    def run_task_side_effect(task, agents, client, tracer, evaluator):
+        if task.description == "do x":
+            return _qa_fail()                      # parent échoue
+        return _output(f"ok:{task.description}")   # sous-tâches réussissent
+
+    monkeypatch.setattr(runner, "run_task", run_task_side_effect)
+    monkeypatch.setattr(runner, "diagnose_failure",
+                        lambda *a, **k: DiagnosticResult(attribution="task_spec", reason="ambiguë"))
+
+    ctx = RunContext(
+        agents=[_StubAgentRoster()], client=SimpleNamespace(), divider=divider,
+        aggregator=_AggStub(), tagger=_TaggerStub(), tracer=None, evaluator=None,
+    )
+    out = runner.run_with_recovery(_task(), ctx)
+
+    assert isinstance(out, Output)
+    assert out.content == "aggregated"
+    # le divider a bien reçu un failure_context (pas None)
+    assert divider.calls and divider.calls[0] is not None
+    assert divider.calls[0].diagnostic_reason == "ambiguë"
+
+
+def test_route_task_spec_atomic_returns_qa_failed(monkeypatch):
+    # divider juge la tâche atomique → pas de division possible → qa_failed(task_spec)
+    divider = _DividerStub(DivisionResult(is_atomic=True))
+    monkeypatch.setattr(runner, "run_task", lambda *a, **k: _qa_fail())
+    monkeypatch.setattr(runner, "diagnose_failure",
+                        lambda *a, **k: DiagnosticResult(attribution="task_spec", reason="r"))
+    ctx = RunContext(
+        agents=[_StubAgentRoster()], client=SimpleNamespace(), divider=divider,
+        aggregator=_AggStub(), tagger=_TaggerStub(), tracer=None, evaluator=None,
+    )
+    out = runner.run_with_recovery(_task(), ctx)
+    assert out.status == "qa_failed"
+    assert out.attribution == "task_spec"
+
+
+def test_route_task_spec_terminates_at_max_depth(monkeypatch):
+    # à depth >= MAX_RECOVERY_DEPTH, _divide_and_recover renvoie le fallback sans diviser
+    divider = _DividerStub(DivisionResult(sub_tasks=[SubTaskSpec(description="sub")]))
+    monkeypatch.setattr(runner, "run_task", lambda *a, **k: _qa_fail())
+    monkeypatch.setattr(runner, "diagnose_failure",
+                        lambda *a, **k: DiagnosticResult(attribution="task_spec", reason="r"))
+    ctx = RunContext(
+        agents=[_StubAgentRoster()], client=SimpleNamespace(), divider=divider,
+        aggregator=_AggStub(), tagger=_TaggerStub(), tracer=None, evaluator=None,
+    )
+    out = runner.run_with_recovery(_task(), ctx, depth=runner.MAX_RECOVERY_DEPTH)
+    assert out.status == "qa_failed"
+    assert out.attribution == "task_spec"
+    assert divider.calls == []   # jamais divisé
