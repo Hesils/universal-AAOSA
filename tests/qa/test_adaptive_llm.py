@@ -3,6 +3,9 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+from aaosa.qa.diagnostic import FailureContext
+from aaosa.qa.protocol import QAResult
+from aaosa.schemas.output import LLMMetadata, Output
 from aaosa.qa.adaptive import (
     _IMPORTANCE_WEIGHT,
     _LLMCriterion,
@@ -216,3 +219,34 @@ class TestBuildLLMSpecColdStart:
         assert "llm_check" in prompt and "min_length" in prompt
         assert "importance" in prompt
         assert "non_empty" in prompt  # consigne de ne pas le déclarer
+
+
+def _failure_context() -> FailureContext:
+    out = Output(
+        task_id="t", agent_id="a", content="réponse ratée bidon",
+        llm_metadata=LLMMetadata(model_name="m", tokens_in=1, tokens_out=1, latency_ms=1.0),
+    )
+    qa = QAResult(task_id="t", agent_id="a", success=False, score=0.2,
+                  reason="trop court", criteria_results={"min_length": False})
+    return FailureContext(failed_output=out, qa_result=qa,
+                          diagnostic_reason="les critères étaient trop stricts")
+
+
+class TestBuildLLMSpecInformed:
+    def test_prompt_includes_failure_details(self):
+        client = _FakeParseClient(_LLMEvaluatorSpec(criteria=[]))
+        build_llm_spec(make_task(), client, failure_context=_failure_context())
+        prompt = client.captured_kwargs["messages"][1]["content"]
+        assert "Échec précédent" in prompt
+        assert "réponse ratée bidon" in prompt          # output raté
+        assert "trop court" in prompt                    # raison QA
+        assert "les critères étaient trop stricts" in prompt  # diagnostic
+        assert "min_length" in prompt                    # critère raté
+
+    def test_none_failure_context_matches_cold_start(self):
+        c1 = _FakeParseClient(_LLMEvaluatorSpec(criteria=[]))
+        c2 = _FakeParseClient(_LLMEvaluatorSpec(criteria=[]))
+        build_llm_spec(make_task(), c1)
+        build_llm_spec(make_task(), c2, failure_context=None)
+        assert c1.captured_kwargs["messages"][1]["content"] == \
+            c2.captured_kwargs["messages"][1]["content"]
