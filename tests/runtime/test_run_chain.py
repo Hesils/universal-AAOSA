@@ -65,9 +65,9 @@ class TestRunChain:
         recorded = {}
         with patch.object(Agent, "claim", _claim_for(a)):
             with patch.object(Agent, "execute", _recording_execute(recorded)):
-                results = run_chain([t1, t2, t3], _ctx_for_chain([a]), 1)
-        assert [r.task_id for r in results] == [t1.id, t2.id, t3.id]
-        assert all(isinstance(r, Output) for r in results)
+                outputs = run_chain([t1, t2, t3], _ctx_for_chain([a]), 1)
+        assert list(outputs.keys()) == [t1.id, t2.id, t3.id]
+        assert all(isinstance(o, Output) for o in outputs.values())
 
     def test_linear_deps(self):
         a = make_agent()
@@ -103,8 +103,8 @@ class TestRunChain:
         assert recorded[t1.id] == []
 
     def test_execution_error_is_contained(self):
-        # Une sous-tâche dont l'exécution lève (ex: MAX_TOOL_ROUNDS) ne doit pas
-        # tuer la chaîne : elle est marquée execution_failed, les autres continuent.
+        # Une sous-tâche dont l'exécution lève (ex: MAX_TOOL_ROUNDS) ne tue pas la chaîne :
+        # elle est absente du dict, les indépendantes réussissent, ses dépendants sont sautés.
         a = make_agent()
         t1 = make_task("A")                       # lèvera
         t2 = make_task("B")                       # indépendante -> réussit
@@ -120,11 +120,11 @@ class TestRunChain:
 
         with patch.object(Agent, "claim", _claim_for(a)):
             with patch.object(Agent, "execute", exploding_execute):
-                results = run_chain([t1, t2, t3], _ctx_for_chain([a]), 1)
+                outputs = run_chain([t1, t2, t3], _ctx_for_chain([a]), 1)
 
-        assert isinstance(results[0], DispatchResult) and results[0].status == "execution_failed"
-        assert isinstance(results[1], Output) and results[1].task_id == t2.id
-        assert isinstance(results[2], DispatchResult) and results[2].status == "dependency_failed"
+        assert t1.id not in outputs                       # execution_failed -> absent
+        assert isinstance(outputs[t2.id], Output)         # indépendante réussie
+        assert t3.id not in outputs                       # dépendance non résolue -> sautée
 
     def test_dependency_failed_skips(self):
         a = make_agent()
@@ -135,12 +135,11 @@ class TestRunChain:
         recorded = {}
         with patch.object(Agent, "claim", _claim_for(a)):
             with patch.object(Agent, "execute", _recording_execute(recorded)):
-                results = run_chain([t1, t_b, t_c], _ctx_for_chain([a]), 1)
-        by_id = {getattr(r, "task_id", None): r for r in results}
-        # C must be dependency_failed and never executed
-        c_result = next(r for r in results if isinstance(r, DispatchResult) and r.status == "dependency_failed")
+                outputs = run_chain([t1, t_b, t_c], _ctx_for_chain([a]), 1)
+        assert isinstance(outputs[t1.id], Output)
+        assert t_b.id not in outputs    # unassigned
+        assert t_c.id not in outputs    # dépendance échouée -> jamais exécutée
         assert t_c.id not in recorded
-        assert c_result.status == "dependency_failed"
 
     def test_cycle_raises(self):
         a = make_agent()

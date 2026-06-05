@@ -177,33 +177,28 @@ def _sinks(sub_tasks: list[Task], outputs_by_id: dict[str, Output]) -> list[Outp
     return [outputs_by_id[t.id] for t in sub_tasks if t.id in succeeded and t.id not in consumed]
 
 
-def run_chain(sub_tasks: list[Task], ctx: RunContext, depth: int) -> list[Output | DispatchResult | QAFailure]:
-    """Exécute une liste de sous-tâches ordonnée par leur graphe de dépendances (Kahn).
+def run_chain(sub_tasks: list[Task], ctx: RunContext, depth: int) -> dict[str, Output]:
+    """Exécute des sous-tâches ordonnées par leur DAG de dépendances (Kahn) et renvoie
+    les outputs RÉUSSIS indexés par id de tâche (ordre d'insertion = ordre topologique).
 
-    Recovery-aware (D1) : l'exécuteur par nœud est `run_with_recovery` (était `run_task`).
-    Le reste est identique à A3 — required_outputs des deps réussies injectés, cascade
-    dependency_failed, input non muté (model_copy)."""
+    Recovery-aware (D1) : l'exécuteur par nœud est `run_with_recovery`. required_outputs
+    des deps réussies injectés, input non muté (model_copy). Les échecs ne sont pas dans
+    le retour (déjà contenus/tracés à l'exécution) ; un dépendant dont une dep manque est
+    simplement sauté. Interne à la récursion : seul `run_with_recovery` l'appelle (D2)."""
     order = _topological_order(sub_tasks)
     outputs: dict[str, Output] = {}
-    results: list[Output | DispatchResult | QAFailure] = []
 
     for task in order:
         unmet = [dep for dep in task.depends_on if dep not in outputs]
         if unmet:
-            results.append(DispatchResult(
-                status="dependency_failed",
-                agent_id=None,
-                reason=f"unresolved dependencies: {unmet}",
-            ))
             continue
         resolved = [outputs[dep] for dep in task.depends_on]
         task_to_run = task.model_copy(update={"required_outputs": resolved})
         result = run_with_recovery(task_to_run, ctx, depth)
-        results.append(result)
         if isinstance(result, Output):
             outputs[task.id] = result
 
-    return results
+    return outputs
 
 
 def build_sub_tasks(parent_task: Task, division: DivisionResult, ctx: RunContext) -> list[Task]:
@@ -286,19 +281,22 @@ def run_with_recovery(task: Task, ctx: RunContext, depth: int = 0) -> Output | D
             reason="tagging produced no tags",
         )
 
-    sub_results = run_chain(sub_tasks, ctx, depth + 1)
-    successful = [r for r in sub_results if isinstance(r, Output)]
-    if not successful:
+    outputs_by_id = run_chain(sub_tasks, ctx, depth + 1)
+    if not outputs_by_id:
         return DispatchResult(
             status="unassigned",
             agent_id=None,
             reason="no sub-tasks recovered",
         )
 
+    sinks = _sinks(sub_tasks, outputs_by_id)
+    if len(sinks) == 1:
+        return sinks[0]   # court-circuit : un seul résultat terminal, rien à synthétiser
+
     try:
-        return ctx.aggregator.aggregate(task, successful, ctx.client, ctx.tracer)
+        return ctx.aggregator.aggregate(task, sinks, ctx.client, ctx.tracer)
     except Exception:
-        return successful[-1]
+        return sinks[-1]
 
 
 def run_recovery(
