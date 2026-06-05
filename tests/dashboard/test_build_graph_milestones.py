@@ -202,7 +202,7 @@ def _divided_events():
     return [
         TaskDividedEvent(session_id=SID, task_id=P, sub_tasks=[
             DividedSubTask(id=S1, description="investigate", depends_on=[], required_tags={"backend": 70}),
-            DividedSubTask(id=S2, description="fix", depends_on=[S1], required_tags={"python": 60}),
+            DividedSubTask(id=S2, description="fix", depends_on=[], required_tags={"python": 60}),
         ]),
         # sous-tâche 1 (avec tool)
         Phase1FilteredEvent(session_id=SID, task_id=S1, agent_id="ag", passed=True, fit_score=0.9),
