@@ -177,14 +177,21 @@ def _sinks(sub_tasks: list[Task], outputs_by_id: dict[str, Output]) -> list[Outp
     return [outputs_by_id[t.id] for t in sub_tasks if t.id in succeeded and t.id not in consumed]
 
 
-def run_chain(sub_tasks: list[Task], ctx: RunContext, depth: int) -> dict[str, Output]:
+def run_chain(
+    sub_tasks: list[Task],
+    ctx: RunContext,
+    depth: int,
+    chained_context: list[Task] | None = None,
+) -> dict[str, Output]:
     """Exécute des sous-tâches ordonnées par leur DAG de dépendances (Kahn) et renvoie
     les outputs RÉUSSIS indexés par id de tâche (ordre d'insertion = ordre topologique).
 
     Recovery-aware (D1) : l'exécuteur par nœud est `run_with_recovery`. required_outputs
-    des deps réussies injectés, input non muté (model_copy). Les échecs ne sont pas dans
-    le retour (déjà contenus/tracés à l'exécution) ; un dépendant dont une dep manque est
-    simplement sauté. Interne à la récursion : seul `run_with_recovery` l'appelle (D2)."""
+    des deps réussies injectés, input non muté (model_copy). chained_context (D3) est
+    transmis tel quel à chaque nœud (déjà augmenté du parent par l'appelant). Les échecs
+    ne sont pas dans le retour (déjà contenus/tracés à l'exécution) ; un dépendant dont
+    une dep manque est simplement sauté. Interne à la récursion : seul `run_with_recovery`
+    l'appelle (D2)."""
     order = _topological_order(sub_tasks)
     outputs: dict[str, Output] = {}
 
@@ -194,7 +201,9 @@ def run_chain(sub_tasks: list[Task], ctx: RunContext, depth: int) -> dict[str, O
             continue
         resolved = [outputs[dep] for dep in task.depends_on]
         task_to_run = task.model_copy(update={"required_outputs": resolved})
-        result = run_with_recovery(task_to_run, ctx, depth)
+        result = run_with_recovery(
+            task_to_run, ctx, depth, chained_context=chained_context
+        )
         if isinstance(result, Output):
             outputs[task.id] = result
 
@@ -238,9 +247,18 @@ def build_sub_tasks(parent_task: Task, division: DivisionResult, ctx: RunContext
     return sub_tasks
 
 
-def run_with_recovery(task: Task, ctx: RunContext, depth: int = 0) -> Output | DispatchResult | QAFailure:
+def run_with_recovery(
+    task: Task,
+    ctx: RunContext,
+    depth: int = 0,
+    chained_context: list[Task] | None = None,
+    failure_context: dict | None = None,
+) -> Output | DispatchResult | QAFailure:
     """Cœur récursif D1. Tente la tâche à plat ; ne divise que sur `unassigned`,
-    récursivement (mutuellement récursif avec run_chain). `task` est TOUJOURS taguée."""
+    récursivement (mutuellement récursif avec run_chain). `task` est TOUJOURS taguée.
+
+    D3 : chained_context et failure_context sont threadés à travers la récursion
+    et utilisés par le divider lors de la division (Task 11)."""
     missing = _roster_gap(task, ctx.agents)
     if missing:
         if ctx.tracer is not None:
@@ -282,7 +300,9 @@ def run_with_recovery(task: Task, ctx: RunContext, depth: int = 0) -> Output | D
             reason="tagging produced no tags",
         )
 
-    outputs_by_id = run_chain(sub_tasks, ctx, depth + 1)
+    outputs_by_id = run_chain(
+        sub_tasks, ctx, depth + 1, chained_context=chained_context
+    )
     if not outputs_by_id:
         return DispatchResult(
             status="unassigned",

@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import aaosa.runtime.runner as runner
 from aaosa.claiming.dispatch import DispatchResult
 from aaosa.core.agent import Agent
 from aaosa.runtime.aggregator import TaskAggregator
@@ -201,3 +202,23 @@ class TestExecuteRequiredOutputs:
         a.execute(task, self._fake_client(capture))
         user_msg = capture["messages"][-1]["content"]
         assert "Required context from previous steps" not in user_msg
+
+
+def test_run_chain_forwards_chained_context(monkeypatch):
+    seen = []
+
+    def fake_recovery(task, ctx, depth=0, chained_context=None, failure_context=None):
+        seen.append(chained_context)
+        return None  # pas d'Output → rien dans outputs_by_id
+
+    monkeypatch.setattr(runner, "run_with_recovery", fake_recovery)
+
+    ancestor = Task(description="root", required_tags={"python": 50})
+    sub = Task(description="child", required_tags={"python": 50})
+    ctx = RunContext(
+        agents=[], client=SimpleNamespace(), divider=SimpleNamespace(),
+        aggregator=SimpleNamespace(), tagger=SimpleNamespace(), tracer=None,
+    )
+    runner.run_chain([sub], ctx, depth=1, chained_context=[ancestor])
+
+    assert seen == [[ancestor]]
