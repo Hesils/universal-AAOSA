@@ -51,7 +51,7 @@ def build_incident_task() -> Task:
             "cause, fix it, and add a regression test."
         ),
         required_tags={"backend": 70, "python": 70, "database": 60},
-        metadata={"context": _INCIDENT_CONTEXT},
+        context=_INCIDENT_CONTEXT,
     )
 
 
@@ -105,7 +105,7 @@ def run_demo_v3() -> None:
         tasks=[SessionTaskRecord(
             id=task.id, description=task.description,
             winner_agent_id=None, outcome=outcome,
-            required_tags=task.required_tags, context=task.metadata.get("context"),
+            required_tags=task.required_tags, context=task.context,
         )],
         agent_ids=[a.id for a in agents],
     )

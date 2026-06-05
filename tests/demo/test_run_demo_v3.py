@@ -5,7 +5,7 @@ from aaosa.schemas.task import Task
 def test_build_incident_task_has_context_and_tags():
     task = build_incident_task()
     assert isinstance(task, Task)
-    assert task.metadata.get("context")
+    assert task.context
     assert task.required_tags  # non vide
 
 
