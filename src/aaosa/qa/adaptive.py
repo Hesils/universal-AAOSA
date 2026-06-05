@@ -5,6 +5,7 @@ from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
 from aaosa.qa.criteria import CRITERIA_REGISTRY
+from aaosa.qa.diagnostic import FailureContext
 from aaosa.qa.spec import CriterionSpec, EvaluatorSpec, JudgeSpec
 from aaosa.schemas.elo import ELO_COMPETENT_MIN, ELO_EXPERT_MIN
 from aaosa.schemas.task import Task
@@ -160,44 +161,73 @@ def _ensure_non_empty_gate(spec: EvaluatorSpec) -> EvaluatorSpec:
     return spec.model_copy(update={"criteria": criteria})
 
 
-def _build_prompt(task: Task) -> str:
-    predefined = ", ".join(sorted(CRITERIA_REGISTRY))
+_CRITERION_TYPES_DOC = (
+    "- min_length : params {min_chars: int} — longueur minimale attendue\n"
+    "- keyword_presence : params {keywords: list[str]} — mots-clés devant apparaître\n"
+    "- llm_check : params {description: str} — critère sémantique libre, vérifié par LLM\n"
+    "- format_check : params {kind: str} — 'json' | 'code_block' | 'non_empty_lines'\n"
+    "- references_tags : aucun param — la réponse doit référencer les tags requis\n"
+)
+
+
+def _build_prompt(task: Task, failure_context: FailureContext | None = None) -> str:
     context_section = f"# Contexte domaine\n{task.context}\n\n" if task.context else ""
+    failure_section = ""
+    if failure_context is not None:
+        failed = [
+            name for name, ok in failure_context.qa_result.criteria_results.items() if not ok
+        ]
+        failure_section = (
+            "# Échec précédent\n"
+            "Une spec précédente a jugé la réponse suivante comme un échec.\n"
+            f"Réponse de l'agent:\n{failure_context.failed_output.content}\n\n"
+            f"Verdict QA (score={failure_context.qa_result.score:.2f}): "
+            f"{failure_context.qa_result.reason}\n"
+            f"Critères ratés: {', '.join(failed) or 'aucun'}\n"
+            f"Diagnostic: {failure_context.diagnostic_reason}\n"
+            "Corrige la spec en conséquence : si les critères étaient inadaptés (trop "
+            "stricts, hors-sujet), desserre-les ou remplace-les pour viser une évaluation "
+            "juste de cette réponse.\n\n"
+        )
     return (
         "Tu génères une EvaluatorSpec pour évaluer la réponse d'un agent à cette tâche.\n\n"
         f"# Tâche\n{task.description}\n\n"
         f"{context_section}"
-        f"# Tags requis\n{', '.join(task.required_tags)}\n\n"
-        f"# Critères prédéfinis disponibles (suggestions)\n{predefined}\n\n"
-        "# Critère adaptatif libre\n"
-        '"llm_check" accepte un param "description" (str) — utilise-le pour tout critère '
-        "sémantique spécifique à cette tâche qui ne correspond à aucun critère prédéfini.\n"
-        'Exemple : {"name": "llm_check", "params": {"description": "La réponse doit inclure '
-        'des exemples de code avec explications"}, "weight": 1.5}\n\n'
+        f"# Tags requis\n{', '.join(task.required_tags) or 'aucun'}\n\n"
+        f"{failure_section}"
+        "# Types de critères disponibles\n"
+        f"{_CRITERION_TYPES_DOC}\n"
         "# Règles\n"
-        '- "non_empty" est ajouté automatiquement comme unique gate — ne le déclare pas\n'
-        '- Ajouter "min_length" si la tâche attend une réponse détaillée\n'
-        '- Utiliser "llm_check" pour des critères qualitatifs propres à cette tâche\n'
-        '- Ajouter un judge (mode "rubric") si la tâche est complexe ou ambiguë\n'
-        '- Tout nom hors de la liste prédéfinie ET hors "llm_check" sera ignoré\n'
-        "- success_threshold entre 0.5 et 0.9 selon la criticité"
+        "- Chaque critère porte un `type` (parmi la liste ci-dessus), une `importance` "
+        "('critique' | 'normal' | 'mineur') et un `rationale` court (pourquoi ce critère).\n"
+        "- Maximum 6 critères au total, dont au plus 4 de type 'llm_check'.\n"
+        "- 'non_empty' est ajouté automatiquement comme unique gate — ne le déclare pas.\n"
+        "- Utilise 'llm_check' pour les critères qualitatifs propres à cette tâche.\n"
+        "- Ajoute un judge (mode 'rubric') si la tâche est complexe ou ambiguë.\n"
+        "- Ne choisis PAS de seuil de succès : il est dérivé automatiquement."
     )
 
 
-def build_llm_spec(task: Task, client: OpenAI) -> EvaluatorSpec:
+def build_llm_spec(
+    task: Task,
+    client: OpenAI,
+    failure_context: FailureContext | None = None,
+) -> EvaluatorSpec:
     """Génère un EvaluatorSpec via LLM (structured output).
 
+    Moteur B (génération bornée) : caps déterministes, importance discrète,
+    threshold dérivé, rationale. Moteur A (régénération informée) : si
+    `failure_context` est fourni, le prompt inclut l'échec précédent.
     Fallback automatique sur build_adaptive_spec si le LLM échoue.
-    Post-filtre les critères inconnus de CRITERIA_REGISTRY et garantit
-    l'invariant non_empty gate=True.
     """
+    threshold = _derive_threshold(task)
     try:
         response = client.beta.chat.completions.parse(
             model="gpt-4o-mini",
             temperature=0.0,
             messages=[
                 {"role": "system", "content": "Tu produis une spec d'évaluation déclarative."},
-                {"role": "user", "content": _build_prompt(task)},
+                {"role": "user", "content": _build_prompt(task, failure_context)},
             ],
             response_format=_LLMEvaluatorSpec,
         )
@@ -205,9 +235,9 @@ def build_llm_spec(task: Task, client: OpenAI) -> EvaluatorSpec:
         if parsed is None:
             raise ValueError("LLM returned no parsed _LLMEvaluatorSpec")
         spec = _filter_unknown_criteria(parsed.to_spec(), task)
-        return _ensure_non_empty_gate(spec)
+        spec = spec.model_copy(update={"criteria": _apply_caps(list(spec.criteria))})
+        spec = _ensure_non_empty_gate(spec)
+        return spec.model_copy(update={"success_threshold": threshold})
     except Exception as e:
-        # Fallback runtime-safe (un hoquet LLM ne casse pas le run) mais PLUS silencieux :
-        # c'est ce except nu + le dict ouvert de CriterionSpec qui masquaient le bug spec.
         logger.warning("build_llm_spec fallback to deterministic spec: %s", e)
         return build_adaptive_spec(task)

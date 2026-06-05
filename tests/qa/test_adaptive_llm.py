@@ -141,3 +141,78 @@ class TestLLMCriterionSchema:
         llm = _LLMEvaluatorSpec(criteria=[_LLMCriterion(type="min_length", min_chars=50)])
         spec = llm.to_spec()
         assert [c.name for c in spec.criteria] == ["min_length"]
+
+
+class TestBuildLLMSpecColdStart:
+    def test_returns_evaluator_spec(self):
+        llm = _LLMEvaluatorSpec(criteria=[_LLMCriterion(type="min_length", min_chars=100)])
+        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        assert isinstance(result, EvaluatorSpec)
+        assert "min_length" in {c.name for c in result.criteria}
+
+    def test_response_format_is_closed_schema(self):
+        client = _FakeParseClient(_LLMEvaluatorSpec(criteria=[]))
+        build_llm_spec(make_task(), client)
+        assert client.captured_kwargs["response_format"] is _LLMEvaluatorSpec
+
+    def test_always_has_non_empty_gate(self):
+        llm = _LLMEvaluatorSpec(criteria=[_LLMCriterion(type="min_length", min_chars=50)])
+        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        gates = [c for c in result.criteria if c.name == "non_empty" and c.gate]
+        assert len(gates) == 1
+
+    def test_threshold_is_derived_not_from_llm(self):
+        # tag expert → 0.8, indépendamment de ce que "voudrait" le LLM
+        llm = _LLMEvaluatorSpec(criteria=[_LLMCriterion(type="min_length", min_chars=50)])
+        task = make_task(required_tags={"frontend": 90})
+        result = build_llm_spec(task, _FakeParseClient(llm))
+        assert result.success_threshold == 0.8
+
+    def test_importance_mapped_in_resulting_spec(self):
+        llm = _LLMEvaluatorSpec(criteria=[
+            _LLMCriterion(type="min_length", importance="critique", min_chars=50),
+        ])
+        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        ml = next(c for c in result.criteria if c.name == "min_length")
+        assert ml.weight == 3.0
+
+    def test_rationale_present_on_generated_criteria(self):
+        llm = _LLMEvaluatorSpec(criteria=[
+            _LLMCriterion(type="llm_check", description="d", rationale="parce que"),
+        ])
+        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        llm_c = next(c for c in result.criteria if c.name == "llm_check")
+        assert llm_c.rationale == "parce que"
+
+    def test_caps_enforced_end_to_end(self):
+        llm = _LLMEvaluatorSpec(criteria=[
+            _LLMCriterion(type="llm_check", description=str(i)) for i in range(6)
+        ])
+        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        assert sum(c.name == "llm_check" for c in result.criteria) == 4
+
+    def test_judge_converted_weight_locked(self):
+        llm = _LLMEvaluatorSpec(
+            criteria=[_LLMCriterion(type="min_length", min_chars=50)],
+            judge=_LLMJudge(mode="rubric", rubric=["correctness"]),
+        )
+        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        assert result.judge is not None and result.judge.weight == 0.3
+
+    def test_filters_unknown_criteria_kept_known(self):
+        llm = _LLMEvaluatorSpec(criteria=[_LLMCriterion(type="references_tags")])
+        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        assert "references_tags" in {c.name for c in result.criteria}
+
+    def test_fallback_on_exception(self):
+        task = make_task()
+        result = build_llm_spec(task, _RaisingClient())
+        assert result == build_adaptive_spec(task)
+
+    def test_prompt_lists_types_and_caps(self):
+        client = _FakeParseClient(_LLMEvaluatorSpec(criteria=[]))
+        build_llm_spec(make_task(), client)
+        prompt = client.captured_kwargs["messages"][1]["content"]
+        assert "llm_check" in prompt and "min_length" in prompt
+        assert "importance" in prompt
+        assert "non_empty" in prompt  # consigne de ne pas le déclarer
