@@ -1,6 +1,7 @@
 from openai import OpenAI
 
 from aaosa.qa.adaptive import build_llm_spec
+from aaosa.qa.diagnostic import FailureContext
 from aaosa.qa.criteria import get_criterion
 from aaosa.qa.judge import JudgeBreakdown, run_judge
 from aaosa.qa.protocol import QAResult
@@ -95,14 +96,14 @@ def from_spec(
 class AdaptiveSpecEvaluator:
     """Evaluator paresseux : génère la spec par tâche (B1) dans evaluate.
 
-    Satisfait le Protocol QAEvaluator. La spec construite par build_llm_spec est
-    interprétée par un SpecEvaluator (qui injecte le client dans llm_check et
-    renseigne QAResult.spec_used). Aucun changement de signature côté runner.
+    Satisfait le Protocol QAEvaluator. `failure_context` optionnel (D4 moteur A) :
+    s'il est fourni, build_llm_spec régénère une spec informée par l'échec.
     """
 
-    def __init__(self, client: OpenAI):
+    def __init__(self, client: OpenAI, failure_context: FailureContext | None = None):
         self.client = client
+        self.failure_context = failure_context
 
     def evaluate(self, task: Task, output: Output) -> QAResult:
-        spec = build_llm_spec(task, self.client)
+        spec = build_llm_spec(task, self.client, self.failure_context)
         return SpecEvaluator(spec, client=self.client).evaluate(task, output)

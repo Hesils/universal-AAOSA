@@ -230,7 +230,7 @@ class TestAdaptiveSpecEvaluator:
         known = EvaluatorSpec(criteria=[CriterionSpec(name="non_empty", gate=True)],
                               success_threshold=0.5)
         calls = {"n": 0}
-        def fake_build(task, client):
+        def fake_build(task, client, failure_context=None):
             calls["n"] += 1
             return known
         monkeypatch.setattr(se_module, "build_llm_spec", fake_build)
@@ -240,3 +240,38 @@ class TestAdaptiveSpecEvaluator:
         assert calls["n"] == 1
         assert r.success is True
         assert r.spec_used == known
+
+
+from aaosa.qa.diagnostic import FailureContext
+
+
+def _fc():
+    out = make_output("bad")
+    qa = QAResult(task_id="t", agent_id="a1", success=False, score=0.1,
+                  reason="r", criteria_results={})
+    return FailureContext(failed_output=out, qa_result=qa, diagnostic_reason="d")
+
+
+class TestAdaptiveSpecEvaluatorFailureContext:
+    def test_default_failure_context_is_none(self):
+        ev = AdaptiveSpecEvaluator(client=None)
+        assert ev.failure_context is None
+
+    def test_stores_failure_context(self):
+        fc = _fc()
+        ev = AdaptiveSpecEvaluator(client=None, failure_context=fc)
+        assert ev.failure_context is fc
+
+    def test_evaluate_passes_failure_context_to_build(self, monkeypatch):
+        captured = {}
+
+        def fake_build(task, client, failure_context=None):
+            captured["fc"] = failure_context
+            return EvaluatorSpec(criteria=[CriterionSpec(name="non_empty", gate=True)])
+
+        monkeypatch.setattr(se_module, "build_llm_spec", fake_build)
+        fc = _fc()
+        AdaptiveSpecEvaluator(client=None, failure_context=fc).evaluate(
+            make_task(), make_output("x")
+        )
+        assert captured["fc"] is fc
