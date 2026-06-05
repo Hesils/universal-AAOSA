@@ -5,7 +5,9 @@ from aaosa.claiming.phase1 import filter_candidates
 from aaosa.claiming.phase2 import run_phase2
 from aaosa.core.agent import Agent
 from aaosa.elo.updater import update_agent_elo
+from aaosa.qa.diagnostic import DiagnosticResult, FailureContext, diagnose_failure
 from aaosa.qa.protocol import QAEvaluator, QAFailure
+from aaosa.qa.spec_evaluator import AdaptiveSpecEvaluator
 from aaosa.runtime.context import RunContext
 from aaosa.runtime.divider import DivisionResult
 from aaosa.runtime.tagger import EmptyTaggingError
@@ -247,66 +249,49 @@ def build_sub_tasks(parent_task: Task, division: DivisionResult, ctx: RunContext
     return sub_tasks
 
 
-def run_with_recovery(
+def _divide_and_recover(
     task: Task,
     ctx: RunContext,
-    depth: int = 0,
-    chained_context: list[Task] | None = None,
-    failure_context: dict | None = None,
+    depth: int,
+    chained_context: list[Task] | None,
+    failure_context: FailureContext | None,
+    atomic_fallback: Output | DispatchResult | QAFailure,
 ) -> Output | DispatchResult | QAFailure:
-    """Cœur récursif D1. Tente la tâche à plat ; ne divise que sur `unassigned`,
-    récursivement (mutuellement récursif avec run_chain). `task` est TOUJOURS taguée.
+    """Divise `task`, exécute le sous-DAG (run_chain), agrège les sinks (D2).
 
-    D3 : chained_context et failure_context sont threadés à travers la récursion
-    et utilisés par le divider lors de la division (Task 11)."""
-    missing = _roster_gap(task, ctx.agents)
-    if missing:
-        if ctx.tracer is not None:
-            ctx.tracer.emit(RosterGapEvent(
-                session_id=ctx.tracer.session_id,
-                task_id=task.id,
-                missing_tags=sorted(missing),
-            ))
-        return DispatchResult(
-            status="roster_gap",
-            agent_id=None,
-            reason=f"no agent covers required tags: {sorted(missing)}",
-        )
-
-    result = run_task(task, ctx.agents, ctx.client, ctx.tracer, ctx.evaluator)
-    if not (isinstance(result, DispatchResult) and result.status == "unassigned"):
-        return result
-
+    Partagé par la route D1 (unassigned, failure_context=None) et la route D3
+    task_spec (failure_context renseigné). `atomic_fallback` est renvoyé si le
+    divider juge la tâche atomique ou si aucune sous-tâche n'aboutit."""
     if depth >= MAX_RECOVERY_DEPTH:
-        return result
+        return atomic_fallback
 
     try:
-        division = ctx.divider.divide(task, ctx.client)
+        division = ctx.divider.divide(
+            task, ctx.client,
+            chained_context=chained_context,
+            failure_context=failure_context,
+        )
     except Exception:
         return DispatchResult(
-            status="execution_failed",
-            agent_id=None,
+            status="execution_failed", agent_id=None,
             reason="divider raised an exception",
         )
     if division.is_atomic:
-        return result
+        return atomic_fallback
 
     try:
         sub_tasks = build_sub_tasks(task, division, ctx)
     except EmptyTaggingError:
         return DispatchResult(
-            status="execution_failed",
-            agent_id=None,
+            status="execution_failed", agent_id=None,
             reason="tagging produced no tags",
         )
 
-    outputs_by_id = run_chain(
-        sub_tasks, ctx, depth + 1, chained_context=chained_context
-    )
+    child_context = (chained_context or []) + [task]
+    outputs_by_id = run_chain(sub_tasks, ctx, depth + 1, chained_context=child_context)
     if not outputs_by_id:
         return DispatchResult(
-            status="unassigned",
-            agent_id=None,
+            status="unassigned", agent_id=None,
             reason="no sub-tasks recovered",
         )
 
@@ -318,6 +303,40 @@ def run_with_recovery(
         return ctx.aggregator.aggregate(task, sinks, ctx.client, ctx.tracer)
     except Exception:
         return sinks[-1]
+
+
+def run_with_recovery(
+    task: Task,
+    ctx: RunContext,
+    depth: int = 0,
+    chained_context: list[Task] | None = None,
+    failure_context: FailureContext | None = None,
+) -> Output | DispatchResult | QAFailure:
+    """Cœur récursif D1+D3. Tente la tâche à plat ; divise sur `unassigned` (D1) ou
+    sur diagnostic `task_spec` (D3) ; route les autres qa_fail (D3). `task` est
+    TOUJOURS taguée."""
+    missing = _roster_gap(task, ctx.agents)
+    if missing:
+        if ctx.tracer is not None:
+            ctx.tracer.emit(RosterGapEvent(
+                session_id=ctx.tracer.session_id,
+                task_id=task.id,
+                missing_tags=sorted(missing),
+            ))
+        return DispatchResult(
+            status="roster_gap", agent_id=None,
+            reason=f"no agent covers required tags: {sorted(missing)}",
+        )
+
+    result = run_task(task, ctx.agents, ctx.client, ctx.tracer, ctx.evaluator)
+
+    if isinstance(result, DispatchResult) and result.status == "unassigned":
+        return _divide_and_recover(
+            task, ctx, depth, chained_context,
+            failure_context=None, atomic_fallback=result,
+        )
+
+    return result
 
 
 def run_recovery(

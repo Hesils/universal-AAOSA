@@ -40,7 +40,7 @@ class _StaticDivider:
     def __init__(self, division):
         self.division = division
 
-    def divide(self, task, client):
+    def divide(self, task, client, chained_context=None, failure_context=None):
         return self.division
 
 
