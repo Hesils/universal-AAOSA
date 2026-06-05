@@ -74,3 +74,13 @@ class TestEvaluatorSpec:
     def test_extra_forbidden(self):
         with pytest.raises(Exception):
             EvaluatorSpec(criteria=[], bogus=1)
+
+
+def test_criterion_spec_rationale_defaults_empty():
+    c = CriterionSpec(name="min_length")
+    assert c.rationale == ""
+
+
+def test_criterion_spec_accepts_rationale():
+    c = CriterionSpec(name="llm_check", rationale="vérifie la présence d'exemples")
+    assert c.rationale == "vérifie la présence d'exemples"

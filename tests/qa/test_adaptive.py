@@ -50,3 +50,28 @@ def test_build_prompt_omits_context_section_when_absent():
     task = Task(description="audit auth", required_tags={"security": 80})
     prompt = _build_prompt(task)
     assert "# Contexte" not in prompt
+
+
+from aaosa.qa.adaptive import _derive_threshold
+
+
+def test_derive_threshold_expert():
+    assert _derive_threshold(Task(description="x", required_tags={"db": 90})) == 0.8
+
+
+def test_derive_threshold_competent():
+    assert _derive_threshold(Task(description="x", required_tags={"db": 50})) == 0.7
+
+
+def test_derive_threshold_basic():
+    assert _derive_threshold(Task(description="x", required_tags={"db": 15})) == 0.6
+
+
+def test_derive_threshold_medium_elo_returns_07():
+    # ELO entre COMPETENT_MIN (30) et EXPERT_MIN (85) → 0.7
+    assert _derive_threshold(Task(description="x", required_tags={"db": 50})) == 0.7
+
+
+def test_build_adaptive_spec_uses_derived_threshold():
+    spec = build_adaptive_spec(Task(description="x", required_tags={"db": 90}))
+    assert spec.success_threshold == 0.8

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from aaosa.qa.criteria import CRITERIA_REGISTRY
 from aaosa.qa.spec import CriterionSpec, EvaluatorSpec, JudgeSpec
-from aaosa.schemas.elo import ELO_EXPERT_MIN
+from aaosa.schemas.elo import ELO_COMPETENT_MIN, ELO_EXPERT_MIN
 from aaosa.schemas.task import Task
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,19 @@ class _LLMEvaluatorSpec(BaseModel):
         )
 
 
+def _derive_threshold(task: Task) -> float:
+    """success_threshold dérivé du max des ELO requis (déterministe, zéro LLM)."""
+    elos = task.required_tags.values()
+    if not elos:
+        return 0.7
+    max_elo = max(elos)
+    if max_elo >= ELO_EXPERT_MIN:        # 85
+        return 0.8
+    if max_elo >= ELO_COMPETENT_MIN:     # 30
+        return 0.7
+    return 0.6
+
+
 def build_adaptive_spec(task: Task) -> EvaluatorSpec:
     n_tags = len(task.required_tags)
 
@@ -81,7 +94,7 @@ def build_adaptive_spec(task: Task) -> EvaluatorSpec:
             rubric=["correctness", "completeness", "relevance"],
         )
 
-    return EvaluatorSpec(criteria=criteria, judge=judge)
+    return EvaluatorSpec(criteria=criteria, judge=judge, success_threshold=_derive_threshold(task))
 
 
 def _filter_unknown_criteria(spec: EvaluatorSpec, task: Task) -> EvaluatorSpec:

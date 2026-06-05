@@ -9,6 +9,7 @@ class CriterionSpec(BaseModel):
     params: dict = {}
     weight: float = 1.0
     gate: bool = False
+    rationale: str = ""
 
 
 class JudgeSpec(BaseModel):
