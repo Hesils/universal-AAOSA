@@ -348,10 +348,15 @@ def _route_diagnostic(
         return _retry_with_consignes(task, diagnostic.consignes, ctx, attribution="agent")
 
     if diagnostic.attribution == "evaluator":
-        new_evaluator = AdaptiveSpecEvaluator(ctx.client)
+        fc = FailureContext(
+            failed_output=failure.output,
+            qa_result=failure.qa_result,
+            diagnostic_reason=diagnostic.reason,
+        )
+        new_evaluator = AdaptiveSpecEvaluator(ctx.client, failure_context=fc)
         qa2 = new_evaluator.evaluate(task, failure.output)
         if qa2.success:
-            return failure.output   # l'output original passe avec le nouvel evaluator
+            return failure.output   # l'output original passe avec la spec régénérée
         return _retry_with_consignes(task, diagnostic.consignes, ctx, attribution="evaluator")
 
     if diagnostic.attribution == "task_spec":

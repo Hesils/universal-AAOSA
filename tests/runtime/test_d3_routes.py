@@ -65,7 +65,7 @@ def test_route_evaluator_reeval_ok_returns_output(monkeypatch):
                         lambda *a, **k: DiagnosticResult(attribution="evaluator", consignes=None, reason="r"))
     good_qa = QAResult(task_id="t", agent_id="a", success=True, score=0.9, reason="ok", criteria_results={})
     monkeypatch.setattr(runner, "AdaptiveSpecEvaluator",
-                        lambda client: SimpleNamespace(evaluate=lambda task, output: good_qa))
+                        lambda client, failure_context=None: SimpleNamespace(evaluate=lambda task, output: good_qa))
     out = runner.run_with_recovery(_task(), _ctx())
     assert isinstance(out, Output)
     assert out.content == "bad"   # l'output original passe avec le nouvel evaluator
@@ -78,7 +78,7 @@ def test_route_evaluator_reeval_ko_then_agent_retry_ok(monkeypatch):
                         lambda *a, **k: DiagnosticResult(attribution="evaluator", consignes="clarify", reason="r"))
     bad_qa = QAResult(task_id="t", agent_id="a", success=False, score=0.1, reason="still bad", criteria_results={})
     monkeypatch.setattr(runner, "AdaptiveSpecEvaluator",
-                        lambda client: SimpleNamespace(evaluate=lambda task, output: bad_qa))
+                        lambda client, failure_context=None: SimpleNamespace(evaluate=lambda task, output: bad_qa))
     out = runner.run_with_recovery(_task(), _ctx())
     assert isinstance(out, Output)
     assert out.content == "recovered"
@@ -91,7 +91,7 @@ def test_route_evaluator_reeval_ko_then_agent_retry_ko(monkeypatch):
                         lambda *a, **k: DiagnosticResult(attribution="evaluator", consignes="clarify", reason="r"))
     bad_qa = QAResult(task_id="t", agent_id="a", success=False, score=0.1, reason="bad", criteria_results={})
     monkeypatch.setattr(runner, "AdaptiveSpecEvaluator",
-                        lambda client: SimpleNamespace(evaluate=lambda task, output: bad_qa))
+                        lambda client, failure_context=None: SimpleNamespace(evaluate=lambda task, output: bad_qa))
     out = runner.run_with_recovery(_task(), _ctx())
     assert out.status == "qa_failed"
     assert out.attribution == "evaluator"
@@ -201,3 +201,26 @@ def test_route_task_spec_terminates_at_max_depth(monkeypatch):
     assert out.status == "qa_failed"
     assert out.attribution == "task_spec"
     assert divider.calls == []   # jamais divisé
+
+
+def test_route_evaluator_passes_failure_context(monkeypatch):
+    monkeypatch.setattr(runner, "run_task", lambda *a, **k: _qa_fail())
+    monkeypatch.setattr(runner, "diagnose_failure",
+                        lambda *a, **k: DiagnosticResult(
+                            attribution="evaluator", consignes=None, reason="critères trop stricts"))
+    captured = {}
+    good_qa = QAResult(task_id="t", agent_id="a", success=True, score=0.9,
+                       reason="ok", criteria_results={})
+
+    def fake_evaluator(client, failure_context=None):
+        captured["fc"] = failure_context
+        return SimpleNamespace(evaluate=lambda task, output: good_qa)
+
+    monkeypatch.setattr(runner, "AdaptiveSpecEvaluator", fake_evaluator)
+    out = runner.run_with_recovery(_task(), _ctx())
+    assert isinstance(out, Output)
+    fc = captured["fc"]
+    assert fc is not None
+    assert fc.diagnostic_reason == "critères trop stricts"
+    assert fc.failed_output.content == "bad"        # output raté du _qa_fail()
+    assert fc.qa_result.score == 0.2
