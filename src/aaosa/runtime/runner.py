@@ -162,6 +162,21 @@ def _topological_order(tasks: list[Task]) -> list[Task]:
     return order
 
 
+def _sinks(sub_tasks: list[Task], outputs_by_id: dict[str, Output]) -> list[Output]:
+    """Sinks du sous-DAG des frères réussis : un réussi non consommé par un réussi.
+
+    Un sink est un résultat terminal « lâche » qui doit être fusionné ; un réussi
+    consommé par un réussi est déjà replié dans son consommateur (required_outputs).
+    Ordre = ordre de sub_tasks (ordre du divider). Pur, pas d'appel LLM."""
+    succeeded = set(outputs_by_id)
+    consumed = {
+        dep
+        for t in sub_tasks if t.id in succeeded
+        for dep in t.depends_on if dep in succeeded
+    }
+    return [outputs_by_id[t.id] for t in sub_tasks if t.id in succeeded and t.id not in consumed]
+
+
 def run_chain(sub_tasks: list[Task], ctx: RunContext, depth: int) -> list[Output | DispatchResult | QAFailure]:
     """Exécute une liste de sous-tâches ordonnée par leur graphe de dépendances (Kahn).
 
