@@ -376,6 +376,103 @@ class TestDividedWalk:
         assert graph.steps[-1].detail.output.output_content == "content"
 
 
+class TestD3Walk:
+    def test_route_agent_retry(self):
+        events = (simple_pass("t1", success=False)
+                  + [diag("t1", "ag", "agent", reason="weak", consignes="be precise")]
+                  + simple_pass("t1", success=True, content="fixed"))
+        graph = build_graph(events, meta("t1", "do it"))
+        types = [(s.milestone_type, s.pass_index) for s in graph.steps]
+        assert types == [("input", 0), ("tagger", 0),
+                         ("dispatch", 0), ("agent", 0), ("evaluator", 0),
+                         ("diagnostic", 0),
+                         ("dispatch", 1), ("agent", 1), ("evaluator", 1),
+                         ("output", 0)]
+        dg = next(s for s in graph.steps if s.milestone_type == "diagnostic")
+        assert dg.outcome == "diagnosed"
+        assert dg.label == "DIAGNOSTIC · route agent"
+        assert dg.detail.diagnostic.attribution == "agent"
+        assert dg.detail.diagnostic.consignes == "be precise"
+        # le loop-back diag→dispatch s'allume au DISPATCH pass 2
+        d2 = next(s for s in graph.steps if s.milestone_type == "dispatch" and s.pass_index == 1)
+        assert d2.label == "DISPATCH · pass 2"
+        pairs = {(e.from_node, e.to, e.flow) for e in d2.active_edges}
+        assert ("diagnostic:t1", "dispatch:t1", "transient") in pairs
+        # l'output final vient de la passe 2
+        assert graph.steps[-1].detail.output.output_content == "fixed"
+
+    def test_route_evaluator_reeval_success(self):
+        spec_v2 = EvaluatorSpec(criteria=[CriterionSpec(name="non_empty", gate=True)])
+        events = (simple_pass("t1", success=False)
+                  + [diag("t1", "ag", "evaluator", reason="strict"),
+                     qa("t1", "ag", success=True, spec=spec_v2)])
+        graph = build_graph(events, meta("t1", "do it"))
+        types = [s.milestone_type for s in graph.steps]
+        assert types == ["input", "tagger", "dispatch", "agent", "evaluator",
+                         "diagnostic", "evaluator", "output"]
+        v2 = [s for s in graph.steps if s.milestone_type == "evaluator"][1]
+        assert v2.label == "EVALUATOR v2"
+        assert v2.outcome == "qa_pass"
+        assert v2.detail.evaluator.spec.criteria[0].name == "non_empty"   # spec régénérée
+        v1 = [s for s in graph.steps if s.milestone_type == "evaluator"][0]
+        assert v1.detail.evaluator.spec is None                            # specs v1/v2 distinctes
+        # l'output final est l'output ORIGINAL (validé par la spec v2)
+        assert graph.steps[-1].detail.output.output_content == "content"
+
+    def test_route_evaluator_reeval_fail_then_retry(self):
+        events = (simple_pass("t1", success=False)
+                  + [diag("t1", "ag", "evaluator", consignes="clarify"), qa("t1", "ag", success=False)]
+                  + simple_pass("t1", success=True, content="recovered"))
+        graph = build_graph(events, meta("t1", "do it"))
+        types = [s.milestone_type for s in graph.steps]
+        assert types == ["input", "tagger", "dispatch", "agent", "evaluator",
+                         "diagnostic", "evaluator",
+                         "dispatch", "agent", "evaluator", "output"]
+        assert graph.steps[-1].detail.output.output_content == "recovered"
+
+    def test_route_task_spec_division_origin_diagnostic(self):
+        events = (simple_pass("root", success=False)
+                  + [diag("root", "ag", "task_spec", reason="ambiguous"),
+                     divided("root", [("s1", "part A", [], {"python": 50}),
+                                      ("s2", "part B", [], {"python": 50})])]
+                  + simple_pass("s1") + simple_pass("s2")
+                  + [aggregated("root", ["s1", "s2"])])
+        graph = build_graph(events, meta("root", "big"))
+        div = next(s for s in graph.steps if s.milestone_type == "divider")
+        assert div.detail.divider.origin == "diagnostic"
+        # l'arête de division part du DIAG, pas du dispatch
+        flows = {(e.from_node, e.to): e.flow for e in graph.edges}
+        assert flows[("diagnostic:root", "divider:root")] == "ascent"
+        assert ("dispatch:root", "divider:root") not in flows
+        # séquence : ... evaluator (fail) → diagnostic → divider → branches → aggregator → output
+        types = [s.milestone_type for s in graph.steps]
+        i = types.index("diagnostic")
+        assert types[i + 1] == "divider"
+
+    def test_route_unattributed_stops(self):
+        events = simple_pass("t1", success=False) + [diag("t1", "ag", "unattributed", reason="")]
+        graph = build_graph(events, meta("t1", "do it"))
+        dg = graph.steps[-1]
+        assert dg.milestone_type == "diagnostic"
+        assert dg.label == "DIAGNOSTIC · route stop"
+        assert dg.detail.diagnostic.route_taken == "stop"
+        # pas d'output : la branche meurt au diagnostic
+        assert all(s.milestone_type != "output" for s in graph.steps)
+
+    def test_diagnostic_node_and_edges_static(self):
+        events = (simple_pass("t1", success=False)
+                  + [diag("t1", "ag", "agent", consignes="x")]
+                  + simple_pass("t1", success=True))
+        graph = build_graph(events, meta("t1", "do it"))
+        ids = {n.id for n in graph.nodes}
+        assert "diagnostic:t1" in ids
+        n = next(n for n in graph.nodes if n.id == "diagnostic:t1")
+        assert n.type == "diagnostic"
+        flows = {(e.from_node, e.to): e.flow for e in graph.edges}
+        assert flows[("evaluator:t1", "diagnostic:t1")] == "descent"
+        assert flows[("diagnostic:t1", "dispatch:t1")] == "transient"
+
+
 class TestBuildTree:
     def test_root_from_meta(self):
         events = simple_pass("t1")
