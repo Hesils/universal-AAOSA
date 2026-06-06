@@ -195,6 +195,8 @@ function renderTestSet(t) {
 function renderDivider(d) {
   const f = document.createDocumentFragment();
   if (!d.divided) { f.append(field("Divider", "non déclenché")); return f; }
+  f.append(field("Origine de la division", d.origin === "diagnostic"
+    ? "diagnostic D3 (task_spec)" : "récupération D1 (unassigned)"));
   d.sub_tasks.forEach((st, i) => {
     const deps = st.depends_on.length ? ` (dépend de ${st.depends_on.length})` : "";
     f.append(longField(`Sous-tâche ${i + 1}${deps}`, st.description));
@@ -234,6 +236,34 @@ function renderTool(t) {
   return f;
 }
 
+function renderDiagnostic(d) {
+  const f = document.createDocumentFragment();
+  if (!d) { f.append(field("Diagnostic", "non déclenché à cette étape")); return f; }
+  f.append(field("Attribution", d.attribution));
+  f.append(field("Route prise", d.route_taken === "stop" ? "stop (unattributed)" : d.route_taken));
+  if (d.reason) f.append(longField("Raison", d.reason));
+  if (d.consignes) f.append(longField("Consignes de correction", d.consignes));
+  return f;
+}
+
+function renderRosterGap(r, inp) {
+  const f = document.createDocumentFragment();
+  if (!r) { f.append(field("Roster gap", "—")); return f; }
+  f.append(fieldLines("Tags manquants au roster", r.missing_tags.length ? r.missing_tags : ["—"]));
+  f.append(field("Conséquence", "aucun agent ne couvre ces tags — branche terminée sans exécution"));
+  if (inp) f.append(longField("Sous-tâche", inp.description));
+  return f;
+}
+
+function renderTagger(inp) {
+  const f = document.createDocumentFragment();
+  const tags = Object.entries(inp.required_tags).map(([t, lvl]) => `${t} ≥ ${lvl}`);
+  f.append(fieldLines("Tags posés sur la racine", tags.length ? tags : ["—"]));
+  // caveat assumé (spec §4.6) : la trace ne distingue pas tags inférés vs épinglés
+  f.append(field("Origine", "inférés ou épinglés (non distingués par la trace)"));
+  return f;
+}
+
 // node = {id, type, label} ; step = GraphStep courant ; runAgents = agents du run (B1)
 export function openNodeModal(node, step, runAgents) {
   if (!step) return;
@@ -253,6 +283,9 @@ export function openNodeModal(node, step, runAgents) {
     case "divider": body = renderDivider(step.detail.divider); break;
     case "aggregator": body = renderAggregator(step.detail.aggregator); break;
     case "tool": body = renderTool(step.detail.tool); break;
+    case "diagnostic": body = renderDiagnostic(step.detail.diagnostic); break;
+    case "roster_gap": body = renderRosterGap(step.detail.roster_gap, step.detail.input); break;
+    case "tagger": body = renderTagger(step.detail.input); break;
     default: return;
   }
 
