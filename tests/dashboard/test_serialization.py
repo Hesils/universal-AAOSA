@@ -45,3 +45,15 @@ def test_divided_graph_serializes_with_aliases():
     assert tool_step["detail"]["tool"]["tool_name"] == "grep"
     # todo présent sur chaque jalon
     assert all("todo" in s for s in dumped["steps"])
+
+
+def test_tree_graph_serializes_with_flow_and_tasks():
+    from tests.dashboard.test_build_graph_tree import divided_agg_fixture, meta
+    from dashboard.graph_model import build_graph
+    graph = build_graph(divided_agg_fixture(), meta("root", "big"))
+    dumped = graph.model_dump(by_alias=True, mode="json")
+    assert all("from" in e and "flow" in e for e in dumped["edges"])
+    assert {t["id"] for t in dumped["tasks"]} == {"root", "s1", "s2"}
+    assert all("pass_index" in s for s in dumped["steps"])
+    todo = dumped["steps"][-1]["todo"]
+    assert all("first_step_index" in t and "depth" in t for t in todo)

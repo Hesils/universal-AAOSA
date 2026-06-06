@@ -79,7 +79,7 @@ class TestSingleSinkCourtCircuit:
         out = graph.steps[-1]
         assert out.detail.output.output_content == "c2"   # fix = le sink
         pairs = {(e.from_node, e.to) for e in out.active_edges}
-        assert ("evaluator", "output") in pairs
+        assert ("evaluator:s2", "output") in pairs
 
 
 class TestMultiSinkWithConsumedIntermediate:
@@ -87,10 +87,10 @@ class TestMultiSinkWithConsumedIntermediate:
         graph = build_graph(_multi_sink_with_intermediate_events(), _meta())
         ev_by_sub = {s.sub_task_id: s for s in graph.steps if s.milestone_type == "evaluator"}
         # investigate (s1) est consommé par analyze (s2) -> pas un sink -> n'allume pas l'aggregator
-        assert "aggregator" not in ev_by_sub["s1"].active_nodes
+        assert "aggregator:parent" not in ev_by_sub["s1"].active_nodes
         # analyze (s2) et check (s3) sont des sinks -> allument l'aggregator
-        assert "aggregator" in ev_by_sub["s2"].active_nodes
-        assert "aggregator" in ev_by_sub["s3"].active_nodes
+        assert "aggregator:parent" in ev_by_sub["s2"].active_nodes
+        assert "aggregator:parent" in ev_by_sub["s3"].active_nodes
 
     def test_total_and_collected_count_sinks(self):
         graph = build_graph(_multi_sink_with_intermediate_events(), _meta())

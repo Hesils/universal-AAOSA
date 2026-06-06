@@ -39,9 +39,10 @@ def _divided_events():
 class TestBuildGraphA4:
     def test_divided_has_divider_and_aggregator_nodes(self):
         ids = {n.id for n in build_graph(_divided_events(), _meta()).nodes}
-        assert "divider" in ids and "aggregator" in ids
+        assert "divider:parent-task" in ids and "aggregator:parent-task" in ids
 
     def test_divided_milestone_sequence(self):
+        # required_tags={} → no tagger
         types = [s.milestone_type for s in build_graph(_divided_events(), _meta()).steps]
         assert types == ["input", "divider", "dispatch", "agent", "evaluator", "aggregator", "output"]
 

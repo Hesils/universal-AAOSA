@@ -248,17 +248,6 @@ class GraphModel(BaseModel):
     tasks: list[TaskBranch] = Field(default_factory=list)   # topologie de l'arbre (layout frontend)
 
 
-def _agent_ids(events: list[ClaimEvent]) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for e in events:
-        aid = getattr(e, "agent_id", None)
-        if aid is not None and aid not in seen:
-            seen.add(aid)
-            ordered.append(aid)
-    return ordered
-
-
 def _nid(kind: str, tid: str, extra: str | None = None) -> str:
     return f"{kind}:{tid}" + (f":{extra}" if extra else "")
 
