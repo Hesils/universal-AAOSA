@@ -296,6 +296,86 @@ class TestSimpleRunWalk:
         assert graph.steps[-1].detail.dispatch.unassigned_reason == "no claim"
 
 
+class TestDividedWalk:
+    def test_sequence_short_circuit(self):
+        # divided_fixture : s2 consomme s1 → sink unique s2 → PAS d'aggregator, OUTPUT depuis s2
+        graph = build_graph(divided_fixture(), meta("root", "big"))
+        types = [s.milestone_type for s in graph.steps]
+        assert types == ["input", "tagger", "dispatch",                  # racine (unassigned)
+                         "divider",
+                         "dispatch", "tool", "agent", "evaluator",       # s1
+                         "dispatch", "agent", "evaluator",               # s2
+                         "output"]
+        assert "aggregator" not in types
+        out = graph.steps[-1]
+        assert out.detail.output.output_content == "c2"                  # l'output du sink, pas une synthèse
+
+    def test_sequence_aggregated(self):
+        graph = build_graph(divided_agg_fixture(), meta("root", "big"))
+        types = [s.milestone_type for s in graph.steps]
+        assert types[-2:] == ["aggregator", "output"]
+        agg = next(s for s in graph.steps if s.milestone_type == "aggregator")
+        assert agg.detail.aggregator.aggregated is True
+        assert agg.detail.aggregator.collected == 2 and agg.detail.aggregator.total == 2
+        out = graph.steps[-1]
+        assert out.detail.output.output_content == "final"
+
+    def test_collect_story_on_sink_evaluator(self):
+        graph = build_graph(divided_agg_fixture(), meta("root", "big"))
+        ev1 = next(s for s in graph.steps if s.milestone_type == "evaluator" and s.sub_task_id == "s1")
+        assert "aggregator:root" in ev1.active_nodes
+        pairs = {(e.from_node, e.to) for e in ev1.active_edges}
+        assert ("evaluator:s1", "aggregator:root") in pairs
+        assert ev1.detail.aggregator.collected == 1 and ev1.detail.aggregator.total == 2
+
+    def test_divider_milestone_carries_subtasks_and_origin(self):
+        graph = build_graph(divided_agg_fixture(), meta("root", "big"))
+        div = next(s for s in graph.steps if s.milestone_type == "divider")
+        assert div.detail.divider.origin == "recovery"            # division D1 (unassigned)
+        assert [st.id for st in div.detail.divider.sub_tasks] == ["s1", "s2"]
+        assert div.detail.divider.sub_tasks[0].required_tags == {"python": 50}
+
+    def test_recursive_walk_nested(self):
+        # même fixture que test_recursive_division_nested_pair (Task 5)
+        events = (
+            [p1("root", "ag", passed=False), UnassignedEvent(session_id=SID, task_id="root", reason="r"),
+             divided("root", [("c1", "part 1", [], {"python": 50}), ("c2", "part 2", [], {"python": 50})])]
+            + [p1("c1", "ag", passed=False), UnassignedEvent(session_id=SID, task_id="c1", reason="r"),
+               divided("c1", [("g1", "deep A", [], {"python": 50}), ("g2", "deep B", [], {"python": 50})])]
+            + simple_pass("g1") + simple_pass("g2")
+            + [aggregated("c1", ["g1", "g2"], content="c1 synth")]
+            + simple_pass("c2")
+            + [aggregated("root", ["c1", "c2"])]
+        )
+        graph = build_graph(events, meta("root", "big"))
+        seq = [(s.milestone_type, s.sub_task_id) for s in graph.steps]
+        # l'arbre se déroule en profondeur : c1 se divise AVANT que c2 ne tourne
+        assert seq.index(("divider", "c1")) < seq.index(("dispatch", "c2"))
+        assert seq.index(("aggregator", "c1")) < seq.index(("dispatch", "c2"))
+        # deux aggregators, niveau enfant puis racine
+        aggs = [s.sub_task_id for s in graph.steps if s.milestone_type == "aggregator"]
+        assert aggs == ["c1", "root"]
+        # le step detail de chaque sous-branche est scopé
+        a_g1 = next(s for s in graph.steps if s.milestone_type == "agent" and s.sub_task_id == "g1")
+        assert a_g1.detail.input.description == "deep A"
+
+    def test_subtask_unassigned_no_recovery(self):
+        # une sous-tâche unassigned NON divisée (gap de claim) : sa branche s'arrête au dispatch
+        events = ([p1("root", "ag", passed=False),
+                   UnassignedEvent(session_id=SID, task_id="root", reason="r"),
+                   divided("root", [("s1", "ok", [], {"python": 50}),
+                                    ("s2", "nobody", [], {"python": 50})])]
+                  + simple_pass("s1")
+                  + [p1("s2", "ag", passed=False),
+                     UnassignedEvent(session_id=SID, task_id="s2", reason="no claim")])
+        graph = build_graph(events, meta("root", "big"))
+        s2_types = [s.milestone_type for s in graph.steps if s.sub_task_id == "s2"]
+        assert s2_types == ["dispatch"]
+        # s1 est l'unique sink → court-circuit → OUTPUT depuis s1
+        assert graph.steps[-1].milestone_type == "output"
+        assert graph.steps[-1].detail.output.output_content == "content"
+
+
 class TestBuildTree:
     def test_root_from_meta(self):
         events = simple_pass("t1")
