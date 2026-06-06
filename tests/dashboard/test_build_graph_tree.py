@@ -540,6 +540,23 @@ class TestBuildTree:
         assert by_id["c1"].description == "part 1"
         assert by_id["root"].description == "big"
 
+    def test_meta_root_absent_from_trace_falls_back_to_real_root(self):
+        # run_recovery crée sa propre Task interne : l'id du meta n'apparaît jamais dans
+        # la trace. La racine réelle = première tâche non-enfant ; description/tags du
+        # meta sont reportés dessus (même tâche sémantique).
+        events = simple_pass("real-root")
+        tree = _build_tree(events, meta("meta-root", "do it"))
+        assert tree.root_id == "real-root"
+        assert tree.description("real-root") == "do it"
+        assert tree.tags("real-root") == {"python": 50}
+        graph = build_graph(events, meta("meta-root", "do it"))
+        assert [s.milestone_type for s in graph.steps] == [
+            "input", "tagger", "dispatch", "agent", "evaluator", "output"]
+
+    def test_meta_root_kept_on_empty_trace(self):
+        tree = _build_tree([], meta("meta-root", "do it"))
+        assert tree.root_id == "meta-root"   # session vide : INPUT seul, pas de crash
+
 
 class TestTodoHierarchy:
     def test_simple_run_root_only(self):

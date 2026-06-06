@@ -633,6 +633,14 @@ def _build_tree(events: list[ClaimEvent], session_meta: SessionMeta | None) -> _
 
     if session_meta is not None and session_meta.tasks:
         root_id = session_meta.tasks[0].id
+        # Meta désynchronisé (run_recovery crée sa propre Task interne) : si l'id du meta
+        # n'apparaît jamais dans la trace, la racine réelle = première tâche non-enfant.
+        # Description/tags du meta sont reportés dessus (même tâche sémantique).
+        # Trace vide : on garde la racine du meta (INPUT seul, pas de crash).
+        if root_id not in first_idx:
+            fallback = next((tid for tid in first_idx if tid not in parents), None)
+            if fallback is not None:
+                root_id = fallback
         descriptions[root_id] = session_meta.tasks[0].description
         tags[root_id] = dict(session_meta.tasks[0].required_tags)
     else:

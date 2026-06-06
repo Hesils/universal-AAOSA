@@ -16,7 +16,7 @@ from aaosa.runtime.aggregator import TaskAggregator
 from aaosa.runtime.context import RunContext
 from aaosa.runtime.divider import TaskDivider
 from aaosa.runtime.llm_client import create_client
-from aaosa.runtime.runner import run_recovery
+from aaosa.runtime.runner import run_with_recovery
 from aaosa.runtime.tagger import Tagger
 from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
@@ -89,7 +89,9 @@ def run_demo_v3() -> None:
     print("=== AAOSA Demo V3 — divided incident run ===\n")
     print(f"Input: {task.description}\n")
 
-    result = run_recovery(task.description, ctx, pinned_tags=task.required_tags)
+    # run_with_recovery directement : la Task du meta EST la racine de la trace
+    # (run_recovery créerait sa propre Task interne → id du meta absent de la trace).
+    result = run_with_recovery(task, ctx)
     outcome = "divided" if isinstance(result, Output) else "unassigned"
     print(f"  -> {outcome}\n")
 
