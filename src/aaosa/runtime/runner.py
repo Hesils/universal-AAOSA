@@ -15,6 +15,7 @@ from aaosa.schemas.elo import DEFAULT_REQUIRED_ELO
 from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
 from aaosa.tracing.events import (
+    DiagnosedEvent,
     DividedSubTask,
     EloUpdatedEvent,
     ExecutedEvent,
@@ -341,6 +342,19 @@ def _route_diagnostic(
     chained_context: list[Task] | None,
 ) -> "Output | DispatchResult | QAFailure":
     diagnostic = diagnose_failure(task, failure.output, failure.qa_result, ctx.client)
+
+    # Pattern observer : le RUNNER émet (diagnostic.py reste pur). Émis y compris
+    # sur échec LLM (diagnostic=None → unattributed, reason vide).
+    if ctx.tracer is not None:
+        ctx.tracer.emit(DiagnosedEvent(
+            session_id=ctx.tracer.session_id,
+            task_id=task.id,
+            agent_id=failure.agent_id,
+            attribution=diagnostic.attribution if diagnostic is not None else "unattributed",
+            reason=diagnostic.reason if diagnostic is not None else "",
+            consignes=diagnostic.consignes if diagnostic is not None else None,
+        ))
+
     if diagnostic is None:
         return _qa_failed(task, attribution="unattributed", consignes_tried=False)
 
@@ -355,6 +369,19 @@ def _route_diagnostic(
         )
         new_evaluator = AdaptiveSpecEvaluator(ctx.client, failure_context=fc)
         qa2 = new_evaluator.evaluate(task, failure.output)
+        # Ré-évaluation VISIBLE : le runner trace la QA v2 (spec régénérée portée par spec_used).
+        if ctx.tracer is not None:
+            ctx.tracer.emit(QAEvaluatedEvent(
+                session_id=ctx.tracer.session_id,
+                task_id=task.id,
+                agent_id=failure.agent_id,
+                success=qa2.success,
+                score=qa2.score,
+                reason=qa2.reason,
+                criteria_results=qa2.criteria_results,
+                judge=qa2.judge,
+                spec=qa2.spec_used,
+            ))
         if qa2.success:
             return failure.output   # l'output original passe avec la spec régénérée
         return _retry_with_consignes(task, diagnostic.consignes, ctx, attribution="evaluator")
