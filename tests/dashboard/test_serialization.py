@@ -12,7 +12,7 @@ def test_json_response_alias_and_header():
     assert resp.mimetype == "application/json"
     assert resp.headers["Cache-Control"] == "no-store"
     body = json.loads(resp.get_data(as_text=True))
-    assert body == {"from": "a", "to": "b"}  # by_alias -> "from"
+    assert body == {"from": "a", "to": "b", "flow": "ascent"}  # by_alias -> "from"
 
 
 def test_json_response_datetime_iso():

@@ -19,6 +19,7 @@ from aaosa.tracing.events import (
 from aaosa.tracing.store import SessionMeta, SessionTaskRecord
 from dashboard.graph_model import (
     AggregatorDetail,
+    DiagnosticDetail,
     DividerDetail,
     DividerSubTaskInfo,
     EvaluatorDetail,
@@ -26,7 +27,9 @@ from dashboard.graph_model import (
     GraphModel,
     GraphNode,
     GraphStep,
+    RosterGapDetail,
     StepDetail,
+    TaskBranch,
     ToolCallInfo,
     ToolDetail,
     TodoItem,
@@ -75,7 +78,7 @@ def tool(tid, aid, name, args=None, result="r", latency=0.5):
 class TestGraphEdgeAlias:
     def test_from_alias_in_json(self):
         edge = GraphEdge(from_node="input", to="dispatch")
-        assert edge.model_dump(by_alias=True) == {"from": "input", "to": "dispatch"}
+        assert edge.model_dump(by_alias=True) == {"from": "input", "to": "dispatch", "flow": "ascent"}
 
     def test_construct_by_field_name(self):
         edge = GraphEdge(from_node="a", to="b")
@@ -116,3 +119,56 @@ class TestGraphStepIsMilestone:
         model = GraphModel(nodes=[node], edges=[], steps=[step])
         assert model.steps[0].milestone_type == "input"
         assert model.steps[0].active_nodes == ["input"]
+
+
+class TestSerieDModelExtensions:
+    def test_edge_flow(self):
+        e = GraphEdge(from_node="a", to="b", flow="descent")
+        assert e.flow == "descent"
+        assert GraphEdge(from_node="a", to="b").flow == "ascent"   # défaut documenté
+
+    def test_edge_flow_serialized(self):
+        e = GraphEdge(from_node="a", to="b", flow="transient")
+        assert e.model_dump(by_alias=True) == {"from": "a", "to": "b", "flow": "transient"}
+
+    def test_node_carries_task_and_agent(self):
+        n = GraphNode(id="agent:t1:ag", layer="bottom", type="agent", label="ag",
+                      task_id="t1", agent_id="ag")
+        assert n.task_id == "t1" and n.agent_id == "ag"
+        assert GraphNode(id="input", layer="top", type="input", label="Input").task_id is None
+
+    def test_step_pass_index_default(self):
+        step = GraphStep(milestone_type="dispatch", label="DISPATCH",
+                         detail=StepDetail.empty(task_id="t", description="d"))
+        assert step.pass_index == 0
+
+    def test_diagnostic_detail(self):
+        d = DiagnosticDetail(attribution="evaluator", reason="strict", consignes="relax",
+                             route_taken="evaluator")
+        assert d.route_taken == "evaluator"
+
+    def test_roster_gap_detail(self):
+        d = RosterGapDetail(missing_tags=["legal", "gdpr"])
+        assert d.missing_tags == ["legal", "gdpr"]
+
+    def test_step_detail_new_fields_default_none(self):
+        d = StepDetail.empty(task_id="t", description="x")
+        assert d.diagnostic is None and d.roster_gap is None
+
+    def test_todo_item_hierarchy(self):
+        t = TodoItem(id="s1", description="x", state="current", is_root=False,
+                     parent_id="root", depth=1, first_step_index=4, note="pass 2")
+        assert t.parent_id == "root" and t.depth == 1 and t.first_step_index == 4
+        bare = TodoItem(id="r", description="x", state="done", is_root=True)
+        assert bare.parent_id is None and bare.depth == 0 and bare.first_step_index is None
+
+    def test_task_branch(self):
+        b = TaskBranch(id="s1", parent_id="root", depth=1, order_index=0, description="sub")
+        assert b.depth == 1
+
+    def test_new_outcomes_and_types_accepted(self):
+        step = GraphStep(milestone_type="diagnostic", label="DIAGNOSTIC", outcome="diagnosed",
+                         detail=StepDetail.empty(task_id="t", description="d"))
+        assert step.outcome == "diagnosed"
+        n = GraphNode(id="roster_gap:t1", layer="center", type="roster_gap", label="GAP", task_id="t1")
+        assert n.type == "roster_gap"

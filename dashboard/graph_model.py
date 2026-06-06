@@ -7,6 +7,7 @@ from aaosa.qa.spec import EvaluatorSpec
 from aaosa.schemas.output import LLMMetadata
 from aaosa.tracing.events import (
     ClaimEvent,
+    DiagnosedEvent,  # noqa: F401 — utilisé dès Task 4
     DispatchedEvent,
     EloUpdatedEvent,
     ExecutedEvent,
@@ -21,10 +22,13 @@ from aaosa.tracing.events import (
 )
 from aaosa.tracing.store import SessionMeta, SessionTaskRecord
 
-NodeLayer = Literal["tools", "bottom", "center", "top"]
-NodeType = Literal["input", "dispatch", "evaluator", "output", "testset", "agent", "divider", "aggregator", "tool"]
-MilestoneType = Literal["input", "divider", "dispatch", "agent", "tool", "evaluator", "aggregator", "output"]
-Outcome = Literal["qa_pass", "qa_fail", "unassigned", "no_qa", "divided"]
+NodeLayer = Literal["tools", "bottom", "center", "top"]          # conservé pour l'API ; le layout frontend n'en dépend plus
+NodeType = Literal["input", "tagger", "dispatch", "evaluator", "diagnostic", "roster_gap",
+                   "output", "testset", "agent", "divider", "aggregator", "tool"]
+MilestoneType = Literal["input", "tagger", "divider", "dispatch", "agent", "tool",
+                        "evaluator", "diagnostic", "roster_gap", "aggregator", "output"]
+Outcome = Literal["qa_pass", "qa_fail", "unassigned", "no_qa", "divided", "roster_gap", "diagnosed"]
+EdgeFlow = Literal["ascent", "descent", "transient"]
 
 
 class GraphNode(BaseModel):
@@ -33,12 +37,15 @@ class GraphNode(BaseModel):
     layer: NodeLayer
     type: NodeType
     label: str
+    task_id: str | None = None   # appartenance de branche (None pour input/tagger/output)
+    agent_id: str | None = None  # nœud agent : agent_id réel (badge ×N côté frontend)
 
 
 class GraphEdge(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     from_node: str = Field(alias="from")
     to: str
+    flow: EdgeFlow = "ascent"
 
 
 class CandidateInfo(BaseModel):
@@ -128,10 +135,24 @@ class DividerSubTaskInfo(BaseModel):
     required_tags: dict[str, int] = Field(default_factory=dict)
 
 
+class DiagnosticDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    attribution: Literal["agent", "evaluator", "task_spec", "unattributed"]
+    reason: str
+    consignes: str | None = None
+    route_taken: Literal["agent", "evaluator", "task_spec", "stop"]   # stop = unattributed
+
+
+class RosterGapDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    missing_tags: list[str] = Field(default_factory=list)
+
+
 class DividerDetail(BaseModel):
     model_config = ConfigDict(extra="forbid")
     divided: bool
     sub_tasks: list[DividerSubTaskInfo] = Field(default_factory=list)
+    origin: Literal["recovery", "diagnostic"] = "recovery"   # D1 (unassigned) vs D3 (task_spec)
 
 
 class AggregatorDetail(BaseModel):
@@ -174,6 +195,8 @@ class StepDetail(BaseModel):
     divider: DividerDetail = Field(default_factory=lambda: DividerDetail(divided=False))
     aggregator: AggregatorDetail = Field(default_factory=lambda: AggregatorDetail(aggregated=False))
     tool: ToolDetail | None = None
+    diagnostic: DiagnosticDetail | None = None
+    roster_gap: RosterGapDetail | None = None
 
     @classmethod
     def empty(cls, task_id: str, description: str) -> "StepDetail":
@@ -186,6 +209,10 @@ class TodoItem(BaseModel):
     description: str
     state: Literal["pending", "current", "done", "failed"]
     is_root: bool
+    parent_id: str | None = None
+    depth: int = 0
+    first_step_index: int | None = None   # point de navigation timeline (calcul backend)
+    note: str | None = None               # annotation de marge : "pass 2", "roster gap", "route X"
 
 
 class GraphStep(BaseModel):
@@ -200,6 +227,16 @@ class GraphStep(BaseModel):
     outcome: Outcome = "no_qa"
     detail: StepDetail
     todo: list[TodoItem] = Field(default_factory=list)
+    pass_index: int = 0   # 0 = première tentative, 1 = passe retry (D3)
+
+
+class TaskBranch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    parent_id: str | None = None
+    depth: int = 0
+    order_index: int = 0
+    description: str = ""
 
 
 class GraphModel(BaseModel):
@@ -207,6 +244,7 @@ class GraphModel(BaseModel):
     nodes: list[GraphNode]
     edges: list[GraphEdge]
     steps: list[GraphStep]
+    tasks: list[TaskBranch] = Field(default_factory=list)   # topologie de l'arbre (layout frontend)
 
 
 def _agent_ids(events: list[ClaimEvent]) -> list[str]:
