@@ -33,6 +33,6 @@ class TestDemoAgentsTools:
 
     def test_demo_agents_tools_are_toolbox_instances(self):
         """Les ToolDef attachés sont ceux du TOOLBOX (pas des copies)."""
-        by_name = {a.name: a for a in DEMO_AGENTS}
-        for tool in by_name["Backend"].tools:
-            assert tool is TOOLBOX[tool.name]
+        for agent in DEMO_AGENTS:
+            for tool in agent.tools:
+                assert tool is TOOLBOX[tool.name]
