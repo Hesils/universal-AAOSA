@@ -87,6 +87,14 @@ class TagLostEvent(_BaseEvent):
     last_elo: int  # ELO the agent held on this tag just before losing it
 
 
+class DiagnosedEvent(_BaseEvent):
+    type: Literal["diagnosed"] = "diagnosed"
+    agent_id: str | None = None    # agent du failed output (None si inconnu)
+    attribution: Literal["agent", "evaluator", "task_spec", "unattributed"]
+    reason: str                    # raison du diagnostic ("" si échec LLM)
+    consignes: str | None = None   # consignes de correction (routes agent/evaluator)
+
+
 class RosterGapEvent(_BaseEvent):
     type: Literal["roster_gap"] = "roster_gap"
     missing_tags: list[str]
@@ -127,6 +135,7 @@ ClaimEvent = Annotated[
         EloUpdatedEvent,
         TagAcquiredEvent,
         TagLostEvent,
+        DiagnosedEvent,
         RosterGapEvent,
         ToolCalledEvent,
         TaskDividedEvent,
