@@ -473,6 +473,39 @@ class TestD3Walk:
         assert flows[("diagnostic:t1", "dispatch:t1")] == "transient"
 
 
+class TestRosterGap:
+    def test_roster_gap_branch_is_dead_end(self):
+        events = ([p1("root", "ag", passed=False),
+                   UnassignedEvent(session_id=SID, task_id="root", reason="r"),
+                   divided("root", [("s1", "ok", [], {"python": 50}),
+                                    ("s2", "needs legal", [], {"legal": 50})])]
+                  + simple_pass("s1")
+                  + [RosterGapEvent(session_id=SID, task_id="s2", missing_tags=["legal"])])
+        graph = build_graph(events, meta("root", "big"))
+        # nœud terminal dédié, tags manquants en label
+        gap = next(n for n in graph.nodes if n.type == "roster_gap")
+        assert gap.id == "roster_gap:s2"
+        assert "legal" in gap.label
+        # riser depuis le divider, AUCUNE descente depuis le gap
+        flows = {(e.from_node, e.to): e.flow for e in graph.edges}
+        assert flows[("divider:root", "roster_gap:s2")] == "ascent"
+        assert not any(frm == "roster_gap:s2" for (frm, _to) in flows)
+        # jalon dédié, outcome roster_gap, detail porté
+        gs = next(s for s in graph.steps if s.milestone_type == "roster_gap")
+        assert gs.outcome == "roster_gap"
+        assert gs.detail.roster_gap.missing_tags == ["legal"]
+        assert gs.sub_task_id == "s2"
+        # s1 unique sink → court-circuit → OUTPUT existe quand même
+        assert graph.steps[-1].milestone_type == "output"
+
+    def test_roster_gap_at_root(self):
+        events = [RosterGapEvent(session_id=SID, task_id="t1", missing_tags=["legal", "gdpr"])]
+        graph = build_graph(events, meta("t1", "do it"))
+        types = [s.milestone_type for s in graph.steps]
+        assert types == ["input", "tagger", "roster_gap"]
+        assert graph.steps[-1].detail.roster_gap.missing_tags == ["legal", "gdpr"]
+
+
 class TestBuildTree:
     def test_root_from_meta(self):
         events = simple_pass("t1")
