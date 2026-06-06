@@ -227,6 +227,7 @@ class TestDividedRunMilestones:
         # état terminal : l'arête aggregator→output est dans le backbone cumulatif de l'output
         # (active_nodes au jalon OUTPUT contient uniquement ["output"] dans le nouveau modèle)
         assert "output" in out.active_nodes
+        assert "aggregator:parent" not in out.active_nodes
 
 
 class TestTodoSimple:
@@ -287,6 +288,7 @@ class TestRealDividedTrace:
         # tools RLE : moins de jalons tool que d'appels bruts (16 appels)
         n_tool_calls = sum(1 for e in events if e.type == "tool_called")
         assert sum(1 for t in types if t == "tool") < n_tool_calls
+        assert "tool" in types
 
 
 class TestFailAndUnassignedStates:
