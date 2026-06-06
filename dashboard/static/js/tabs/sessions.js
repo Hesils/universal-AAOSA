@@ -120,13 +120,23 @@ export async function mountSessions(panel) {
     chips.innerHTML = `<span><b>${detail.meta.tasks.length}</b> tasks</span>${sub}<span><b>${detail.meta.agent_ids.length}</b> agents</span>`;
   }
 
+  // follow : cadre la BRANCHE du jalon courant (tous les nœuds de sa sous-tâche),
+  // pas le seul nœud actif — le cadrage reste stable pendant que la branche se déroule
+  function branchIds(step) {
+    const ids = new Set(step.active_nodes);
+    if (step.sub_task_id) {
+      for (const n of graph.nodes) if (n.task_id === step.sub_task_id) ids.add(n.id);
+    }
+    return [...ids];
+  }
+
   function rerender() {
     const info = renderGraph(svg, graph, activeStepIndex,
       (node, step) => openNodeModal(node, stepForNode(node, step), detail.agents),
       agentNames, { keepViewBox: true });
     camera.setContent(info.width, info.height);
     const cur = graph.steps[activeStepIndex];
-    if (cur) camera.focusOn(bboxOf(cur.active_nodes, info.pos));
+    if (cur) camera.focusOn(bboxOf(branchIds(cur), info.pos));
     const n = graph.steps.length;
     if (n) {
       const step = graph.steps[activeStepIndex];
@@ -135,7 +145,10 @@ export async function mountSessions(panel) {
         : "";
       const subTxt = sub && !step.todo.find(t => t.id === step.sub_task_id)?.is_root
         ? ` <span class="scrub-sub">· ${esc(sub.slice(0, 48))}${sub.length > 48 ? "…" : ""}</span>` : "";
-      scrubLabel.innerHTML = `Jalon <b>${activeStepIndex + 1}</b> / ${n} — <span class="mono">${esc(step.label)}</span>${subTxt}`;
+      // les labels backend portent l'uuid de l'agent : on le remplace par son nom connu du run
+      const label = step.label.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+        m => agentNames[m] || m);
+      scrubLabel.innerHTML = `Jalon <b>${activeStepIndex + 1}</b> / ${n} — <span class="mono">${esc(label)}</span>${subTxt}`;
       const ratio = n > 1 ? activeStepIndex / (n - 1) : 1;
       scrubFill.style.width = `${ratio * 100}%`;
       scrubHandle.style.left = `${ratio * 100}%`;

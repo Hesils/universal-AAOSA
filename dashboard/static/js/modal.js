@@ -1,6 +1,7 @@
 const root = () => document.getElementById("modal-root");
 
 function closeModal() { root().innerHTML = ""; }
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeModal(); });
 
 // Coquille de modal partagée : head (titre + ×) + body rempli par `bodyNode`.
 function mountModal(title, bodyNode) {

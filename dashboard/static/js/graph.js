@@ -3,9 +3,10 @@
 // paire DIVIDER/AGGREGATOR par niveau, routage delta 45° (rails + chanfreins, point = jonction).
 const SVG_NS = "http://www.w3.org/2000/svg";
 const NODE_W = 104, NODE_H = 40;
-const ROW_H = 96;        // pas vertical de la grille (k-rows)
-const SLOT_W = 244;      // largeur d'un slot de branche feuille
+const ROW_H = 118;       // pas vertical de la grille (k-rows)
+const SLOT_W = 212;      // largeur d'un slot de branche feuille
 const LEG_IN = 56;       // retrait des jambes (montée/descente) depuis les bords du slot
+const TRUNK = 118;       // demi-écart du tronc d'une branche divisée (base étroite → silhouette d'arbre)
 const PAD = 64;
 const CH = 14;           // chanfrein 45° aux coudes (dialecte delta)
 
@@ -72,18 +73,31 @@ function layout(graph) {
   const height = PAD * 2 + maxK * ROW_H + NODE_H;
   const Y = k => height - PAD - NODE_H / 2 - k * ROW_H;
 
+  // jambes d'une branche : aux bords du slot pour une feuille ; resserrées autour du
+  // centre pour une branche divisée (le tronc s'élargit si la branche porte des agents,
+  // ex. division D3 task_spec après une passe avec winner — pas de collision au rang apex)
+  function legsOf(tid) {
+    const [x0, x1] = span[tid] || [PAD, PAD + SLOT_W];
+    const cx = (x0 + x1) / 2;
+    if (!tree.children(tid).length) return { ax: x0 + LEG_IN, dx: x1 - LEG_IN, cx };
+    const nA = byTask[tid] ? byTask[tid].agents.length : 0;
+    const half = nA ? ((nA - 1) * (NODE_W + 14) + NODE_W) / 2 + NODE_W / 2 + 22 : 0;
+    const t = Math.max(TRUNK, half);
+    return { ax: Math.max(x0 + LEG_IN, cx - t), dx: Math.min(x1 - LEG_IN, cx + t), cx };
+  }
+
   const pos = {};
-  const [rx0, rx1] = span[tree.root] || [PAD, PAD + SLOT_W];
-  pos.input = { cx: rx0 + LEG_IN, cy: Y(0) };
-  pos.output = { cx: rx1 - LEG_IN, cy: Y(0) };
-  pos.tagger = { cx: rx0 + LEG_IN, cy: Y(1) };
+  const rl = legsOf(tree.root);
+  pos.input = { cx: rl.ax, cy: Y(0) };
+  pos.output = { cx: rl.dx, cy: Y(0) };
+  pos.tagger = { cx: rl.ax, cy: Y(1) };
 
   for (const tid in byTask) {
     const t = tree.byId[tid];
     const sp = span[tid];
     if (!t || !sp) continue;
     const [x0, x1] = sp;
-    const ax = x0 + LEG_IN, dx = x1 - LEG_IN, cx = (x0 + x1) / 2;
+    const { ax, dx, cx } = legsOf(tid);
     const kOrg = 2 * t.depth + 2;
     const b = byTask[tid];
     if (b.dispatch) pos[b.dispatch.id] = { cx: ax, cy: Y(kOrg) };
@@ -91,7 +105,9 @@ function layout(graph) {
     if (b.diagnostic) pos[b.diagnostic.id] = { cx: dx, cy: Y(kOrg) + ROW_H * 0.58 };
     if (b.roster_gap) pos[b.roster_gap.id] = { cx: cx, cy: Y(kOrg) };
     b.agents.forEach((n, i) => {
-      const off = (i - (b.agents.length - 1) / 2) * (NODE_W + 14);
+      const step = b.agents.length > 1
+        ? Math.min(NODE_W + 14, (x1 - x0 - NODE_W) / (b.agents.length - 1)) : 0;
+      const off = (i - (b.agents.length - 1) / 2) * step;
       pos[n.id] = { cx: cx + off, cy: Y(kOrg + 1) };
     });
     b.tools.forEach((n, i) => {
@@ -99,8 +115,8 @@ function layout(graph) {
       const step = b.tools.length > 1 ? innerW / (b.tools.length - 1) : 0;
       pos[n.id] = { cx: b.tools.length > 1 ? x0 + LEG_IN + i * step : cx, cy: Y(kOrg + 2) };
     });
-    if (b.divider) pos[b.divider.id] = { cx: x0 + NODE_W / 2 + 4, cy: Y(kOrg + 1) };
-    if (b.aggregator) pos[b.aggregator.id] = { cx: x1 - NODE_W / 2 - 4, cy: Y(kOrg + 1) };
+    if (b.divider) pos[b.divider.id] = { cx: ax, cy: Y(kOrg + 1) };
+    if (b.aggregator) pos[b.aggregator.id] = { cx: dx, cy: Y(kOrg + 1) };
   }
   return { pos, width, height };
 }
@@ -122,7 +138,7 @@ function railThenRise(a, b) {
 
 function riseThenRail(a, b) {
   // verticale depuis a, chanfrein 45°, rail horizontal à hauteur de b (bus de collecte, montées vers divider)
-  if (Math.abs(a.cy - b.cy) < CH * 2) return straight(a, b);
+  if (Math.abs(a.cy - b.cy) < CH * 2 || Math.abs(a.cx - b.cx) < CH * 2) return straight(a, b);
   const sx = Math.sign(b.cx - a.cx) || -1, sy = Math.sign(b.cy - a.cy);
   const jy = b.cy - sy * CH;
   return {
@@ -156,6 +172,51 @@ function unionActive(graph) {
   return { activeNodes: nodes, activeEdges: edges, winnerId, failBranch };
 }
 
+// arbre émergent par SOUS-ARBRE (modèle « du divider à l'aggregator ») : quand le divider
+// d'une tâche est appelé (ou le dispatch racine au niveau 0), tout le sous-arbre qu'il
+// encadre apparaît d'un coup — la paire DIVIDER/AGGREGATOR et l'arche de chaque branche
+// enfant. Un enfant lui-même divisé ne montre que son entrée (dispatch) : son propre
+// sous-arbre attend SON divider. Les nœuds-événements (DIAG, GAP) et les racines
+// INPUT/TAGGER/OUTPUT naissent à leur propre jalon.
+function revealUpTo(graph, idx) {
+  const upto = Math.min(idx, Math.max(graph.steps.length - 1, 0));
+  const firstSeen = new Map();          // nodeId -> jalon de première activation
+  const dividerAt = new Map();          // task_id -> jalon de son divider
+  const entryAt = new Map();            // task_id -> premier jalon d'organe (dispatch/gap/divider)
+  graph.steps.forEach((s, i) => {
+    for (const n of s.active_nodes) if (!firstSeen.has(n)) firstSeen.set(n, i);
+    if (!s.sub_task_id) return;
+    if (s.milestone_type === "divider" && !dividerAt.has(s.sub_task_id)) dividerAt.set(s.sub_task_id, i);
+    if ((s.milestone_type === "dispatch" || s.milestone_type === "roster_gap" || s.milestone_type === "divider")
+      && !entryAt.has(s.sub_task_id)) entryAt.set(s.sub_task_id, i);
+  });
+  const parentOf = {};
+  for (const t of (graph.tasks || [])) parentOf[t.id] = t.parent_id;
+  // jalon de révélation de l'arche d'une tâche : le divider du parent, ou sa propre entrée (racine)
+  const archAt = tid => {
+    const p = parentOf[tid];
+    if (p != null && dividerAt.has(p)) return dividerAt.get(p);
+    return entryAt.has(tid) ? entryAt.get(tid) : 0;
+  };
+  const nodeAt = n => {
+    if (!n.task_id) return firstSeen.has(n.id) ? firstSeen.get(n.id) : 0;       // input/tagger/output
+    if (n.type === "diagnostic" || n.type === "roster_gap")
+      return firstSeen.has(n.id) ? firstSeen.get(n.id) : archAt(n.task_id);     // événements : à leur jalon
+    if (n.type === "divider" || n.type === "aggregator")
+      return dividerAt.has(n.task_id) ? dividerAt.get(n.task_id) : archAt(n.task_id);
+    return archAt(n.task_id);                                                   // arche de la branche
+  };
+  const revealIdx = Object.fromEntries(graph.nodes.map(n => [n.id, nodeAt(n)]));
+  const vis = id => (revealIdx[id] ?? 0) <= upto;
+  const born = id => (revealIdx[id] ?? 0) === upto;
+  return {
+    node: vis,
+    nodeBorn: born,
+    edge: e => vis(e.from) && vis(e.to),
+    edgeBorn: e => vis(e.from) && vis(e.to) && (born(e.from) || born(e.to)),
+  };
+}
+
 export function bboxOf(ids, pos) {
   const xs = [], ys = [];
   for (const id of ids) { const p = pos[id]; if (p) { xs.push(p.cx); ys.push(p.cy); } }
@@ -186,7 +247,7 @@ export function renderGraph(svg, graph, activeStepIndex, onNodeClick, agentNames
   const typeById = Object.fromEntries(graph.nodes.map(n => [n.id, n.type]));
 
   const step = graph.steps[activeStepIndex] || null;
-  let activeNodes, activeEdges, winnerId, failBranch;
+  let activeNodes, activeEdges, winnerId, failBranch, reveal = null;
   if (opts.fullPath) {
     const u = unionActive(graph);
     activeNodes = u.activeNodes; activeEdges = u.activeEdges;
@@ -196,6 +257,7 @@ export function renderGraph(svg, graph, activeStepIndex, onNodeClick, agentNames
     activeEdges = new Set(step ? step.active_edges.map(edgeKey) : []);
     winnerId = step ? step.winner_agent_id : null;
     failBranch = step && step.outcome === "qa_fail";
+    reveal = revealUpTo(graph, activeStepIndex);   // replay : l'arbre grandit physiquement
   }
 
   // arêtes : idle wire ; actives par flow (montée crest, descente fire, transient pointillé)
@@ -204,15 +266,18 @@ export function renderGraph(svg, graph, activeStepIndex, onNodeClick, agentNames
   const pulseLayer = el("g");
   let pulseIdx = 0;
   for (const e of graph.edges) {
+    const k = edgeKey(e);
+    if (reveal && !reveal.edge(e)) continue;   // pas encore sollicitée : n'existe pas
     const r = routeEdge(e, pos, typeById);
     if (!r) continue;
-    const isActive = activeEdges.has(edgeKey(e));
-    const path = el("path", { d: r.d, class: `edge edge--${e.flow}${isActive ? " edge--a" : ""}` });
+    const isActive = activeEdges.has(k);
+    const born = reveal && reveal.edgeBorn(e) ? " edge--born" : "";
+    const path = el("path", { d: r.d, class: `edge edge--${e.flow}${isActive ? " edge--a" : ""}${born}` });
     edgeLayer.appendChild(path);
     for (const dot of r.dots) {
       dotLayer.appendChild(el("circle", {
         cx: fmt(dot.x), cy: fmt(dot.y), r: 2.4,
-        class: "junction" + (isActive ? " junction--a" : ""),
+        class: "junction" + (isActive ? " junction--a" : "") + (born ? " junction--born" : ""),
       }));
     }
     // pulses directionnels : points crest montent, points ember descendent (jamais sur transient)
@@ -232,16 +297,20 @@ export function renderGraph(svg, graph, activeStepIndex, onNodeClick, agentNames
   svg.appendChild(dotLayer);
   svg.appendChild(pulseLayer);
 
-  // badge ×N : même agent réel instancié sur plusieurs branches
+  // badge ×N : même agent réel instancié sur plusieurs branches (révélées uniquement)
   const instances = {};
-  for (const n of graph.nodes) if (n.type === "agent" && n.agent_id) (instances[n.agent_id] ||= []).push(n.id);
+  for (const n of graph.nodes) {
+    if (n.type === "agent" && n.agent_id && (!reveal || reveal.node(n.id))) (instances[n.agent_id] ||= []).push(n.id);
+  }
 
   for (const n of graph.nodes) {
     const p = pos[n.id];
     if (!p) continue;
+    if (reveal && !reveal.node(n.id)) continue;   // pas encore sollicité : n'existe pas
     const g = el("g", { class: "node node--" + n.type, transform: `translate(${fmt(p.cx)},${fmt(p.cy)})` });
     g.dataset.nodeId = n.id;
     if (n.agent_id) g.dataset.agentId = n.agent_id;
+    if (reveal && reveal.nodeBorn(n.id)) g.classList.add("node--born");
     if (activeNodes.has(n.id)) g.classList.add("node--active");
     if (n.agent_id && n.agent_id === winnerId && activeNodes.has(n.id)) g.classList.add("node--winner");
 

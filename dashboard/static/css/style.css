@@ -224,6 +224,13 @@ svg.graph { display: block; width: 100%; height: 100%; max-height: 100%; overflo
 .junction { fill: var(--wire); }
 .junction--a { fill: var(--fg-1); }
 
+/* arbre émergent : nœuds/arêtes sollicités au jalon courant naissent en fondu */
+.node--born, .edge--born, .junction--born { animation: born 240ms var(--ease); }
+@keyframes born { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .node--born, .edge--born, .junction--born { animation: none; }
+}
+
 /* pulses directionnels (redondance de la couleur, jamais seuls porteurs du sens) */
 .pulse--ascent { fill: var(--crest); }
 .pulse--descent { fill: var(--fire); filter: drop-shadow(0 0 4px var(--fire-glow)); }
