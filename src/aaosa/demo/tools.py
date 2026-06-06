@@ -1,10 +1,9 @@
 """Toolbox stubbée déterministe pour la démo V3 (A5).
 
-Les fn retournent des données figées mais réalistes (str). Attachées
-programmatiquement (callables non sérialisables → impossibles dans agents.yaml).
+Les fn retournent des données figées mais réalistes (str). TOOLBOX sert de
+tool_registry à load_agents — les tools se déclarent dans agents.yaml.
 """
 
-from aaosa.core.agent import Agent
 from aaosa.core.tool import ToolDef
 
 _FILES = {
@@ -74,17 +73,3 @@ TOOLBOX: dict[str, ToolDef] = {
         "explain_query_plan", "Return the EXPLAIN plan for a SQL query.",
         {"sql": {"type": "string"}}, explain_query_plan),
 }
-
-_ASSIGNMENT: dict[str, list[str]] = {
-    "Backend": ["read_file", "grep_codebase", "run_tests", "explain_query_plan"],
-    "Frontend": ["read_file", "grep_codebase"],
-    "Fullstack": ["read_file", "run_tests"],
-    "DevOps": ["read_file"],
-}
-
-
-def attach_tools(agents: list[Agent]) -> None:
-    """Mute agent.tools en place selon le nom (identifiant stable)."""
-    for agent in agents:
-        names = _ASSIGNMENT.get(agent.name, [])
-        agent.tools = [TOOLBOX[n] for n in names]

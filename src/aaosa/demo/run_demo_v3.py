@@ -9,7 +9,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from aaosa.demo.agents import DEMO_AGENTS
-from aaosa.demo.tools import attach_tools
 from aaosa.elo.persistence import save_snapshot
 from aaosa.qa.spec_evaluator import AdaptiveSpecEvaluator
 from aaosa.runtime.aggregator import TaskAggregator
@@ -64,7 +63,6 @@ def run_demo_v3() -> None:
     started_at = datetime.now(timezone.utc)
 
     agents = list(DEMO_AGENTS)
-    attach_tools(agents)
     evaluator = AdaptiveSpecEvaluator(client)
 
     divider = TaskDivider(system_prompt=(

@@ -1,17 +1,12 @@
-from aaosa.core.agent import Agent
 from aaosa.core.tool import ToolDef
+from aaosa.demo.agents import DEMO_AGENTS
 from aaosa.demo.tools import (
     TOOLBOX,
-    attach_tools,
     explain_query_plan,
     grep_codebase,
     read_file,
     run_tests,
 )
-
-
-def _agent(name: str) -> Agent:
-    return Agent(name=name, tags_with_elo={"python": 80}, system_prompt="x")
 
 
 class TestToolFns:
@@ -26,18 +21,18 @@ class TestToolFns:
         assert {"read_file", "grep_codebase", "run_tests", "explain_query_plan"} == set(TOOLBOX)
 
 
-class TestAttachTools:
-    def test_attaches_by_name(self):
-        agents = [_agent("Backend"), _agent("Frontend"), _agent("Fullstack"), _agent("DevOps")]
-        attach_tools(agents)
-        by_name = {a.name: a for a in agents}
+class TestDemoAgentsTools:
+    def test_demo_agents_carry_yaml_tools(self):
+        """DEMO_AGENTS porte les tools déclarés dans agents.yaml (résolution loader)."""
+        by_name = {a.name: a for a in DEMO_AGENTS}
         assert {t.name for t in by_name["Backend"].tools} == {
             "read_file", "grep_codebase", "run_tests", "explain_query_plan"}
         assert {t.name for t in by_name["Frontend"].tools} == {"read_file", "grep_codebase"}
         assert {t.name for t in by_name["Fullstack"].tools} == {"read_file", "run_tests"}
         assert {t.name for t in by_name["DevOps"].tools} == {"read_file"}
 
-    def test_unknown_agent_gets_no_tools(self):
-        agents = [_agent("Unknown")]
-        attach_tools(agents)
-        assert agents[0].tools == []
+    def test_demo_agents_tools_are_toolbox_instances(self):
+        """Les ToolDef attachés sont ceux du TOOLBOX (pas des copies)."""
+        by_name = {a.name: a for a in DEMO_AGENTS}
+        for tool in by_name["Backend"].tools:
+            assert tool is TOOLBOX[tool.name]

@@ -1,6 +1,7 @@
 # Agents de la démo logicielle AAOSA.
 # Chargés par aaosa.config.loader.load_agents — le champ id est généré à la volée.
 # Le nom est l'identifiant stable (matché par les snapshots ELO).
+# tools : noms résolus en ToolDef via le tool_registry passé à load_agents.
 
 - name: Frontend
   tags_with_elo:
@@ -8,6 +9,7 @@
     css: 90
     javascript: 80
     testing: 40
+  tools: [read_file, grep_codebase]
   system_prompt: >-
     You are a frontend specialist focused on UI, CSS, and JavaScript.
     Investigate with your available tools before answering: read the relevant
@@ -21,6 +23,7 @@
     database: 85
     python: 80
     testing: 50
+  tools: [read_file, grep_codebase, run_tests, explain_query_plan]
   system_prompt: >-
     You are a backend specialist focused on APIs, databases, Python, and backend
     performance optimization (middleware, connection pooling, caching, async
@@ -36,6 +39,7 @@
     docker: 85
     ci_cd: 80
     backend: 30
+  tools: [read_file]
   system_prompt: >-
     You are a DevOps specialist focused on infrastructure and CI/CD.
     Investigate with your available tools before answering: read the relevant
@@ -49,6 +53,7 @@
     javascript: 60
     python: 50
     database: 40
+  tools: [read_file, run_tests]
   system_prompt: >-
     You are a fullstack generalist covering frontend and backend.
     Investigate with your available tools before answering: read the relevant

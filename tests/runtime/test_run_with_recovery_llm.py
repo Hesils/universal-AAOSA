@@ -11,7 +11,6 @@ pytestmark = pytest.mark.skipif(
 def test_broad_task_recovers_by_division():
     load_dotenv()
     from aaosa.demo.agents import DEMO_AGENTS
-    from aaosa.demo.tools import attach_tools
     from aaosa.runtime.aggregator import TaskAggregator
     from aaosa.runtime.context import RunContext
     from aaosa.runtime.divider import TaskDivider
@@ -24,7 +23,6 @@ def test_broad_task_recovers_by_division():
 
     client = create_client()
     agents = list(DEMO_AGENTS)
-    attach_tools(agents)
     tracer = Tracer(session_id="llm-smoke")
     ctx = RunContext(
         agents=agents, client=client,
