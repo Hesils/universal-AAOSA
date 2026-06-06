@@ -396,7 +396,7 @@ def _build_structure(
                 tnid = _nid("tool", tid, tname)
                 nodes.append(GraphNode(id=tnid, layer="tools", type="tool", label=tname, task_id=tid))
                 add_edge(_nid("agent", tid, w), tnid, "transient")
-        if run.diagnosed is not None:
+        if run.diagnosed is not None and run.passes:  # garde : pas de DIAG sans passe (trace partielle)
             dgid = _nid("diagnostic", tid)
             nodes.append(GraphNode(id=dgid, layer="center", type="diagnostic", label="DIAG", task_id=tid))
             add_edge(_nid("evaluator", tid), dgid, "descent")
