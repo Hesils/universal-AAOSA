@@ -587,11 +587,13 @@ class _Tree:
     """Arbre de tâches reconstruit depuis TOUS les TaskDividedEvent."""
     def __init__(self, root_id: str, children: dict[str, list[str]],
                  parents: dict[str, str], descriptions: dict[str, str],
+                 tags: dict[str, dict[str, int]],
                  first_idx: dict[str, int]):
         self.root_id = root_id
         self._children = children
         self._parents = parents
         self._descriptions = descriptions
+        self._tags = tags
         self._first_idx = first_idx
 
     def children(self, tid: str) -> list[str]:
@@ -611,6 +613,9 @@ class _Tree:
     def description(self, tid: str) -> str:
         return self._descriptions.get(tid, tid)
 
+    def tags(self, tid: str) -> dict[str, int]:
+        return dict(self._tags.get(tid, {}))
+
     def walk_ids(self) -> list[str]:
         """DFS préordre depuis la racine (ordre d'exécution)."""
         out: list[str] = []
@@ -626,6 +631,7 @@ def _build_tree(events: list[ClaimEvent], session_meta: SessionMeta | None) -> _
     children: dict[str, list[str]] = {}
     parents: dict[str, str] = {}
     descriptions: dict[str, str] = {}
+    tags: dict[str, dict[str, int]] = {}
     first_idx: dict[str, int] = {}
     for i, e in enumerate(events):
         first_idx.setdefault(e.task_id, i)
@@ -634,13 +640,15 @@ def _build_tree(events: list[ClaimEvent], session_meta: SessionMeta | None) -> _
             for st in e.sub_tasks:
                 parents[st.id] = e.task_id
                 descriptions[st.id] = st.description
+                tags[st.id] = dict(st.required_tags)
 
     if session_meta is not None and session_meta.tasks:
         root_id = session_meta.tasks[0].id
         descriptions[root_id] = session_meta.tasks[0].description
+        tags[root_id] = dict(session_meta.tasks[0].required_tags)
     else:
         root_id = next((tid for tid in first_idx if tid not in parents), "task")
-    return _Tree(root_id, children, parents, descriptions, first_idx)
+    return _Tree(root_id, children, parents, descriptions, tags, first_idx)
 
 
 def _task_branches(tree: _Tree) -> list[TaskBranch]:
@@ -660,335 +668,280 @@ class _EdgeAccumulator:
         self.backbone: list[GraphEdge] = []
         self._seen: set[tuple[str, str]] = set()
 
-    def add_backbone(self, frm: str, to: str) -> None:
+    def add_backbone(self, frm: str, to: str, flow: EdgeFlow = "ascent") -> None:
         if (frm, to) not in self._seen:
             self._seen.add((frm, to))
-            self.backbone.append(GraphEdge(from_node=frm, to=to))
+            self.backbone.append(GraphEdge(from_node=frm, to=to, flow=flow))
 
-    def snapshot(self, fanout: list[tuple[str, str]]) -> list[GraphEdge]:
-        return list(self.backbone) + [GraphEdge(from_node=f, to=t) for f, t in fanout]
+    def snapshot(self, fanout: list[tuple[str, str, EdgeFlow]]) -> list[GraphEdge]:
+        return list(self.backbone) + [GraphEdge(from_node=f, to=t, flow=fl) for f, t, fl in fanout]
 
 
-def _evaluator_detail(run: "_Pass") -> EvaluatorDetail:
-    if run is None or run.qa is None:
+def _evaluator_detail(p: "_Pass") -> EvaluatorDetail:
+    if p is None or p.qa is None:
         return EvaluatorDetail(ran=False, success=None, score=None, reason=None)
     return EvaluatorDetail(
-        ran=True, success=run.qa.success, score=run.qa.score, reason=run.qa.reason,
-        criteria_results=dict(run.qa.criteria_results), judge=run.qa.judge, spec=run.qa.spec,
+        ran=True, success=p.qa.success, score=p.qa.score, reason=p.qa.reason,
+        criteria_results=dict(p.qa.criteria_results), judge=p.qa.judge, spec=p.qa.spec,
     )
 
 
-def _dispatch_detail(run: "_Pass") -> DispatchDetail:
+def _dispatch_detail(p: "_Pass") -> DispatchDetail:
     return DispatchDetail(
-        candidates=[CandidateInfo(agent_id=e.agent_id, passed=e.passed, fit_score=e.fit_score) for e in run.phase1],
-        claims=[ClaimInfo(agent_id=e.agent_id, decision=e.decision, justification=e.justification) for e in run.phase2.values()],
-        winner_agent_id=run.winner_id,
-        dispatch_reason=run.dispatched.reason if run.dispatched is not None else None,
-        unassigned_reason=run.unassigned.reason if run.unassigned is not None else None,
+        candidates=[CandidateInfo(agent_id=e.agent_id, passed=e.passed, fit_score=e.fit_score) for e in p.phase1],
+        claims=[ClaimInfo(agent_id=e.agent_id, decision=e.decision, justification=e.justification) for e in p.phase2.values()],
+        winner_agent_id=p.winner_id,
+        dispatch_reason=p.dispatched.reason if p.dispatched is not None else None,
+        unassigned_reason=p.unassigned.reason if p.unassigned is not None else None,
     )
 
 
-def _scope_detail(input_detail: InputDetail, run: "_Pass | None") -> StepDetail:
-    """StepDetail scopé sur une sous-tâche (réutilisé par chaque jalon de cette sous-tâche)."""
+def _pass_detail(input_detail: InputDetail, p: "_Pass", tid: str) -> "StepDetail":
+    """StepDetail scopé sur UNE passe d'une tâche (réutilisé par les jalons de la passe)."""
     detail = StepDetail(input=input_detail)
-    if run is None:
-        return detail
-    detail.dispatch = _dispatch_detail(run)
-    detail.evaluator = _evaluator_detail(run)
-    detail.testset = TestSetDetail(forked=(run.outcome == "qa_fail"), from_task_id=run.task_id)
-    winner = run.winner_id
-    winner_tools = [t for t in run.tools if t.agent_id == winner] if winner else []
-    for aid in run.phase1_by_agent:
+    detail.dispatch = _dispatch_detail(p)
+    detail.evaluator = _evaluator_detail(p)
+    detail.testset = TestSetDetail(forked=(p.outcome == "qa_fail"), from_task_id=tid)
+    winner = p.winner_id
+    winner_tools = [t for t in p.tools if t.agent_id == winner] if winner else []
+    for aid in p.phase1_by_agent:
         detail.agents[aid] = _agent_detail(
-            aid, run.phase1_by_agent, run.phase2, winner, run.executed, run.elo, run.tags, winner_tools
+            aid, p.phase1_by_agent, p.phase2, winner, p.executed, p.elo, p.tags, winner_tools
         )
-    if run.executed is not None:
+    if p.executed is not None:
         detail.output = OutputDetail(
-            produced=True, output_summary=run.executed.output_summary,
-            output_content=run.executed.output_content, llm_metadata=run.executed.llm_metadata,
+            produced=True, output_summary=p.executed.output_summary,
+            output_content=p.executed.output_content, llm_metadata=p.executed.llm_metadata,
         )
     return detail
 
 
-def _milestones_simple(run: "_Pass | None", record: SessionTaskRecord | None, tid: str) -> list[GraphStep]:
-    input_detail = _make_input_detail(record, tid)
-    detail = _scope_detail(input_detail, run)
-    acc = _EdgeAccumulator()
-    steps: list[GraphStep] = []
-
-    # INPUT
-    steps.append(GraphStep(milestone_type="input", label="INPUT", active_nodes=["input"],
-                           active_edges=acc.snapshot([]), outcome="no_qa", detail=detail,
-                           todo=_todo_simple(record, tid, "input", run)))
-    if run is None:
-        return steps
-
-    winner = run.winner_id
-    # DISPATCH
-    acc.add_backbone("input", "dispatch")
-    fan = [("dispatch", winner)] if winner else []
-    nodes_active = ["dispatch"] + ([winner] if winner else [])
-    steps.append(GraphStep(milestone_type="dispatch", label="DISPATCH", sub_task_id=tid,
-                           active_nodes=nodes_active, active_edges=acc.snapshot(fan),
-                           winner_agent_id=winner, outcome=run.outcome, detail=detail,
-                           todo=_todo_simple(record, tid, "dispatch", run)))
-    if winner is None:
-        return steps  # unassigned : la séquence s'arrête au dispatch
-
-    # TOOL milestones (Task 4 les ajoute) ; le caller assigne le todo
-    for ts in _tool_milestones(run, detail, acc, tid):
-        ts.todo = _todo_simple(record, tid, "tool", run)
-        steps.append(ts)
-
-    # AGENT (executed)
-    steps.append(GraphStep(milestone_type="agent", label=f"AGENT · {winner}", sub_task_id=tid,
-                           active_nodes=[winner], active_edges=acc.snapshot([("dispatch", winner)]),
-                           winner_agent_id=winner, outcome=run.outcome, detail=detail,
-                           todo=_todo_simple(record, tid, "agent", run)))
-
-    # EVALUATOR
-    if run.qa is not None:
-        fanq = [("dispatch", winner), (winner, "evaluator")]
-        nodes_q = ["evaluator"]
-        if run.outcome == "qa_fail":
-            fanq.append(("evaluator", "testset"))
-            nodes_q.append("testset")
-        steps.append(GraphStep(milestone_type="evaluator", label="EVALUATOR", sub_task_id=tid,
-                               active_nodes=nodes_q, active_edges=acc.snapshot(fanq),
-                               winner_agent_id=winner, outcome=run.outcome, detail=detail,
-                               todo=_todo_simple(record, tid, "evaluator", run)))
-
-    # OUTPUT
-    if run.outcome != "qa_fail":
-        acc.add_backbone("evaluator", "output")
-        steps.append(GraphStep(milestone_type="output", label="OUTPUT", active_nodes=["output"],
-                               active_edges=acc.snapshot([]), winner_agent_id=winner, outcome=run.outcome,
-                               detail=detail, todo=_todo_simple(record, tid, "output", run)))
-    return steps
-
-
-def _tool_milestones(run: "_Pass", input_detail_owner: StepDetail, acc: _EdgeAccumulator, tid: str) -> list[GraphStep]:
-    winner = run.winner_id
+def _tool_milestones(tid: str, p: "_Pass", owner_detail: "StepDetail", acc: "_EdgeAccumulator") -> list["GraphStep"]:
+    winner = p.winner_id
     if winner is None:
         return []
-    winner_tools = [t for t in run.tools if t.agent_id == winner]
+    wnode = _nid("agent", tid, winner)
     steps: list[GraphStep] = []
-    for group in _tool_groups(winner_tools):
+    for group in _tool_groups([t for t in p.tools if t.agent_id == winner]):
         tname = group[0].tool_name
-        tool_node = _tool_node_id(tname)
-        # detail scopé tool pour ce jalon (réutilise le StepDetail de la sous-tâche, surcharge .tool).
-        # Copie superficielle volontaire : `.tool` est le seul champ qui diverge par jalon.
-        # NE PAS muter detail.agents / detail.dispatch / detail.evaluator après ce point
-        # (objets partagés entre jalons frères → mutation corromprait les voisins).
-        detail = input_detail_owner.model_copy()
+        tnode = _nid("tool", tid, tname)
+        # shallow copy volontaire : .tool est le seul champ qui diverge par jalon.
+        detail = owner_detail.model_copy()
         detail.tool = ToolDetail(
             agent_id=winner, tool_name=tname,
-            calls=[ToolCallInfo(tool_name=c.tool_name, arguments=c.arguments, result=c.result, latency_ms=c.latency_ms) for c in group],
+            calls=[ToolCallInfo(tool_name=c.tool_name, arguments=c.arguments,
+                                result=c.result, latency_ms=c.latency_ms) for c in group],
         )
-        fan = [("dispatch", winner), (winner, tool_node)]
         label = f"TOOL · {tname}" + (f" ×{len(group)}" if len(group) > 1 else "")
         steps.append(GraphStep(milestone_type="tool", label=label, sub_task_id=tid,
-                               active_nodes=[winner, tool_node], active_edges=acc.snapshot(fan),
-                               winner_agent_id=winner, outcome=run.outcome, detail=detail,
-                               todo=[]))   # le caller assigne le todo
+                               active_nodes=[wnode, tnode],
+                               active_edges=acc.snapshot([(wnode, tnode, "transient")]),
+                               winner_agent_id=winner, outcome=p.outcome, detail=detail))
     return steps
 
 
-def _root_state(milestone: str) -> Literal["current", "done"]:
-    return "done" if milestone == "output" else "current"
+def _exit_owner(exit_node_id: str) -> str:
+    """task_id du nœud d'exit (format kind:tid[:extra] ; les task ids UUID n'ont pas de ':')."""
+    return exit_node_id.split(":")[1]
 
 
-def _todo_simple(record, tid, milestone, run) -> list[TodoItem]:
-    desc = record.description if record is not None else tid
-    if run is not None and milestone == "evaluator" and run.outcome == "qa_fail":
-        state: Literal["pending", "current", "done", "failed"] = "failed"
-    else:
-        state = _root_state(milestone)
-    return [TodoItem(id=tid, description=desc, state=state, is_root=True)]
-
-
-def _graph_sinks(divided_ev, sub_runs) -> list[str]:
-    """Sinks reconstruits côté dashboard, même règle qu'en runtime `_sinks` :
-    une sous-tâche qa_pass non consommée par une sous-tâche qa_pass. Pur."""
-    passed = {r.task_id for r in sub_runs if r.outcome == "qa_pass"}
-    consumed = {
-        dep
-        for st in divided_ev.sub_tasks if st.id in passed
-        for dep in st.depends_on if dep in passed
-    }
-    return [st.id for st in divided_ev.sub_tasks if st.id in passed and st.id not in consumed]
-
-
-def _milestones_divided(divided_ev, aggregated_ev, sub_runs, parent_record, parent_id) -> list[GraphStep]:
-    parent_input = _make_input_detail(parent_record, parent_id)
-    parent_desc = parent_input.description
-    acc = _EdgeAccumulator()
+def _walk(tid: str, entry_anchor: str, tree: "_Tree", runs: dict[str, "_TaskRun"],
+          acc: "_EdgeAccumulator") -> list["GraphStep"]:
+    run = runs.get(tid)
     steps: list[GraphStep] = []
+    if run is None:
+        return steps   # dep sautée : jamais tracée
+    input_detail = InputDetail(task_id=tid, description=tree.description(tid),
+                               required_tags=tree.tags(tid))
 
-    def td(milestone, current_task_id):
-        return _todo_divided(divided_ev, sub_runs, milestone, current_task_id, parent_desc)
+    # ROSTER GAP : branche réduite au cul-de-sac
+    if run.roster_gap is not None:
+        gid = _nid("roster_gap", tid)
+        acc.add_backbone(entry_anchor, gid, "ascent")
+        det = StepDetail(input=input_detail,
+                         roster_gap=RosterGapDetail(missing_tags=list(run.roster_gap.missing_tags)))
+        steps.append(GraphStep(milestone_type="roster_gap", label="ROSTER GAP", sub_task_id=tid,
+                               active_nodes=[gid], active_edges=acc.snapshot([]),
+                               outcome="roster_gap", detail=det))
+        return steps
 
-    # INPUT (parent)
-    parent_detail = StepDetail(input=parent_input)
-    steps.append(GraphStep(milestone_type="input", label="INPUT", active_nodes=["input"],
-                           active_edges=acc.snapshot([]), outcome="divided", detail=parent_detail,
-                           todo=td("input", None)))
+    diag_detail: DiagnosticDetail | None = None
+    if run.diagnosed is not None:
+        att = run.diagnosed.attribution
+        diag_detail = DiagnosticDetail(
+            attribution=att, reason=run.diagnosed.reason, consignes=run.diagnosed.consignes,
+            route_taken=att if att != "unattributed" else "stop",
+        )
 
-    # DIVIDER
-    acc.add_backbone("input", "divider")
-    div_detail = StepDetail(input=parent_input, divider=DividerDetail(
-        divided=True,
-        sub_tasks=[DividerSubTaskInfo(id=st.id, description=st.description, depends_on=list(st.depends_on), required_tags=dict(getattr(st, "required_tags", {}) or {})) for st in divided_ev.sub_tasks],
-    ))
-    steps.append(GraphStep(milestone_type="divider", label="DIVIDER", active_nodes=["divider"],
-                           active_edges=acc.snapshot([]), outcome="divided", detail=div_detail,
-                           todo=td("divider", None)))
+    did, evid, dgid = _nid("dispatch", tid), _nid("evaluator", tid), _nid("diagnostic", tid)
 
-    sink_ids = set(_graph_sinks(divided_ev, sub_runs))
+    for pi, p in enumerate(run.passes):
+        detail = _pass_detail(input_detail, p, tid)
+        if pi > 0 and diag_detail is not None:
+            detail.diagnostic = diag_detail   # la passe retry porte le diagnostic qui l'a déclenchée
+        winner = p.winner_id
+        suffix = " · pass 2" if pi == 1 else ""
 
-    # Récit progressif de collecte : l'aggregator s'allume à chaque sink validé.
-    total = len(sink_ids)   # le récit de collecte porte sur les sinks, pas toutes les sous-tâches
-    collected = 0
-
-    # Sous-tâches dans l'ordre d'émission (= ordre topologique de run_chain)
-    for idx, run in enumerate(sub_runs):
-        sub_input = InputDetail(task_id=run.task_id, description=_sub_desc(divided_ev, run.task_id),
-                                required_tags=_sub_tags(divided_ev, run.task_id))
-        detail = _scope_detail(sub_input, run)
-        winner = run.winner_id
-
-        acc.add_backbone("divider", "dispatch")
-        fan = [("dispatch", winner)] if winner else []
-        nodes_active = ["dispatch"] + ([winner] if winner else [])
-        steps.append(GraphStep(milestone_type="dispatch", label=f"DISPATCH · {idx + 1}", sub_task_id=run.task_id,
-                               order_index=idx, active_nodes=nodes_active, active_edges=acc.snapshot(fan),
-                               winner_agent_id=winner, outcome=run.outcome, detail=detail,
-                               todo=td("dispatch", run.task_id)))
+        # DISPATCH
+        acc.add_backbone(entry_anchor, did, "ascent")
+        fan: list[tuple[str, str, EdgeFlow]] = []
+        nodes_active = [did]
+        if winner:
+            fan.append((did, _nid("agent", tid, winner), "ascent"))
+            nodes_active.append(_nid("agent", tid, winner))
+        if pi == 1:
+            fan.append((dgid, did, "transient"))   # loop-back diag→dispatch allumé au retry
+        steps.append(GraphStep(milestone_type="dispatch", label=f"DISPATCH{suffix}", sub_task_id=tid,
+                               pass_index=pi, active_nodes=nodes_active, active_edges=acc.snapshot(fan),
+                               winner_agent_id=winner, outcome=p.outcome, detail=detail))
         if winner is None:
-            continue
+            continue   # unassigned : la passe s'arrête au dispatch (divider éventuel plus bas)
+        wnode = _nid("agent", tid, winner)
+        acc.add_backbone(did, wnode, "ascent")
 
-        for ts in _tool_milestones(run, detail, acc, run.task_id):
-            ts.order_index = idx
-            ts.todo = td("tool", run.task_id)
+        # TOOL*
+        for ts in _tool_milestones(tid, p, detail, acc):
+            ts.pass_index = pi
             steps.append(ts)
 
-        steps.append(GraphStep(milestone_type="agent", label=f"AGENT · {winner}", sub_task_id=run.task_id,
-                               order_index=idx, active_nodes=[winner], active_edges=acc.snapshot([("dispatch", winner)]),
-                               winner_agent_id=winner, outcome=run.outcome, detail=detail,
-                               todo=td("agent", run.task_id)))
+        # AGENT
+        steps.append(GraphStep(milestone_type="agent", label=f"AGENT · {winner}{suffix}", sub_task_id=tid,
+                               pass_index=pi, active_nodes=[wnode], active_edges=acc.snapshot([]),
+                               winner_agent_id=winner, outcome=p.outcome, detail=detail))
 
-        if run.qa is not None:
-            fanq = [("dispatch", winner), (winner, "evaluator")]
-            nodes_q = ["evaluator"]
-            ev_detail = detail
-            if run.outcome == "qa_fail":
-                fanq.append(("evaluator", "testset"))
-                nodes_q.append("testset")
-            elif run.outcome == "qa_pass" and aggregated_ev is not None and run.task_id in sink_ids:
-                # seul un SINK validé est collecté par l'aggregator (les intermédiaires consommés
-                # sont déjà repliés dans leur dépendant). shallow copy : surcharge .aggregator
-                # sans muter le detail partagé des frères.
-                collected += 1
-                nodes_q.append("aggregator")
-                fanq.append(("evaluator", "aggregator"))
-                ev_detail = detail.model_copy()
-                ev_detail.aggregator = AggregatorDetail(aggregated=False, collected=collected, total=total)
-            steps.append(GraphStep(milestone_type="evaluator", label=f"EVALUATOR · {idx + 1}", sub_task_id=run.task_id,
-                                   order_index=idx, active_nodes=nodes_q, active_edges=acc.snapshot(fanq),
-                                   winner_agent_id=winner, outcome=run.outcome, detail=ev_detail,
-                                   todo=td("evaluator", run.task_id)))
+        # EVALUATOR
+        if p.qa is not None:
+            acc.add_backbone(wnode, evid, "descent")
+            steps.append(GraphStep(milestone_type="evaluator", label=f"EVALUATOR{suffix}", sub_task_id=tid,
+                                   pass_index=pi, active_nodes=[evid], active_edges=acc.snapshot([]),
+                                   winner_agent_id=winner, outcome=p.outcome, detail=detail))
 
-    # AGGREGATOR / court-circuit single-sink
-    if aggregated_ev is not None:
-        acc.add_backbone("evaluator", "aggregator")
-        agg_detail = StepDetail(input=parent_input, aggregator=AggregatorDetail(
-            aggregated=True, sub_task_ids=list(aggregated_ev.sub_task_ids),
-            output_summary=aggregated_ev.output_summary, output_content=aggregated_ev.output_content,
-            collected=collected, total=total,
+        # Chaîne D3 après la passe 0 : DIAGNOSTIC (+ EVAL v2 sur route evaluator)
+        if pi == 0 and diag_detail is not None:
+            acc.add_backbone(evid, dgid, "descent")
+            ddetail = detail.model_copy()
+            ddetail.diagnostic = diag_detail
+            steps.append(GraphStep(milestone_type="diagnostic",
+                                   label=f"DIAGNOSTIC · route {diag_detail.route_taken}",
+                                   sub_task_id=tid, active_nodes=[dgid],
+                                   active_edges=acc.snapshot([]), winner_agent_id=winner,
+                                   outcome="diagnosed", detail=ddetail))
+            if run.reeval is not None:
+                vdetail = ddetail.model_copy()
+                vdetail.evaluator = EvaluatorDetail(
+                    ran=True, success=run.reeval.success, score=run.reeval.score,
+                    reason=run.reeval.reason, criteria_results=dict(run.reeval.criteria_results),
+                    judge=run.reeval.judge, spec=run.reeval.spec,
+                )
+                steps.append(GraphStep(milestone_type="evaluator", label="EVALUATOR v2", sub_task_id=tid,
+                                       active_nodes=[evid],
+                                       active_edges=acc.snapshot([(dgid, evid, "transient")]),
+                                       winner_agent_id=winner,
+                                       outcome="qa_pass" if run.reeval.success else "qa_fail",
+                                       detail=vdetail))
+
+    # DIVISION (D1 recovery ou D3 task_spec) — paire par niveau
+    if run.divided is not None:
+        dvid = _nid("divider", tid)
+        acc.add_backbone(_divider_anchor(run, tid) or entry_anchor, dvid, "ascent")
+        div_detail = StepDetail(input=input_detail, divider=DividerDetail(
+            divided=True, origin=_division_origin(run),
+            sub_tasks=[DividerSubTaskInfo(id=st.id, description=st.description,
+                                          depends_on=list(st.depends_on),
+                                          required_tags=dict(st.required_tags or {}))
+                       for st in run.divided.sub_tasks],
         ))
-        agg_detail.output = OutputDetail(produced=True, output_summary=aggregated_ev.output_summary,
-                                         output_content=aggregated_ev.output_content, llm_metadata=aggregated_ev.llm_metadata)
-        steps.append(GraphStep(milestone_type="aggregator", label="AGGREGATOR", active_nodes=["aggregator"],
-                               active_edges=acc.snapshot([]), outcome="divided", detail=agg_detail,
-                               todo=td("aggregator", None)))
+        if diag_detail is not None:
+            div_detail.diagnostic = diag_detail
+        steps.append(GraphStep(milestone_type="divider", label="DIVIDER", sub_task_id=tid,
+                               active_nodes=[dvid], active_edges=acc.snapshot([]),
+                               outcome="divided", detail=div_detail))
 
-        # OUTPUT — l'aggregator reste allumé (l'output est produit PAR lui : sinon une arête
-        # ember pointe depuis un nœud éteint, incohérent comme état terminal).
-        acc.add_backbone("aggregator", "output")
-        steps.append(GraphStep(milestone_type="output", label="OUTPUT", active_nodes=["aggregator", "output"],
-                               active_edges=acc.snapshot([]), outcome="divided", detail=agg_detail,
-                               todo=td("output", None)))
-    elif len(sink_ids) == 1:
-        # court-circuit D2 : un seul sink, aucune agrégation. OUTPUT terminal depuis le sink
-        # (l'output réel de l'agent du sink) — image honnête : aucune synthèse n'a eu lieu.
-        sink_run = next((r for r in sub_runs if r.task_id in sink_ids), None)
-        if sink_run is not None and sink_run.executed is not None:
-            sink_input = InputDetail(
-                task_id=sink_run.task_id, description=_sub_desc(divided_ev, sink_run.task_id),
-                required_tags=_sub_tags(divided_ev, sink_run.task_id),
-            )
-            out_detail = _scope_detail(sink_input, sink_run)
-            acc.add_backbone("evaluator", "output")
-            steps.append(GraphStep(
-                milestone_type="output", label="OUTPUT", active_nodes=["output"],
-                active_edges=acc.snapshot([]), winner_agent_id=sink_run.winner_id,
-                outcome="divided", detail=out_detail, todo=td("output", None),
+        sinks = _sink_ids(run.divided, runs)
+        total, collected = len(sinks), 0
+        agid = _nid("aggregator", tid)
+        for c in tree.children(tid):
+            child_steps = _walk(c, dvid, tree, runs, acc)
+            # récit de collecte : le dernier jalon d'un sink validé allume l'aggregator parent
+            if run.aggregated is not None and c in sinks and child_steps and _has_result(c, runs):
+                collected += 1
+                ex_node = _exit_node(c, runs)
+                acc.add_backbone(ex_node, agid, "descent")
+                last = child_steps[-1]
+                last.active_nodes = list(last.active_nodes) + [agid]
+                last.active_edges = list(last.active_edges) + [
+                    GraphEdge(from_node=ex_node, to=agid, flow="descent")]
+                d2 = last.detail.model_copy()
+                d2.aggregator = AggregatorDetail(aggregated=False, collected=collected, total=total)
+                last.detail = d2
+            steps += child_steps
+
+        if run.aggregated is not None:
+            agg_detail = StepDetail(input=input_detail, aggregator=AggregatorDetail(
+                aggregated=True, sub_task_ids=list(run.aggregated.sub_task_ids),
+                output_summary=run.aggregated.output_summary,
+                output_content=run.aggregated.output_content,
+                collected=collected, total=total,
             ))
+            agg_detail.output = OutputDetail(
+                produced=True, output_summary=run.aggregated.output_summary,
+                output_content=run.aggregated.output_content,
+                llm_metadata=run.aggregated.llm_metadata,
+            )
+            steps.append(GraphStep(milestone_type="aggregator", label="AGGREGATOR", sub_task_id=tid,
+                                   active_nodes=[agid], active_edges=acc.snapshot([]),
+                                   outcome="divided", detail=agg_detail))
     return steps
 
 
-def _sub_desc(divided_ev, task_id: str) -> str:
-    for st in divided_ev.sub_tasks:
-        if st.id == task_id:
-            return st.description
-    return task_id
+def _output_detail(exit_id: str, runs: dict[str, "_TaskRun"]) -> "OutputDetail":
+    owner = runs[_exit_owner(exit_id)]
+    if exit_id.startswith("aggregator:"):
+        ev = owner.aggregated
+        return OutputDetail(produced=True, output_summary=ev.output_summary,
+                            output_content=ev.output_content, llm_metadata=ev.llm_metadata)
+    executed = owner.passes[-1].executed
+    return OutputDetail(produced=True, output_summary=executed.output_summary,
+                        output_content=executed.output_content, llm_metadata=executed.llm_metadata)
 
 
-def _sub_tags(divided_ev, task_id: str) -> dict[str, int]:
-    for st in divided_ev.sub_tasks:
-        if st.id == task_id:
-            return dict(getattr(st, "required_tags", {}) or {})
-    return {}
+def _build_steps(tree: "_Tree", runs: dict[str, "_TaskRun"],
+                 session_meta: "SessionMeta | None") -> list["GraphStep"]:
+    root_record = _meta_record(session_meta, tree.root_id)
+    root_input = _make_input_detail(root_record, tree.root_id)
+    root_tags = tree.tags(tree.root_id)
+    acc = _EdgeAccumulator()
+    steps: list[GraphStep] = [GraphStep(
+        milestone_type="input", label="INPUT", sub_task_id=tree.root_id, active_nodes=["input"],
+        active_edges=acc.snapshot([]), outcome="no_qa", detail=StepDetail(input=root_input))]
 
+    trunk_anchor = "input"
+    if root_tags:
+        acc.add_backbone("input", "tagger", "ascent")
+        steps.append(GraphStep(milestone_type="tagger", label="TAGGER", sub_task_id=tree.root_id,
+                               active_nodes=["tagger"], active_edges=acc.snapshot([]),
+                               outcome="no_qa", detail=StepDetail(input=root_input)))
+        trunk_anchor = "tagger"
 
-def _todo_divided(divided_ev, sub_runs, milestone, current_task_id, root_desc="(input)") -> list[TodoItem]:
-    # racine : description réelle de la tâche parent (pas un placeholder)
-    items = [TodoItem(id=divided_ev.task_id, description=root_desc, state=_root_state(milestone), is_root=True)]
-    if milestone == "input":
-        return items
-    # ordre des sous-tâches = ordre d'exécution (sub_runs), fallback ordre divider
-    order = [r.task_id for r in sub_runs] or [st.id for st in divided_ev.sub_tasks]
-    run_by_id = {r.task_id: r for r in sub_runs}
-    # index de la sous-tâche courante dans l'ordre d'exécution (None si jalon parent)
-    cur_idx = order.index(current_task_id) if current_task_id in order else None
-    desc_by_id = {st.id: st.description for st in divided_ev.sub_tasks}
-    for i, tid in enumerate(order):
-        run = run_by_id.get(tid)
-        if milestone in ("aggregator", "output"):
-            state = ("failed" if (run is not None and run.outcome == "qa_fail") else "done")
-        elif cur_idx is None:
-            state = "pending"  # jalon divider : tout pending
-        elif i < cur_idx:
-            state = ("failed" if (run is not None and run.outcome == "qa_fail") else "done")
-        elif i == cur_idx:
-            # current jusqu'à son evaluator résolu
-            if milestone == "evaluator" and run is not None and run.outcome == "qa_fail":
-                state = "failed"
-            elif milestone == "evaluator" and run is not None and run.outcome == "qa_pass":
-                state = "done"
-            else:
-                state = "current"
-        else:
-            state = "pending"
-        items.append(TodoItem(id=tid, description=desc_by_id.get(tid, tid), state=state, is_root=False))
-    return items
+    steps += _walk(tree.root_id, trunk_anchor, tree, runs, acc)
+
+    final_exit = _exit_node(tree.root_id, runs)
+    if final_exit:
+        acc.add_backbone(final_exit, "output", "descent")
+        out_detail = StepDetail(input=root_input, output=_output_detail(final_exit, runs))
+        root_run = runs.get(tree.root_id)
+        steps.append(GraphStep(
+            milestone_type="output", label="OUTPUT", sub_task_id=tree.root_id,
+            active_nodes=["output"], active_edges=acc.snapshot([]),
+            outcome="divided" if (root_run and root_run.divided) else
+                    (root_run.passes[-1].outcome if root_run and root_run.passes else "no_qa"),
+            detail=out_detail))
+    return steps
 
 
 def build_graph(events: list[ClaimEvent], session_meta: SessionMeta | None = None) -> GraphModel:
     tree = _build_tree(events, session_meta)
     runs = _parse_runs(events)
-    root_record = _meta_record(session_meta, tree.root_id)
-    root_tags = dict(root_record.required_tags) if root_record is not None else {}
-    nodes, edges = _build_structure(tree, runs, root_tags)
-    steps = []   # Task 6+ : walk récursif
+    nodes, edges = _build_structure(tree, runs, tree.tags(tree.root_id))
+    steps = _build_steps(tree, runs, session_meta)
     return GraphModel(nodes=nodes, edges=edges, steps=steps, tasks=_task_branches(tree))

@@ -240,6 +240,62 @@ class TestStructure:
         assert flows[("evaluator:g1", "aggregator:c1")] == "descent"
 
 
+class TestSimpleRunWalk:
+    def test_milestone_sequence_with_tagger(self):
+        graph = build_graph(simple_pass("t1"), meta("t1", "do it"))
+        assert [s.milestone_type for s in graph.steps] == [
+            "input", "tagger", "dispatch", "agent", "evaluator", "output"]
+
+    def test_no_tagger_without_required_tags(self):
+        graph = build_graph(simple_pass("t1"), meta("t1", "do it", tags={}))
+        types = [s.milestone_type for s in graph.steps]
+        assert "tagger" not in types
+        assert "tagger" not in {n.id for n in graph.nodes}
+
+    def test_dispatch_milestone_namespaced(self):
+        graph = build_graph(simple_pass("t1"), meta("t1", "do it"))
+        d = next(s for s in graph.steps if s.milestone_type == "dispatch")
+        assert "dispatch:t1" in d.active_nodes and "agent:t1:ag" in d.active_nodes
+        pairs = {(e.from_node, e.to) for e in d.active_edges}
+        assert ("tagger", "dispatch:t1") in pairs
+        assert ("dispatch:t1", "agent:t1:ag") in pairs
+        assert d.winner_agent_id == "ag" and d.pass_index == 0
+
+    def test_evaluator_and_output(self):
+        graph = build_graph(simple_pass("t1"), meta("t1", "do it"))
+        ev = next(s for s in graph.steps if s.milestone_type == "evaluator")
+        assert ev.outcome == "qa_pass" and ev.active_nodes == ["evaluator:t1"]
+        out = graph.steps[-1]
+        assert out.milestone_type == "output"
+        pairs = {(e.from_node, e.to) for e in out.active_edges}
+        assert ("evaluator:t1", "output") in pairs       # backbone cumulatif
+        assert out.detail.output.output_content == "content"
+
+    def test_tool_milestones_rle(self):
+        evs = [p1("t1", "ag"), p2("t1", "ag"), disp("t1", "ag"),
+               tool("t1", "ag", "grep"), tool("t1", "ag", "grep"), tool("t1", "ag", "read"),
+               ex("t1", "ag"), qa("t1", "ag")]
+        graph = build_graph(evs, meta("t1", "do it"))
+        tool_steps = [s for s in graph.steps if s.milestone_type == "tool"]
+        assert [s.detail.tool.tool_name for s in tool_steps] == ["grep", "read"]
+        assert len(tool_steps[0].detail.tool.calls) == 2
+        assert "tool:t1:grep" in tool_steps[0].active_nodes
+
+    def test_qa_fail_no_output_milestone(self):
+        # qa_fail SANS DiagnosedEvent (mode health check) : la branche s'arrête à l'evaluator
+        graph = build_graph(simple_pass("t1", success=False), meta("t1", "do it"))
+        assert graph.steps[-1].milestone_type == "evaluator"
+        assert graph.steps[-1].outcome == "qa_fail"
+
+    def test_unassigned_stops_at_dispatch(self):
+        evs = [p1("t1", "ag", passed=False),
+               UnassignedEvent(session_id=SID, task_id="t1", reason="no claim")]
+        graph = build_graph(evs, meta("t1", "do it"))
+        assert graph.steps[-1].milestone_type == "dispatch"
+        assert graph.steps[-1].winner_agent_id is None
+        assert graph.steps[-1].detail.dispatch.unassigned_reason == "no claim"
+
+
 class TestBuildTree:
     def test_root_from_meta(self):
         events = simple_pass("t1")
