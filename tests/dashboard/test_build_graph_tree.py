@@ -539,3 +539,74 @@ class TestBuildTree:
         assert by_id["c1"].parent_id == "root" and by_id["c1"].depth == 1
         assert by_id["c1"].description == "part 1"
         assert by_id["root"].description == "big"
+
+
+class TestTodoHierarchy:
+    def test_simple_run_root_only(self):
+        graph = build_graph(simple_pass("t1"), meta("t1", "do it"))
+        first, last = graph.steps[0].todo, graph.steps[-1].todo
+        assert len(first) == 1 and first[0].is_root and first[0].state == "current"
+        assert first[0].depth == 0 and first[0].parent_id is None
+        assert first[0].first_step_index == 0
+        assert last[0].state == "done"
+
+    def test_subtasks_revealed_at_divider_with_hierarchy(self):
+        graph = build_graph(divided_agg_fixture(), meta("root", "big"))
+        before = next(s for s in graph.steps if s.milestone_type == "dispatch" and s.sub_task_id == "root")
+        assert [t.id for t in before.todo] == ["root"]
+        div = next(s for s in graph.steps if s.milestone_type == "divider")
+        items = {t.id: t for t in div.todo}
+        assert set(items) == {"root", "s1", "s2"}
+        assert items["s1"].parent_id == "root" and items["s1"].depth == 1
+        assert items["s1"].state == "pending" and items["s2"].state == "pending"
+
+    def test_states_progress_and_navigation(self):
+        graph = build_graph(divided_agg_fixture(), meta("root", "big"))
+        d1 = next(i for i, s in enumerate(graph.steps)
+                  if s.milestone_type == "dispatch" and s.sub_task_id == "s1")
+        states = {t.id: t.state for t in graph.steps[d1].todo}
+        assert states == {"root": "current", "s1": "current", "s2": "pending"}
+        # navigation : first_step_index pointe le premier jalon de la tâche
+        item_s1 = next(t for t in graph.steps[d1].todo if t.id == "s1")
+        assert item_s1.first_step_index == d1
+        # à l'output : tout done
+        assert {t.state for t in graph.steps[-1].todo} == {"done"}
+
+    def test_nested_depths(self):
+        events = (
+            [p1("root", "ag", passed=False), UnassignedEvent(session_id=SID, task_id="root", reason="r"),
+             divided("root", [("c1", "part 1", [], {"python": 50}), ("c2", "part 2", [], {"python": 50})])]
+            + [p1("c1", "ag", passed=False), UnassignedEvent(session_id=SID, task_id="c1", reason="r"),
+               divided("c1", [("g1", "deep A", [], {"python": 50})])]
+            + simple_pass("g1") + simple_pass("c2")
+            + [aggregated("root", ["c1", "c2"])]
+        )
+        graph = build_graph(events, meta("root", "big"))
+        last = {t.id: t for t in graph.steps[-1].todo}
+        assert last["g1"].depth == 2 and last["g1"].parent_id == "c1"
+        # g1 n'apparaît qu'à partir du DIVIDER de c1
+        div_c1 = next(i for i, s in enumerate(graph.steps)
+                      if s.milestone_type == "divider" and s.sub_task_id == "c1")
+        assert all("g1" not in {t.id for t in s.todo} for s in graph.steps[:div_c1])
+
+    def test_notes_annotations(self):
+        # retry → note "pass 2" + route ; roster gap → note "roster gap"
+        events = ([p1("root", "ag", passed=False),
+                   UnassignedEvent(session_id=SID, task_id="root", reason="r"),
+                   divided("root", [("s1", "retry me", [], {"python": 50}),
+                                    ("s2", "needs legal", [], {"legal": 50})])]
+                  + simple_pass("s1", success=False)
+                  + [diag("s1", "ag", "agent", consignes="x")]
+                  + simple_pass("s1", success=True)
+                  + [RosterGapEvent(session_id=SID, task_id="s2", missing_tags=["legal"])])
+        graph = build_graph(events, meta("root", "big"))
+        last = {t.id: t for t in graph.steps[-1].todo}
+        assert "pass 2" in last["s1"].note and "route agent" in last["s1"].note
+        assert last["s2"].note == "roster gap"
+        assert last["s2"].state == "failed"
+
+    def test_failed_states(self):
+        # qa_fail final (diag unattributed) → failed
+        events = simple_pass("t1", success=False) + [diag("t1", "ag", "unattributed", reason="")]
+        graph = build_graph(events, meta("t1", "do it"))
+        assert graph.steps[-1].todo[0].state == "failed"

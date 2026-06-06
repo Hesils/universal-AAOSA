@@ -905,6 +905,85 @@ def _output_detail(exit_id: str, runs: dict[str, "_TaskRun"]) -> "OutputDetail":
                         output_content=executed.output_content, llm_metadata=executed.llm_metadata)
 
 
+def _attach_todos(steps: list[GraphStep], tree: "_Tree", runs: dict[str, "_TaskRun"]) -> None:
+    """Post-processing : TODO hiérarchique par jalon (révélation au DIVIDER parent,
+    parent_id/depth/first_step_index/note). Mute les steps en place."""
+    if not steps:
+        return
+    first_step: dict[str, int] = {}
+    last_subtree: dict[str, int] = {}
+    reveal: dict[str, int] = {tree.root_id: 0}
+
+    def chain(tid: str | None) -> list[str]:
+        out: list[str] = []
+        cur = tid
+        while cur is not None:
+            out.append(cur)
+            cur = tree.parent(cur)
+        return out
+
+    for i, s in enumerate(steps):
+        if s.sub_task_id is None:
+            continue
+        first_step.setdefault(s.sub_task_id, i)
+        for a in chain(s.sub_task_id):
+            last_subtree[a] = i
+        if s.milestone_type == "divider":
+            for c in tree.children(s.sub_task_id):
+                reveal.setdefault(c, i)
+
+    def resolved_state(tid: str) -> Literal["done", "failed", "pending"]:
+        run = runs.get(tid)
+        if run is None:
+            return "pending"   # jamais exécutée (dep sautée)
+        return "done" if _has_result(tid, runs) else "failed"
+
+    def note_of(tid: str) -> str | None:
+        run = runs.get(tid)
+        if run is None:
+            return None
+        if run.roster_gap is not None:
+            return "roster gap"
+        parts: list[str] = []
+        if run.diagnosed is not None:
+            parts.append(f"route {run.diagnosed.attribution}")
+        if len(run.passes) > 1:
+            parts.append("pass 2")
+        return " · ".join(parts) or None
+
+    order = tree.walk_ids()
+    for i, s in enumerate(steps):
+        cur_chain = set(chain(s.sub_task_id)) if s.sub_task_id else {tree.root_id}
+        items: list[TodoItem] = []
+        for tid in order:
+            ri = reveal.get(tid)
+            if ri is None or ri > i:
+                continue
+            is_root = tid == tree.root_id
+            if is_root and s.milestone_type == "output":
+                state: Literal["pending", "current", "done", "failed"] = "done"
+            elif tid in cur_chain:
+                terminal = last_subtree.get(tid, -1) == i and tid == s.sub_task_id
+                if terminal and not _has_result(tid, runs):
+                    state = "failed"     # dernier jalon de la tâche, sans résultat : mort constatée
+                elif (tid == s.sub_task_id and s.milestone_type == "evaluator"
+                        and s.outcome == "qa_fail"):
+                    state = "failed"
+                else:
+                    state = "current"
+            elif last_subtree.get(tid, -1) < i:
+                state = resolved_state(tid)
+            else:
+                state = "pending"
+            items.append(TodoItem(
+                id=tid, description=tree.description(tid), state=state, is_root=is_root,
+                parent_id=tree.parent(tid), depth=tree.depth(tid),
+                first_step_index=first_step.get(tid, 0 if is_root else None),
+                note=note_of(tid),
+            ))
+        s.todo = items
+
+
 def _build_steps(tree: "_Tree", runs: dict[str, "_TaskRun"],
                  session_meta: "SessionMeta | None") -> list["GraphStep"]:
     root_record = _meta_record(session_meta, tree.root_id)
@@ -936,6 +1015,7 @@ def _build_steps(tree: "_Tree", runs: dict[str, "_TaskRun"],
             outcome="divided" if (root_run and root_run.divided) else
                     (root_run.passes[-1].outcome if root_run and root_run.passes else "no_qa"),
             detail=out_detail))
+    _attach_todos(steps, tree, runs)
     return steps
 
 
