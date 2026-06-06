@@ -1,25 +1,18 @@
+// graph.js — arbre émergent bottom-up (série D). Racines (INPUT/TAGGER/OUTPUT) en bas,
+// l'arbre pousse vers le haut : une arche par branche (DISPATCH montée → AGENT apex → EVAL descente),
+// paire DIVIDER/AGGREGATOR par niveau, routage delta 45° (rails + chanfreins, point = jonction).
 const SVG_NS = "http://www.w3.org/2000/svg";
-const NODE_W = 120, NODE_H = 48, GAP_X = 44, BAND_GAP = 124, PAD = 52;
-const LAYERS = ["tools", "bottom", "center", "top"];
+const NODE_W = 104, NODE_H = 40;
+const ROW_H = 96;        // pas vertical de la grille (k-rows)
+const SLOT_W = 244;      // largeur d'un slot de branche feuille
+const LEG_IN = 56;       // retrait des jambes (montée/descente) depuis les bords du slot
+const PAD = 64;
+const CH = 14;           // chanfrein 45° aux coudes (dialecte delta)
 
-// Hex wireframe (largeur NODE_W, hauteur NODE_H), centré sur l'origine.
 const HEX_PTS = `${NODE_W / 2},0 ${NODE_W / 4},${NODE_H / 2} ${-NODE_W / 4},${NODE_H / 2} ${-NODE_W / 2},0 ${-NODE_W / 4},${-NODE_H / 2} ${NODE_W / 4},${-NODE_H / 2}`;
-
-// Anatomie « arbre » : tools = canopée (le plus haut), agents = feuilles, logique = tronc,
-// in/out = racines (le plus bas). Ordre vertical visuel top→bottom.
-const TIER_LABEL = {
-  tools: "tools · capabilities",
-  bottom: "leaves · agents",
-  center: "trunk · logic",
-  top: "roots · in/out",
-};
+const DIA_PTS = `0,${-NODE_H / 2 - 4} ${NODE_W / 3},0 0,${NODE_H / 2 + 4} ${-NODE_W / 3},0`; // losange DIAG
 
 let hexSeq = 0;
-
-// Ordre de lecture dans une bande = ordre de la pipeline (et non l'ordre de création).
-// Trunk : divider → dispatch → evaluator → aggregator. Roots : input → output → testset.
-// Agents/tools (rank absent) gardent leur ordre d'apparition (tri stable).
-const PIPELINE_RANK = { input: 0, divider: 1, dispatch: 2, evaluator: 3, aggregator: 4, output: 5, testset: 6 };
 
 function el(name, attrs = {}) {
   const e = document.createElementNS(SVG_NS, name);
@@ -27,34 +20,131 @@ function el(name, attrs = {}) {
   return e;
 }
 
-function layout(graph) {
-  const byLayer = { tools: [], bottom: [], center: [], top: [] };
-  for (const n of graph.nodes) byLayer[n.layer].push(n);
-  for (const l of LAYERS) byLayer[l].sort((a, b) => (PIPELINE_RANK[a.type] ?? 99) - (PIPELINE_RANK[b.type] ?? 99));
-  const maxCount = Math.max(1, ...LAYERS.map(l => byLayer[l].length));
-  const width = PAD * 2 + maxCount * NODE_W + (maxCount - 1) * GAP_X;
-  const height = PAD * 2 + 4 * NODE_H + 3 * BAND_GAP;
-  // bandes empilées top→bottom : tools (canopée), bottom (agents), center (logic), top (in/out).
-  const bandTop = {};
-  LAYERS.forEach((l, i) => { bandTop[l] = PAD + i * (NODE_H + BAND_GAP); });
-  const pos = {};
-  for (const layer of LAYERS) {
-    const row = byLayer[layer];
-    const rowW = row.length * NODE_W + Math.max(0, row.length - 1) * GAP_X;
-    const startX = (width - rowW) / 2;
-    row.forEach((n, i) => {
-      pos[n.id] = { cx: startX + i * (NODE_W + GAP_X) + NODE_W / 2, cy: bandTop[layer] + NODE_H / 2 };
-    });
+const fmt = n => Math.round(n * 10) / 10;
+
+// ---------------------------------------------------------------- arbre
+function buildTree(graph) {
+  const tasks = graph.tasks || [];
+  const byId = {}, kids = {};
+  let root = null;
+  for (const t of tasks) {
+    byId[t.id] = t;
+    if (t.parent_id == null) root = t.id;
+    else (kids[t.parent_id] ||= []).push(t);
   }
-  const tierY = Object.fromEntries(LAYERS.map(l => [l, bandTop[l] + NODE_H / 2]));
-  return { pos, width, height, tierY };
+  for (const k in kids) kids[k].sort((a, b) => a.order_index - b.order_index);
+  return { byId, root, children: id => (kids[id] || []).map(t => t.id) };
 }
 
+// ---------------------------------------------------------------- layout
+// k-rows depuis le bas : 0 = racines (INPUT/OUTPUT), 1 = TAGGER (tronc).
+// Tâche de profondeur d : organes (DISPATCH/EVAL/GAP) k=2d+2, apex (AGENT ou paire
+// DIVIDER/AGGREGATOR) k=2d+3, canopée TOOLS k=2d+4. DIAG s'insère sur la jambe de
+// descente entre l'organe et la rangée du dessous.
+function layout(graph) {
+  const tree = buildTree(graph);
+  const byTask = {};
+  for (const n of graph.nodes) {
+    if (!n.task_id) continue;
+    const b = (byTask[n.task_id] ||= { agents: [], tools: [] });
+    if (n.type === "agent") b.agents.push(n);
+    else if (n.type === "tool") b.tools.push(n);
+    else b[n.type] = n;
+  }
+
+  const span = {};
+  let nextSlot = 0;
+  (function place(tid) {
+    const ks = tree.children(tid);
+    if (!ks.length) {
+      const x0 = PAD + nextSlot * SLOT_W;
+      span[tid] = [x0, x0 + SLOT_W];
+      nextSlot++;
+      return;
+    }
+    for (const k of ks) place(k);
+    span[tid] = [span[ks[0]][0], span[ks[ks.length - 1]][1]];
+  })(tree.root);
+
+  let maxK = 4;
+  for (const t of (graph.tasks || [])) maxK = Math.max(maxK, 2 * t.depth + 4);
+  const width = Math.max(PAD * 2 + nextSlot * SLOT_W, PAD * 2 + SLOT_W);
+  const height = PAD * 2 + maxK * ROW_H + NODE_H;
+  const Y = k => height - PAD - NODE_H / 2 - k * ROW_H;
+
+  const pos = {};
+  const [rx0, rx1] = span[tree.root] || [PAD, PAD + SLOT_W];
+  pos.input = { cx: rx0 + LEG_IN, cy: Y(0) };
+  pos.output = { cx: rx1 - LEG_IN, cy: Y(0) };
+  pos.tagger = { cx: rx0 + LEG_IN, cy: Y(1) };
+
+  for (const tid in byTask) {
+    const t = tree.byId[tid];
+    const sp = span[tid];
+    if (!t || !sp) continue;
+    const [x0, x1] = sp;
+    const ax = x0 + LEG_IN, dx = x1 - LEG_IN, cx = (x0 + x1) / 2;
+    const kOrg = 2 * t.depth + 2;
+    const b = byTask[tid];
+    if (b.dispatch) pos[b.dispatch.id] = { cx: ax, cy: Y(kOrg) };
+    if (b.evaluator) pos[b.evaluator.id] = { cx: dx, cy: Y(kOrg) };
+    if (b.diagnostic) pos[b.diagnostic.id] = { cx: dx, cy: Y(kOrg) + ROW_H * 0.58 };
+    if (b.roster_gap) pos[b.roster_gap.id] = { cx: cx, cy: Y(kOrg) };
+    b.agents.forEach((n, i) => {
+      const off = (i - (b.agents.length - 1) / 2) * (NODE_W + 14);
+      pos[n.id] = { cx: cx + off, cy: Y(kOrg + 1) };
+    });
+    b.tools.forEach((n, i) => {
+      const innerW = Math.max(x1 - x0 - LEG_IN * 2, NODE_W);
+      const step = b.tools.length > 1 ? innerW / (b.tools.length - 1) : 0;
+      pos[n.id] = { cx: b.tools.length > 1 ? x0 + LEG_IN + i * step : cx, cy: Y(kOrg + 2) };
+    });
+    if (b.divider) pos[b.divider.id] = { cx: x0 + NODE_W / 2 + 4, cy: Y(kOrg + 1) };
+    if (b.aggregator) pos[b.aggregator.id] = { cx: x1 - NODE_W / 2 - 4, cy: Y(kOrg + 1) };
+  }
+  return { pos, width, height };
+}
+
+// ---------------------------------------------------------------- routage delta 45°
+// Convention schéma électrique : point = jonction réelle ; croisement sans point = rien.
+function straight(a, b) { return { d: `M${fmt(a.cx)},${fmt(a.cy)} L${fmt(b.cx)},${fmt(b.cy)}`, dots: [] }; }
+
+function railThenRise(a, b) {
+  // rail horizontal à hauteur de a, chanfrein 45°, verticale vers b (bus d'émission, loop-backs)
+  if (Math.abs(a.cx - b.cx) < CH * 2) return straight(a, b);
+  const sx = Math.sign(b.cx - a.cx), sy = Math.sign(b.cy - a.cy) || -1;
+  const jx = b.cx - sx * CH;
+  return {
+    d: `M${fmt(a.cx)},${fmt(a.cy)} L${fmt(jx)},${fmt(a.cy)} L${fmt(b.cx)},${fmt(a.cy + sy * CH)} L${fmt(b.cx)},${fmt(b.cy)}`,
+    dots: [{ x: jx, y: a.cy }],
+  };
+}
+
+function riseThenRail(a, b) {
+  // verticale depuis a, chanfrein 45°, rail horizontal à hauteur de b (bus de collecte, montées vers divider)
+  if (Math.abs(a.cy - b.cy) < CH * 2) return straight(a, b);
+  const sx = Math.sign(b.cx - a.cx) || -1, sy = Math.sign(b.cy - a.cy);
+  const jy = b.cy - sy * CH;
+  return {
+    d: `M${fmt(a.cx)},${fmt(a.cy)} L${fmt(a.cx)},${fmt(jy)} L${fmt(a.cx + sx * CH)},${fmt(b.cy)} L${fmt(b.cx)},${fmt(b.cy)}`,
+    dots: [{ x: a.cx + sx * CH, y: b.cy }],
+  };
+}
+
+function routeEdge(e, pos, typeById) {
+  const a = pos[e.from], b = pos[e.to];
+  if (!a || !b) return null;
+  const tf = typeById[e.from], tt = typeById[e.to];
+  if (tf === "divider" || tf === "diagnostic") return railThenRise(a, b);
+  if (tt === "divider" || tt === "aggregator" || tt === "output") return riseThenRail(a, b);
+  return straight(a, b);   // tronc, dispatch→agent (diagonale), agent→eval, agent→tool, eval→diag
+}
+
+// ---------------------------------------------------------------- état actif
 function edgeKey(e) { return `${e.from}->${e.to}`; }
 
-// Union cumulée de tous les jalons : le chemin complet réellement parcouru par le run.
-// Utilisé par le graphe health (run mono-tâche, vue statique sans scrubber).
 function unionActive(graph) {
+  // union cumulée de tous les jalons (vue statique du health tab)
   const nodes = new Set(), edges = new Set();
   let winnerId = null, failBranch = false;
   for (const s of graph.steps) {
@@ -66,26 +156,34 @@ function unionActive(graph) {
   return { activeNodes: nodes, activeEdges: edges, winnerId, failBranch };
 }
 
+export function bboxOf(ids, pos) {
+  const xs = [], ys = [];
+  for (const id of ids) { const p = pos[id]; if (p) { xs.push(p.cx); ys.push(p.cy); } }
+  if (!xs.length) return null;
+  const x0 = Math.min(...xs) - NODE_W, x1 = Math.max(...xs) + NODE_W;
+  const y0 = Math.min(...ys) - NODE_H * 2, y1 = Math.max(...ys) + NODE_H * 2;
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+// ---------------------------------------------------------------- rendu
 export function renderGraph(svg, graph, activeStepIndex, onNodeClick, agentNames = {}, opts = {}) {
   while (svg.firstChild) svg.removeChild(svg.firstChild);
   svg.setAttribute("class", "graph");
 
-  const { pos, width, height, tierY } = layout(graph);
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  const { pos, width, height } = layout(graph);
+  if (!opts.keepViewBox) {
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  }
 
-  // hex partagé, id unique par rendu (évite la collision entre les svg sessions/health).
-  const hexId = `hex-${hexSeq++}`;
+  const hexId = `hex-${hexSeq}`, diaId = `dia-${hexSeq}`;
+  hexSeq++;
   const defs = el("defs");
   defs.appendChild(el("polygon", { id: hexId, points: HEX_PTS }));
+  defs.appendChild(el("polygon", { id: diaId, points: DIA_PTS }));
   svg.appendChild(defs);
 
-  // marqueurs de tier (faibles), à gauche
-  for (const layer of LAYERS) {
-    const t = el("text", { x: 6, y: tierY[layer] - NODE_H / 2 - 8, class: "gtier" });
-    t.textContent = TIER_LABEL[layer];
-    svg.appendChild(t);
-  }
+  const typeById = Object.fromEntries(graph.nodes.map(n => [n.id, n.type]));
 
   const step = graph.steps[activeStepIndex] || null;
   let activeNodes, activeEdges, winnerId, failBranch;
@@ -100,49 +198,74 @@ export function renderGraph(svg, graph, activeStepIndex, onNodeClick, agentNames
     failBranch = step && step.outcome === "qa_fail";
   }
 
-  // arêtes : idle (wire) ; actives (ember) ; branche fail pointillée.
+  // arêtes : idle wire ; actives par flow (montée crest, descente fire, transient pointillé)
   const edgeLayer = el("g");
+  const dotLayer = el("g");
   const pulseLayer = el("g");
   let pulseIdx = 0;
   for (const e of graph.edges) {
-    const a = pos[e.from], b = pos[e.to];
-    if (!a || !b) continue;
+    const r = routeEdge(e, pos, typeById);
+    if (!r) continue;
     const isActive = activeEdges.has(edgeKey(e));
-    const isFail = failBranch && isActive && e.to === "testset";
-    const line = el("line", { x1: a.cx, y1: a.cy, x2: b.cx, y2: b.cy });
-    line.setAttribute("class", "edge" + (isActive ? " edge--a" : "") + (isFail ? " edge--fail" : ""));
-    edgeLayer.appendChild(line);
-
-    // pulse dots ember sur les arêtes actives (calme, staggered) — pas sur la branche fail.
-    if (isActive && !isFail) {
-      const dot = el("circle", { r: 2.8, class: "pulse" });
+    const path = el("path", { d: r.d, class: `edge edge--${e.flow}${isActive ? " edge--a" : ""}` });
+    edgeLayer.appendChild(path);
+    for (const dot of r.dots) {
+      dotLayer.appendChild(el("circle", {
+        cx: fmt(dot.x), cy: fmt(dot.y), r: 2.4,
+        class: "junction" + (isActive ? " junction--a" : ""),
+      }));
+    }
+    // pulses directionnels : points crest montent, points ember descendent (jamais sur transient)
+    if (isActive && e.flow !== "transient") {
+      const dot = el("circle", { r: 2.8, class: `pulse pulse--${e.flow}` });
       const motion = el("animateMotion", {
         dur: "2.6s",
         begin: (pulseIdx++ * 0.7).toFixed(1) + "s",
         repeatCount: "indefinite",
-        path: `M${a.cx},${a.cy} L${b.cx},${b.cy}`,
+        path: r.d,
       });
       dot.appendChild(motion);
       pulseLayer.appendChild(dot);
     }
   }
   svg.appendChild(edgeLayer);
+  svg.appendChild(dotLayer);
   svg.appendChild(pulseLayer);
 
-  // nœuds (hexagones wireframe)
+  // badge ×N : même agent réel instancié sur plusieurs branches
+  const instances = {};
+  for (const n of graph.nodes) if (n.type === "agent" && n.agent_id) (instances[n.agent_id] ||= []).push(n.id);
+
   for (const n of graph.nodes) {
     const p = pos[n.id];
-    const g = el("g", { class: "node node--" + n.type, transform: `translate(${p.cx},${p.cy})` });
+    if (!p) continue;
+    const g = el("g", { class: "node node--" + n.type, transform: `translate(${fmt(p.cx)},${fmt(p.cy)})` });
     g.dataset.nodeId = n.id;
+    if (n.agent_id) g.dataset.agentId = n.agent_id;
     if (activeNodes.has(n.id)) g.classList.add("node--active");
-    if (n.id === winnerId) g.classList.add("node--winner");
+    if (n.agent_id && n.agent_id === winnerId && activeNodes.has(n.id)) g.classList.add("node--winner");
 
-    const hex = el("use", { class: "hex", href: "#" + hexId });
-    hex.setAttributeNS("http://www.w3.org/1999/xlink", "href", "#" + hexId);
+    const shapeRef = n.type === "diagnostic" ? diaId : hexId;
+    const shape = el("use", { class: "hex", href: "#" + shapeRef });
+    shape.setAttributeNS("http://www.w3.org/1999/xlink", "href", "#" + shapeRef);
     const label = el("text", { x: 0, y: 4, "text-anchor": "middle", class: "node-label" });
-    label.textContent = (n.type === "agent" && agentNames[n.id]) || n.label;
-    g.append(hex, label);
+    label.textContent = (n.type === "agent" && agentNames[n.agent_id]) || n.label;
+    g.append(shape, label);
+
+    const kin = n.agent_id ? instances[n.agent_id] : null;
+    if (kin && kin.length > 1) {
+      const badge = el("text", { x: NODE_W / 2 - 6, y: -NODE_H / 2 + 2, "text-anchor": "end", class: "node-badge" });
+      badge.textContent = `×${kin.length}`;
+      g.appendChild(badge);
+      g.addEventListener("mouseenter", () => {
+        svg.querySelectorAll(`[data-agent-id="${n.agent_id}"]`).forEach(x => x.classList.add("node--kin"));
+      });
+      g.addEventListener("mouseleave", () => {
+        svg.querySelectorAll(".node--kin").forEach(x => x.classList.remove("node--kin"));
+      });
+    }
     if (onNodeClick) g.addEventListener("click", () => onNodeClick(n, step));
     svg.appendChild(g);
   }
+  return { pos, width, height };
 }
