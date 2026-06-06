@@ -119,6 +119,14 @@ select.sel:focus { outline: none; border-color: var(--fire); }
 .graph-frame { flex: 1; min-width: 0; padding: 14px; position: relative; min-height: 0; overflow: hidden; }
 .todo { width: 240px; flex-shrink: 0; }
 .graph-frame .ghead { position: absolute; z-index: 1; top: 12px; left: 16px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; color: var(--fg-2); }
+/* bouton follow ⌖ (coin du graph-frame) */
+.follow-btn {
+  position: absolute; top: 8px; right: 10px; z-index: 2;
+  background: var(--bg-2); border: 1px solid var(--wire); color: var(--fg-1);
+  font: 11px var(--mono, monospace); padding: 3px 8px; cursor: pointer;
+  transition: color 160ms, border-color 160ms;
+}
+.follow-btn.on { color: var(--fire); border-color: var(--wire-2); }
 svg.graph { display: block; width: 100%; height: 100%; max-height: 100%; overflow: visible; }
 /* Sessions : la cellule a une hauteur définie (grid stretch). On positionne le svg en absolu
    pour qu'il remplisse exactement sa cellule au lieu d'utiliser sa hauteur intrinsèque (sinon
@@ -142,6 +150,10 @@ svg.graph { display: block; width: 100%; height: 100%; max-height: 100%; overflo
 .todo--sub { margin-left: 16px; }
 /* échec QA : réutilise la teinte d'échec (--fail), pas de rouge néon nouveau */
 .todo--failed { color: var(--fail); } .todo--failed .mk { border-color: var(--fail); background: var(--fail); opacity: 0.55; }
+
+/* TODO hiérarchique : note de marge (l'indentation par depth est inline, JS) */
+.todo-note { margin-left: auto; font-size: 10px; color: var(--fg-2); white-space: nowrap; }
+.todo--failed .todo-note { color: var(--fail); }
 
 .scrubber { display: flex; align-items: center; gap: 14px; margin-top: 14px; position: relative; z-index: 2; flex-shrink: 0; }
 .scrub-btn { font-family: var(--mono); font-size: 12px; background: var(--bg-1); color: var(--fg-1); border: 1px solid var(--wire); width: 30px; height: 28px; cursor: pointer; transition: color 160ms var(--ease), border-color 160ms; }
@@ -173,7 +185,6 @@ svg.graph { display: block; width: 100%; height: 100%; max-height: 100%; overflo
 .hex { fill: oklch(16% 0.008 250 / 0.7); stroke: var(--wire-2); stroke-width: 1.25; transition: stroke 200ms var(--ease); }
 .node { cursor: pointer; }
 .node text { font-family: var(--mono); font-size: 12px; fill: var(--fg-1); letter-spacing: 0.02em; pointer-events: none; }
-.gtier { font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; fill: var(--fg-2); opacity: 0.7; }
 .node:hover .hex { stroke: var(--fg-1); }
 /* actif (non-winner) : la coloration suit l'allumage — stroke ember + tint chaud léger, SANS glow
    (le glow est réservé au winner / aux éléments live, cf. DESIGN). Avant : stroke = idle → invisible. */
@@ -184,10 +195,35 @@ svg.graph { display: block; width: 100%; height: 100%; max-height: 100%; overflo
 /* tier tools : canopée idle (pointillé discret), s'allume comme les autres nœuds quand actif */
 .node--tool .hex { stroke-dasharray: 3 3; opacity: 0.7; }
 .node--tool.node--active .hex { stroke-dasharray: none; opacity: 1; }
-.edge { fill: none; stroke: var(--wire); stroke-width: 1; }
-.edge--a { stroke: var(--fire-2); stroke-width: 1.5; opacity: 0.85; }
-.edge--fail { stroke: var(--fail); stroke-dasharray: 5 5; }
-.pulse { fill: var(--fire); filter: drop-shadow(0 0 5px var(--fire-glow)); }
+
+/* ---- nouveaux nœuds série D ---- */
+.node--diagnostic .hex { stroke: var(--warn); }
+.node--diagnostic.node--active .hex { stroke: var(--warn); filter: drop-shadow(0 0 4px var(--warn)); }
+.node--diagnostic .node-label { fill: var(--warn); }
+.node--roster_gap .hex { stroke: var(--fail); }
+.node--roster_gap .node-label { fill: var(--fail); }
+.node--roster_gap.node--active .hex { filter: drop-shadow(0 0 4px var(--fail)); }
+.node--tagger .hex { stroke-dasharray: 3 3; }
+
+/* badge ×N + hover toutes-instances d'un agent */
+.node-badge { font-size: 9px; fill: var(--fg-2); }
+.node--kin .hex { stroke: var(--wire-2); }
+
+/* ---- arêtes par flow : montée crest, descente fire, transient pointillé ---- */
+.edge { stroke: var(--wire); fill: none; stroke-width: 1; }
+.edge--transient { stroke-dasharray: 4 4; }
+.edge--a { stroke-width: 1.4; }
+.edge--a.edge--ascent { stroke: var(--crest); }
+.edge--a.edge--descent { stroke: var(--fire-2); filter: drop-shadow(0 0 3px var(--fire-glow)); }
+.edge--a.edge--transient { stroke: var(--wire-2); }
+
+/* jonctions (point = contact réel, convention schéma électrique) */
+.junction { fill: var(--wire); }
+.junction--a { fill: var(--fg-1); }
+
+/* pulses directionnels (redondance de la couleur, jamais seuls porteurs du sens) */
+.pulse--ascent { fill: var(--crest); }
+.pulse--descent { fill: var(--fire); filter: drop-shadow(0 0 4px var(--fire-glow)); }
 
 /* ─── Agents ─── */
 .agent-view { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 16px; }

@@ -16,7 +16,7 @@ Neutrals are cool graphite (hue ~230-250, very low chroma). The hero is a warm *
 --bg-2:     oklch(21% 0.01 250)    /* raised / track */
 --wire:     oklch(46% 0.012 230)   /* hairline borders, idle lattice/edges */
 --wire-2:   oklch(62% 0.015 230)   /* idle node stroke, brighter rule */
---crest:    oklch(82% 0.04 70)     /* wave crest, winner label */
+--crest:    oklch(82% 0.04 70)     /* wave crest, winner label, graph ascent edges */
 --fire:     oklch(80% 0.18 52)     /* HERO — graph active/winner, accent, primary data */
 --fire-2:   oklch(72% 0.2 38)      /* active edge, bar fill end */
 --fire-glow:oklch(80% 0.18 52 / 0.55)
@@ -48,7 +48,9 @@ Strategy: **Restrained** chrome (tinted neutrals + ember accent), the graph is t
 Calm, state-bearing. Easing `cubic-bezier(0.22, 1, 0.36, 1)`.
 
 - **Scale-field wave**: ~4.6s linear loop, the ambient pulse of the surface.
-- **Graph live path**: ember **pulse dots** travel the active edges (`<animateMotion>`, ~2.6s, staggered), winner node **burns steady** (no blink). Idle edges/nodes are still.
+- **Graph live path**: directional **pulse dots** travel the active edges (`<animateMotion>`, ~2.6s,
+  staggered) — crest dots climb the ascent legs, ember dots ride the descents; the winner node
+  **burns steady** (no blink). Direction is never carried by color alone. Idle edges/nodes are still.
 - **Modal**: fade + rise (200-280ms).
 - Hover/focus transitions 150-200ms. No marching-ant edges, no node ping, no decorative motion on static data.
 
@@ -65,7 +67,12 @@ Calm, state-bearing. Easing `cubic-bezier(0.22, 1, 0.36, 1)`.
 
 - **Topbar**: ember diamond mark + `AAOSA` (mono, tracked) + faint `observability`; right-aligned **tab nav** as bordered wire pills, active = ember text + `--wire` border.
 - **Stat strip** (`.strip`/`.stat`): replaces all card grids. Column-ruled cells, mono value (~26px), uppercase mono label; key metrics in `--fire`.
-- **Hex graph**: see the implementation plan. Tree-tiered (leaves/trunk/roots), hex wireframe nodes, ember active path + pulses, faint tier labels, height-capped.
+- **Hex graph**: bottom-up emergent tree (roots I/O at the bottom, one arch per branch:
+  DISPATCH ascent → AGENT apex with tool canopy → EVAL descent; a DIVIDER/AGGREGATOR pair frames
+  each level). Delta-45 routing: horizontal bus rails + 45deg chamfers, junction dot = real contact.
+  Ascent edges `--crest`, descents `--fire-2`, transients dashed wire. DIAG is a `--warn` diamond
+  on the descent; ROSTER GAP a `--fail` dead-end. Camera: cursor-anchored zoom + pan,
+  defeatable follow-mode. The `--cool` reserve (charts only) is unchanged.
 - **ELO bars**: `--bg-2` track with `--wire` border, `--fire` fill + glow.
 - **Charts**: dashed `--wire` gridlines, `series-1` = `--fire` (glow), `series-2` = `--cool`, bars `--fire-2`; mono captions prefixed with an ember `▸`.
 - **Case table**: column-ruled rows, mono ids, ember role, active row = `--fire-dim` + inset ember bar; pass rate ember (ok) / warn / faint (none).
