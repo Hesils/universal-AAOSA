@@ -271,9 +271,11 @@ export function openNodeModal(node, step, runAgents) {
   switch (node.type) {
     case "dispatch": body = renderDispatch(step.detail.dispatch, runAgents); break;
     case "agent": {
-      body = renderAgent(node.id, step, runAgents);
-      const reg = (runAgents || []).find(x => x.agent_id === node.id);
-      title = (reg ? reg.name : node.label) + (step.winner_agent_id === node.id ? " ★" : "");
+      // id de nœud namespacé (agent:<tid>:<aid>) : l'agent réel est porté par node.agent_id
+      const aid = node.agent_id || node.id;
+      body = renderAgent(aid, step, runAgents);
+      const reg = (runAgents || []).find(x => x.agent_id === aid);
+      title = (reg ? reg.name : node.label) + (step.winner_agent_id === aid ? " ★" : "");
       break;
     }
     case "evaluator": body = renderEvaluator(step.detail.evaluator, step); break;

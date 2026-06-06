@@ -1,5 +1,6 @@
 import { api } from "../api.js";
-import { renderGraph } from "../graph.js";
+import { renderGraph, bboxOf } from "../graph.js";
+import { attachCamera } from "../camera.js";
 import { openNodeModal, openTextModal } from "../modal.js";
 import { esc } from "../util.js";
 
@@ -13,6 +14,7 @@ export async function mountSessions(panel) {
       <div class="panel graph-frame">
         <span class="ghead">EXECUTION GRAPH</span>
         <svg class="graph"></svg>
+        <button class="follow-btn on" title="Auto-centrage sur le jalon actif">⌖ suivre</button>
       </div>
       <aside class="panel todo">
         <h3>Tasks</h3>
@@ -37,6 +39,14 @@ export async function mountSessions(panel) {
   const scrubHandle = panel.querySelector(".scrub-handle");
   const scrubTrack = panel.querySelector(".scrub-track");
 
+  const followBtn = panel.querySelector(".follow-btn");
+  const camera = attachCamera(svg, { onManual: () => followBtn.classList.remove("on") });
+  followBtn.addEventListener("click", () => {
+    camera.setFollow(true);
+    followBtn.classList.add("on");
+    rerender();   // re-déclenche le focus sur le jalon courant
+  });
+
   const list = await api.sessions();
   if (!list.sessions.length) { panel.innerHTML = '<p class="placeholder">Aucune session persistée.</p>'; return; }
   for (const s of list.sessions) {
@@ -48,31 +58,17 @@ export async function mountSessions(panel) {
 
   let detail = null, graph = null, activeStepIndex = 0, agentNames = {};
 
-  // Divider/Aggregator ne s'allument qu'à un seul jalon. Leur modal doit refléter l'état à
-  // l'instant T : si la timeline a déjà atteint leur jalon, on montre son détail (même en
-  // scrubbant ailleurs après) ; si elle est encore AVANT, on garde le jalon courant → état
-  // "pas encore exécuté" (sinon le modal afficherait l'état final dès le 1er jalon).
+  // Divider/Aggregator ne s'allument qu'à un seul jalon, et sont par NIVEAU (namespacés) :
+  // matcher sur node.task_id. Si la timeline a déjà atteint leur jalon, on montre son détail ;
+  // si elle est encore AVANT, on garde le jalon courant → état "pas encore exécuté".
   function stepForNode(node, current) {
-    if (node.type === "aggregator") {
-      // actif au jalon courant (collecte progressive OU final) → état à l'instant T
-      if (current && current.active_nodes.includes("aggregator")) return current;
-      // sinon, si la timeline a dépassé l'agrégation finale → ce jalon ; avant toute collecte → pending
-      const mi = graph.steps.findIndex(s => s.milestone_type === "aggregator");
-      if (mi >= 0 && activeStepIndex >= mi) return graph.steps[mi];
-      return current;
-    }
-    if (node.type === "divider") {
-      const mi = graph.steps.findIndex(s => s.milestone_type === "divider");
+    if (node.type === "aggregator" || node.type === "divider") {
+      if (current && current.active_nodes.includes(node.id)) return current;
+      const mi = graph.steps.findIndex(s =>
+        s.milestone_type === node.type && s.sub_task_id === node.task_id);
       if (mi >= 0 && activeStepIndex >= mi) return graph.steps[mi];
     }
     return current;
-  }
-
-  // Premier jalon qui traite une tâche donnée (racine → INPUT ; sous-tâche → son 1er jalon).
-  function firstStepIndexForTask(tid, isRoot) {
-    if (isRoot) return 0;
-    const i = graph.steps.findIndex(s => s.sub_task_id === tid);
-    return i >= 0 ? i : activeStepIndex;
   }
 
   function renderTodo() {
@@ -82,6 +78,7 @@ export async function mountSessions(panel) {
     for (const t of items) {
       const row = document.createElement("div");
       row.className = `todo-item todo--${t.state}${t.is_root ? "" : " todo--sub"}`;
+      row.style.marginLeft = `${t.depth * 14}px`;
       row.title = "Aller au premier jalon de cette tâche";
 
       const mk = document.createElement("span");
@@ -91,7 +88,13 @@ export async function mountSessions(panel) {
       text.textContent = t.description;
       row.append(mk, text);
 
-      // icône dédiée → texte complet en modal, pour TOUTE (sous-)tâche (descriptions longues)
+      if (t.note) {
+        const note = document.createElement("span");
+        note.className = "todo-note";
+        note.textContent = t.note;
+        row.appendChild(note);
+      }
+
       const exp = document.createElement("button");
       exp.className = "todo-expand";
       const label = t.is_root ? "Voir l'input complet" : "Voir la description complète";
@@ -105,26 +108,34 @@ export async function mountSessions(panel) {
       row.appendChild(exp);
 
       row.addEventListener("click", () => {
-        activeStepIndex = firstStepIndexForTask(t.id, t.is_root);
-        rerender();
+        if (t.first_step_index != null) { activeStepIndex = t.first_step_index; rerender(); }
       });
       todo.appendChild(row);
     }
   }
 
   function renderChips() {
-    const div = graph.steps.find(s => s.milestone_type === "divider");
-    const subCount = div ? div.detail.divider.sub_tasks.length : 0;
+    const subCount = Math.max(0, (graph.tasks || []).length - 1);   // toutes profondeurs
     const sub = subCount ? `<span><b>${subCount}</b> sous-tâches</span>` : "";
     chips.innerHTML = `<span><b>${detail.meta.tasks.length}</b> tasks</span>${sub}<span><b>${detail.meta.agent_ids.length}</b> agents</span>`;
   }
 
   function rerender() {
-    renderGraph(svg, graph, activeStepIndex, (node, step) => openNodeModal(node, stepForNode(node, step), detail.agents), agentNames);
+    const info = renderGraph(svg, graph, activeStepIndex,
+      (node, step) => openNodeModal(node, stepForNode(node, step), detail.agents),
+      agentNames, { keepViewBox: true });
+    camera.setContent(info.width, info.height);
+    const cur = graph.steps[activeStepIndex];
+    if (cur) camera.focusOn(bboxOf(cur.active_nodes, info.pos));
     const n = graph.steps.length;
     if (n) {
       const step = graph.steps[activeStepIndex];
-      scrubLabel.innerHTML = `Jalon <b>${activeStepIndex + 1}</b> / ${n} — <span class="mono">${esc(step.label)}</span>`;
+      const sub = step.sub_task_id
+        ? (step.todo.find(t => t.id === step.sub_task_id)?.description || "")
+        : "";
+      const subTxt = sub && !step.todo.find(t => t.id === step.sub_task_id)?.is_root
+        ? ` <span class="scrub-sub">· ${esc(sub.slice(0, 48))}${sub.length > 48 ? "…" : ""}</span>` : "";
+      scrubLabel.innerHTML = `Jalon <b>${activeStepIndex + 1}</b> / ${n} — <span class="mono">${esc(step.label)}</span>${subTxt}`;
       const ratio = n > 1 ? activeStepIndex / (n - 1) : 1;
       scrubFill.style.width = `${ratio * 100}%`;
       scrubHandle.style.left = `${ratio * 100}%`;
