@@ -149,6 +149,97 @@ class TestParseRuns:
         assert runs["s1"].succeeded is True
 
 
+def divided_fixture():
+    """root unassigned → divisé en s1 (tool) et s2 (dépend de s1), agrégation réelle absente
+    (s2 consomme s1, sink unique = s2 → court-circuit)."""
+    return ([p1("root", "ag", passed=False),
+             UnassignedEvent(session_id=SID, task_id="root", reason="no claim"),
+             divided("root", [("s1", "investigate", [], {"python": 50}),
+                              ("s2", "fix", ["s1"], {"python": 50})])]
+            + simple_pass("s1", with_tool="grep", content="c1")
+            + simple_pass("s2", content="c2"))
+
+
+def divided_agg_fixture():
+    """root → 2 sous-tâches indépendantes → 2 sinks → agrégation réelle."""
+    return ([p1("root", "ag", passed=False),
+             UnassignedEvent(session_id=SID, task_id="root", reason="no claim"),
+             divided("root", [("s1", "part A", [], {"python": 50}),
+                              ("s2", "part B", [], {"python": 50})])]
+            + simple_pass("s1", content="c1") + simple_pass("s2", content="c2")
+            + [aggregated("root", ["s1", "s2"])])
+
+
+class TestStructure:
+    def test_namespaced_nodes_simple_run(self):
+        graph = build_graph(simple_pass("t1"), meta("t1", "do it"))
+        ids = {n.id for n in graph.nodes}
+        assert {"input", "tagger", "output", "dispatch:t1", "agent:t1:ag", "evaluator:t1"} <= ids
+        assert "testset" not in ids                       # retiré du graphe série D
+        agent = next(n for n in graph.nodes if n.type == "agent")
+        assert agent.task_id == "t1" and agent.agent_id == "ag"
+
+    def test_simple_run_edges_and_flows(self):
+        graph = build_graph(simple_pass("t1"), meta("t1", "do it"))
+        flows = {(e.from_node, e.to): e.flow for e in graph.edges}
+        assert flows[("input", "tagger")] == "ascent"
+        assert flows[("tagger", "dispatch:t1")] == "ascent"
+        assert flows[("dispatch:t1", "agent:t1:ag")] == "ascent"
+        assert flows[("agent:t1:ag", "evaluator:t1")] == "descent"
+        assert flows[("evaluator:t1", "output")] == "descent"
+
+    def test_tool_nodes_per_branch(self):
+        graph = build_graph(simple_pass("t1", with_tool="grep"), meta("t1", "do it"))
+        ids = {n.id for n in graph.nodes}
+        assert "tool:t1:grep" in ids
+        flows = {(e.from_node, e.to): e.flow for e in graph.edges}
+        assert flows[("agent:t1:ag", "tool:t1:grep")] == "transient"
+
+    def test_divided_short_circuit_no_aggregator(self):
+        graph = build_graph(divided_fixture(), meta("root", "big"))
+        ids = {n.id for n in graph.nodes}
+        assert "divider:root" in ids and "aggregator:root" not in ids
+        flows = {(e.from_node, e.to): e.flow for e in graph.edges}
+        # division D1 : le dispatch raté monte vers le divider
+        assert flows[("dispatch:root", "divider:root")] == "ascent"
+        # bus d'émission : risers vers chaque branche
+        assert flows[("divider:root", "dispatch:s1")] == "ascent"
+        assert flows[("divider:root", "dispatch:s2")] == "ascent"
+        # dep consommée : s1 → s2 en transient
+        assert flows[("evaluator:s1", "dispatch:s2")] == "transient"
+        # court-circuit : la descente du sink s2 file à OUTPUT
+        assert flows[("evaluator:s2", "output")] == "descent"
+
+    def test_divided_aggregated_structure(self):
+        graph = build_graph(divided_agg_fixture(), meta("root", "big"))
+        ids = {n.id for n in graph.nodes}
+        assert "aggregator:root" in ids
+        flows = {(e.from_node, e.to): e.flow for e in graph.edges}
+        assert flows[("evaluator:s1", "aggregator:root")] == "descent"
+        assert flows[("evaluator:s2", "aggregator:root")] == "descent"
+        assert flows[("aggregator:root", "output")] == "descent"
+        assert ("evaluator:s1", "output") not in flows
+
+    def test_recursive_division_nested_pair(self):
+        events = (
+            [p1("root", "ag", passed=False), UnassignedEvent(session_id=SID, task_id="root", reason="r"),
+             divided("root", [("c1", "part 1", [], {"python": 50}), ("c2", "part 2", [], {"python": 50})])]
+            + [p1("c1", "ag", passed=False), UnassignedEvent(session_id=SID, task_id="c1", reason="r"),
+               divided("c1", [("g1", "deep A", [], {"python": 50}), ("g2", "deep B", [], {"python": 50})])]
+            + simple_pass("g1") + simple_pass("g2")
+            + [aggregated("c1", ["g1", "g2"], content="c1 synth")]
+            + simple_pass("c2")
+            + [aggregated("root", ["c1", "c2"])]
+        )
+        graph = build_graph(events, meta("root", "big"))
+        ids = {n.id for n in graph.nodes}
+        assert {"divider:root", "aggregator:root", "divider:c1", "aggregator:c1"} <= ids
+        flows = {(e.from_node, e.to): e.flow for e in graph.edges}
+        # paire par niveau : l'aggregator enfant descend vers l'aggregator parent
+        assert flows[("aggregator:c1", "aggregator:root")] == "descent"
+        assert flows[("evaluator:g1", "aggregator:c1")] == "descent"
+
+
 class TestBuildTree:
     def test_root_from_meta(self):
         events = simple_pass("t1")

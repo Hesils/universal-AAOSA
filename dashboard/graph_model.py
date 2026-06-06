@@ -259,82 +259,180 @@ def _agent_ids(events: list[ClaimEvent]) -> list[str]:
     return ordered
 
 
-def _tool_node_id(tool_name: str) -> str:
-    return "tool:" + tool_name
+def _nid(kind: str, tid: str, extra: str | None = None) -> str:
+    return f"{kind}:{tid}" + (f":{extra}" if extra else "")
 
 
-def _distinct_tools(events: list[ClaimEvent]) -> list[tuple[str, str]]:
-    """(agent_id, tool_name) distincts, dans l'ordre d'apparition."""
+def _has_result(tid: str, runs: dict[str, "_TaskRun"]) -> bool:
+    """La tâche a un résultat exploitable, à plat ou via son sous-arbre (récursif)."""
+    run = runs.get(tid)
+    if run is None:
+        return False
+    if run.aggregated is not None:
+        return True
+    if run.divided is not None:
+        sinks = _sink_ids(run.divided, runs)
+        return bool(sinks) and _has_result(sinks[-1], runs)
+    return run.succeeded
+
+
+def _sink_ids(divided_ev: TaskDividedEvent, runs: dict[str, "_TaskRun"]) -> list[str]:
+    """Même règle que le runtime `_sinks` : un réussi non consommé par un réussi.
+    Réussi = _has_result (couvre les sous-tâches elles-mêmes divisées)."""
+    ok = {st.id for st in divided_ev.sub_tasks if _has_result(st.id, runs)}
+    consumed = {dep for st in divided_ev.sub_tasks if st.id in ok
+                for dep in st.depends_on if dep in ok}
+    return [st.id for st in divided_ev.sub_tasks if st.id in ok and st.id not in consumed]
+
+
+def _exit_node(tid: str, runs: dict[str, "_TaskRun"]) -> str | None:
+    """Nœud qui porte le résultat final de la tâche (départ de sa descente).
+    Court-circuit single-sink (D2) : l'exit du sous-arbre est l'exit du sink —
+    la descente saute le niveau (aucun aggregator au court-circuit)."""
+    run = runs.get(tid)
+    if run is None:
+        return None
+    if run.aggregated is not None:
+        return _nid("aggregator", tid)
+    if run.divided is not None:
+        sinks = _sink_ids(run.divided, runs)
+        return _exit_node(sinks[-1], runs) if sinks else None
+    if not run.succeeded:
+        return None
+    last = run.passes[-1]
+    if last.qa is not None or run.reeval is not None:
+        return _nid("evaluator", tid)
+    if last.winner_id:
+        return _nid("agent", tid, last.winner_id)
+    return None
+
+
+def _division_origin(run: "_TaskRun") -> Literal["recovery", "diagnostic"]:
+    if run.diagnosed is not None and run.diagnosed.attribution == "task_spec":
+        return "diagnostic"
+    return "recovery"
+
+
+def _divider_anchor(run: "_TaskRun", tid: str) -> str | None:
+    """D'où monte l'arête vers divider:<tid> : DIAG (D3) ou le dispatch raté (D1)."""
+    if _division_origin(run) == "diagnostic":
+        return _nid("diagnostic", tid)
+    if run.passes:
+        return _nid("dispatch", tid)
+    return None
+
+
+def _winners(run: "_TaskRun") -> list[str]:
+    """Winners distincts à travers les passes (ordre d'apparition)."""
+    seen: list[str] = []
+    for p in run.passes:
+        w = p.winner_id
+        if w and w not in seen:
+            seen.append(w)
+    return seen
+
+
+def _branch_tools(run: "_TaskRun") -> list[tuple[str, str]]:
+    """(winner, tool_name) distincts du/des winner(s), ordre d'apparition."""
     seen: set[tuple[str, str]] = set()
-    ordered: list[tuple[str, str]] = []
-    for e in events:
-        if isinstance(e, ToolCalledEvent):
-            key = (e.agent_id, e.tool_name)
-            if key not in seen:
-                seen.add(key)
-                ordered.append(key)
-    return ordered
+    out: list[tuple[str, str]] = []
+    for p in run.passes:
+        w = p.winner_id
+        if not w:
+            continue
+        for t in p.tools:
+            if t.agent_id == w and (w, t.tool_name) not in seen:
+                seen.add((w, t.tool_name))
+                out.append((w, t.tool_name))
+    return out
 
 
-def _has_qa_fail(events: list[ClaimEvent]) -> bool:
-    return any(isinstance(e, QAEvaluatedEvent) and not e.success for e in events)
-
-
-def _build_nodes(events: list[ClaimEvent]) -> list[GraphNode]:
-    nodes = [
-        GraphNode(id="input", layer="top", type="input", label="Input"),
-        GraphNode(id="dispatch", layer="center", type="dispatch", label="Dispatch"),
-        GraphNode(id="evaluator", layer="center", type="evaluator", label="Evaluator"),
-        GraphNode(id="output", layer="top", type="output", label="Output"),
-    ]
-    # testset (fork de régression) n'a de sens qu'en cas d'échec QA — sinon nœud flottant sans arête.
-    if _has_qa_fail(events):
-        nodes.append(GraphNode(id="testset", layer="top", type="testset", label="TestSet"))
-    if any(isinstance(e, TaskDividedEvent) for e in events):
-        nodes.append(GraphNode(id="divider", layer="center", type="divider", label="Divider"))
-        # l'aggregator n'apparaît que s'il y a eu une vraie agrégation (≥2 sinks).
-        # Single-sink (court-circuit) -> aucun TaskAggregatedEvent -> pas de nœud aggregator.
-        if any(isinstance(e, TaskAggregatedEvent) for e in events):
-            nodes.append(GraphNode(id="aggregator", layer="center", type="aggregator", label="Aggregator"))
-    for aid in _agent_ids(events):
-        nodes.append(GraphNode(id=aid, layer="bottom", type="agent", label=aid))
-    seen_tools: set[str] = set()
-    for _aid, tname in _distinct_tools(events):
-        if tname not in seen_tools:
-            seen_tools.add(tname)
-            nodes.append(GraphNode(id=_tool_node_id(tname), layer="tools", type="tool", label=tname))
-    return nodes
-
-
-def _build_edges(nodes: list[GraphNode], events: list[ClaimEvent]) -> list[GraphEdge]:
-    """Arêtes statiques = la pipeline réelle (mêmes arêtes que le backbone/fan-out des jalons).
-
-    Simple : input→dispatch→agents→evaluator→output.
-    Divisé sans agrégation : input→divider→dispatch→agents→evaluator→output.
-    Divisé+agrégé : input→divider→dispatch→agents→evaluator→aggregator→output.
-    Tools en canopée (agent→tool). testset (fork) seulement sur échec QA.
-    """
-    agent_ids = [n.id for n in nodes if n.type == "agent"]
-    divided = any(n.id == "divider" for n in nodes)
-    aggregated = any(n.id == "aggregator" for n in nodes)
+def _build_structure(
+    tree: "_Tree", runs: dict[str, "_TaskRun"], root_tags: dict[str, int],
+) -> tuple[list[GraphNode], list[GraphEdge]]:
+    nodes: list[GraphNode] = [GraphNode(id="input", layer="top", type="input", label="Input")]
     edges: list[GraphEdge] = []
-    if divided:
-        edges.append(GraphEdge(from_node="input", to="divider"))
-        edges.append(GraphEdge(from_node="divider", to="dispatch"))
-    else:
-        edges.append(GraphEdge(from_node="input", to="dispatch"))
-    edges += [GraphEdge(from_node="dispatch", to=aid) for aid in agent_ids]
-    edges += [GraphEdge(from_node=aid, to="evaluator") for aid in agent_ids]
-    for aid, tname in _distinct_tools(events):
-        edges.append(GraphEdge(from_node=aid, to=_tool_node_id(tname)))
-    if aggregated:
-        edges.append(GraphEdge(from_node="evaluator", to="aggregator"))
-        edges.append(GraphEdge(from_node="aggregator", to="output"))
-    else:
-        edges.append(GraphEdge(from_node="evaluator", to="output"))
-    if _has_qa_fail(events):
-        edges.append(GraphEdge(from_node="evaluator", to="testset"))
-    return edges
+    seen_edges: set[tuple[str, str]] = set()
+
+    def add_edge(frm: str | None, to: str | None, flow: EdgeFlow) -> None:
+        if frm and to and (frm, to) not in seen_edges:
+            seen_edges.add((frm, to))
+            edges.append(GraphEdge(from_node=frm, to=to, flow=flow))
+
+    has_tagger = bool(root_tags)
+    if has_tagger:
+        nodes.append(GraphNode(id="tagger", layer="top", type="tagger", label="Tagger"))
+        add_edge("input", "tagger", "ascent")
+    nodes.append(GraphNode(id="output", layer="top", type="output", label="Output"))
+    trunk_anchor = "tagger" if has_tagger else "input"
+
+    def visit(tid: str, entry_anchor: str) -> None:
+        run = runs.get(tid)
+        if run is None:
+            return   # tâche jamais tracée (dep sautée) : pas de nœuds
+        if run.roster_gap is not None:
+            gid = _nid("roster_gap", tid)
+            nodes.append(GraphNode(id=gid, layer="center", type="roster_gap",
+                                   label="GAP · " + " ".join(run.roster_gap.missing_tags),
+                                   task_id=tid))
+            add_edge(entry_anchor, gid, "ascent")
+            return   # cul-de-sac : aucune descente
+        if run.passes:
+            did = _nid("dispatch", tid)
+            nodes.append(GraphNode(id=did, layer="center", type="dispatch", label="DISPATCH", task_id=tid))
+            add_edge(entry_anchor, did, "ascent")
+            has_eval = any(p.qa is not None for p in run.passes) or run.reeval is not None
+            if has_eval:
+                nodes.append(GraphNode(id=_nid("evaluator", tid), layer="center",
+                                       type="evaluator", label="EVAL", task_id=tid))
+            for w in _winners(run):
+                aid = _nid("agent", tid, w)
+                nodes.append(GraphNode(id=aid, layer="bottom", type="agent", label=w,
+                                       task_id=tid, agent_id=w))
+                add_edge(did, aid, "ascent")
+                if has_eval:
+                    add_edge(aid, _nid("evaluator", tid), "descent")
+            for w, tname in _branch_tools(run):
+                tnid = _nid("tool", tid, tname)
+                nodes.append(GraphNode(id=tnid, layer="tools", type="tool", label=tname, task_id=tid))
+                add_edge(_nid("agent", tid, w), tnid, "transient")
+        if run.diagnosed is not None:
+            dgid = _nid("diagnostic", tid)
+            nodes.append(GraphNode(id=dgid, layer="center", type="diagnostic", label="DIAG", task_id=tid))
+            add_edge(_nid("evaluator", tid), dgid, "descent")
+            att = run.diagnosed.attribution
+            if att == "agent" and len(run.passes) > 1:
+                add_edge(dgid, _nid("dispatch", tid), "transient")          # loop-back retry
+            elif att == "evaluator":
+                add_edge(dgid, _nid("evaluator", tid), "transient")         # EVAL rallumé (v2)
+                if len(run.passes) > 1:
+                    add_edge(dgid, _nid("dispatch", tid), "transient")      # ré-éval KO → retry
+        if run.divided is not None:
+            dvid = _nid("divider", tid)
+            nodes.append(GraphNode(id=dvid, layer="center", type="divider", label="DIVIDER", task_id=tid))
+            add_edge(_divider_anchor(run, tid) or entry_anchor, dvid, "ascent")
+            for st in run.divided.sub_tasks:
+                visit(st.id, dvid)
+            # deps inter-sœurs réussies : exit(dep) → dispatch(consommateur), transient
+            for st in run.divided.sub_tasks:
+                consumer = runs.get(st.id)
+                if consumer is None or not consumer.passes:
+                    continue
+                for dep in st.depends_on:
+                    if _has_result(dep, runs):
+                        add_edge(_exit_node(dep, runs), _nid("dispatch", st.id), "transient")
+            if run.aggregated is not None:
+                agid = _nid("aggregator", tid)
+                nodes.append(GraphNode(id=agid, layer="center", type="aggregator",
+                                       label="AGGREGATOR", task_id=tid))
+                for s in _sink_ids(run.divided, runs):
+                    add_edge(_exit_node(s, runs), agid, "descent")
+
+    visit(tree.root_id, trunk_anchor)
+    final_exit = _exit_node(tree.root_id, runs)
+    if final_exit:
+        add_edge(final_exit, "output", "descent")
+    return nodes, edges
 
 
 def _meta_record(session_meta: SessionMeta | None, task_id: str) -> SessionTaskRecord | None:
@@ -887,27 +985,10 @@ def _todo_divided(divided_ev, sub_runs, milestone, current_task_id, root_desc="(
 
 
 def build_graph(events: list[ClaimEvent], session_meta: SessionMeta | None = None) -> GraphModel:
-    nodes = _build_nodes(events)
-    edges = _build_edges(nodes, events)
-
-    # Task 4: build task tree for topology export; steps builder migrated in Task 6.
     tree = _build_tree(events, session_meta)
-    tasks = _task_branches(tree)
-
-    divided_ev = next((e for e in events if isinstance(e, TaskDividedEvent)), None)
-    aggregated_ev = next((e for e in events if isinstance(e, TaskAggregatedEvent)), None)
-    # Temporary shim: replace _split_sub_runs with _parse_runs-based equivalent.
-    # _Pass objects carry .task_id (backfilled by _TaskRun) so old milestones code stays intact.
-    sub_runs = [r.passes[0] for r in _parse_runs(events).values() if r.passes]
-
-    if divided_ev is not None:
-        parent_id = divided_ev.task_id
-        parent_record = _meta_record(session_meta, parent_id)
-        steps = _milestones_divided(divided_ev, aggregated_ev, sub_runs, parent_record, parent_id)
-    else:
-        run = sub_runs[0] if sub_runs else None
-        tid = run.task_id if run is not None else (session_meta.tasks[0].id if session_meta and session_meta.tasks else "task")
-        record = _meta_record(session_meta, tid)
-        steps = _milestones_simple(run, record, tid)
-
-    return GraphModel(nodes=nodes, edges=edges, steps=steps, tasks=tasks)
+    runs = _parse_runs(events)
+    root_record = _meta_record(session_meta, tree.root_id)
+    root_tags = dict(root_record.required_tags) if root_record is not None else {}
+    nodes, edges = _build_structure(tree, runs, root_tags)
+    steps = []   # Task 6+ : walk récursif
+    return GraphModel(nodes=nodes, edges=edges, steps=steps, tasks=_task_branches(tree))
