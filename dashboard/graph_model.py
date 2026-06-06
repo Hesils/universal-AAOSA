@@ -571,7 +571,7 @@ class _EdgeAccumulator:
         return list(self.backbone) + [GraphEdge(from_node=f, to=t) for f, t in fanout]
 
 
-def _evaluator_detail(run: "_SubTaskRun") -> EvaluatorDetail:
+def _evaluator_detail(run: "_Pass") -> EvaluatorDetail:
     if run is None or run.qa is None:
         return EvaluatorDetail(ran=False, success=None, score=None, reason=None)
     return EvaluatorDetail(
@@ -580,7 +580,7 @@ def _evaluator_detail(run: "_SubTaskRun") -> EvaluatorDetail:
     )
 
 
-def _dispatch_detail(run: "_SubTaskRun") -> DispatchDetail:
+def _dispatch_detail(run: "_Pass") -> DispatchDetail:
     return DispatchDetail(
         candidates=[CandidateInfo(agent_id=e.agent_id, passed=e.passed, fit_score=e.fit_score) for e in run.phase1],
         claims=[ClaimInfo(agent_id=e.agent_id, decision=e.decision, justification=e.justification) for e in run.phase2.values()],
@@ -590,7 +590,7 @@ def _dispatch_detail(run: "_SubTaskRun") -> DispatchDetail:
     )
 
 
-def _scope_detail(input_detail: InputDetail, run: "_SubTaskRun | None") -> StepDetail:
+def _scope_detail(input_detail: InputDetail, run: "_Pass | None") -> StepDetail:
     """StepDetail scopé sur une sous-tâche (réutilisé par chaque jalon de cette sous-tâche)."""
     detail = StepDetail(input=input_detail)
     if run is None:
@@ -612,7 +612,7 @@ def _scope_detail(input_detail: InputDetail, run: "_SubTaskRun | None") -> StepD
     return detail
 
 
-def _milestones_simple(run: "_SubTaskRun | None", record: SessionTaskRecord | None, tid: str) -> list[GraphStep]:
+def _milestones_simple(run: "_Pass | None", record: SessionTaskRecord | None, tid: str) -> list[GraphStep]:
     input_detail = _make_input_detail(record, tid)
     detail = _scope_detail(input_detail, run)
     acc = _EdgeAccumulator()
@@ -669,7 +669,7 @@ def _milestones_simple(run: "_SubTaskRun | None", record: SessionTaskRecord | No
     return steps
 
 
-def _tool_milestones(run: "_SubTaskRun", input_detail_owner: StepDetail, acc: _EdgeAccumulator, tid: str) -> list[GraphStep]:
+def _tool_milestones(run: "_Pass", input_detail_owner: StepDetail, acc: _EdgeAccumulator, tid: str) -> list[GraphStep]:
     winner = run.winner_id
     if winner is None:
         return []
