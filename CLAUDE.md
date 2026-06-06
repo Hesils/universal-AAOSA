@@ -38,6 +38,8 @@ Les skills `/prime` et `/save` viennent du master `.claude/` — disponibles san
 
 **V3 — démo phase 1 : observabilité série D — 883 tests total** (2026-06-06, worktree `feat+v3-demo-phase1-observabilite` mergé sur master, plan `docs/superpowers/plans/2026-06-06-v3-demo-phase1-observabilite-serie-d.md`, 17 tasks). Backend TDD subagent-driven (Tasks 1-11) : `DiagnosedEvent` (émis par `_route_diagnostic`, y compris unattributed) + 2e `QAEvaluatedEvent` à la ré-éval D3 ; `build_graph` réécrit en **arbre émergent namespacé** (partition `task_id` + passes retry, `_build_tree` récursif avec fallback racine, walk unique — run simple = arbre dégénéré, chaîne D3 par inférence, `roster_gap` nœud terminal, TAGGER inféré, TODO hiérarchique `parent_id`/`depth`/`first_step_index`). Frontend sous `/impeccable` (Tasks 12-17) : `graph.js` arbre bottom-up delta 45° (k-rows, **tronc centré** — silhouette arbre, pas de bloc), `camera.js` (zoom ancré curseur, pan, **follow par branche**), **révélation par sous-arbre** (un divider appelé révèle sa paire DIVIDER/AGGREGATOR + les arches enfants ; un enfant divisé ne montre que son dispatch jusqu'à SON divider ; DIAG/GAP événementiels, nés à leur jalon), colorway crest→fire, modals DIAG/GAP/TAGGER + origine divider, scrubber enrichi (uuid → nom d'agent). **Sign-off Quentin 2026-06-06** : réserve arbre pur (spec §8) tranchée en faveur de l'arbre pur, retrait du nœud `testset` confirmé, non-régression Health OK. Sessions de validation : synthétique D3+gap, synthétique profondeur 2 (récursion D1), divisé réel, simple réel. **Prochaine étape démo : phases 2-5** (tools YAML → monde simulé + roster → CLI `run`/`campaign` → campagne + curation), puis live mode (ex-B7) et nature C.
 
+**V3 — démo phase 2 : tools YAML — 880 tests** (2026-06-06, branche `feat/v3-demo-phase2-tools-yaml`). `load_agents(path, tool_registry=...)` résout le champ YAML `tools: [list[str]]` en `ToolDef` (erreur au chargement : nom inconnu, registry absent, doublon, non-liste ; `tools` absent → `[]` rétrocompat). `demo/agents.yaml` déclare les tools, `DEMO_AGENTS` arrive outillé, `attach_tools`/`_ASSIGNMENT` supprimés. Nettoyage pré-V3 : `run_demo.py` + `run_health_check.py` + leurs tests supprimés (tests `DEMO_TASKS` migrés vers `test_tasks.py`) ; `tasks.py` conservé (consommé par `run_health_check_v3` + fixtures dashboard). Spec : `docs/superpowers/specs/2026-06-06-v3-demo-phase2-tools-yaml-design.md`. Prochaine étape : phase 3 (monde simulé + roster `demo/incident/`).
+
 V2 découpée en 3 sous-parties :
 - **V2a** (complète) : ELO mechanics + dual QA protocol
 - **V2b** (complète) : QA complet (evaluator composable + boucle auto-amélioration)
@@ -71,7 +73,7 @@ src/aaosa/
 ├── config/         loader.py  # V3-A1 (load_agents YAML)
 ├── runtime/        llm_client.py · runner.py (+run_chain V3-A3, +run_divided_task V3-A4, containment vague1) · divider.py (hérite tags parent vague1) · aggregator.py  # divider/aggregator = V3-A4
 ├── tracing/        events.py (+ToolCalled/TaskDivided/TaskAggregated V3, +DividedSubTask & QAEvaluatedEvent.spec vague1) · tracer.py · analysis.py · formatter.py · store.py  # store.py = V2c
-├── demo/           agents.py (loader A1) · agents.yaml · tasks.py · run_demo.py (+run divisé A4) · run_health_check.py · tools.py (toolbox stubbée vague1) · run_demo_v3.py · run_health_check_v3.py  # *_v3 = vague1
+├── demo/           agents.py (loader A1) · agents.yaml (+tools déclarés P2) · tasks.py · tools.py (toolbox = tool_registry) · run_demo_v3.py · run_health_check_v3.py  # démos pré-V3 supprimées P2
 ├── elo/            formula.py · updater.py · persistence.py          # V2a (implémenté)
 └── qa/             protocol.py (+QAResult.spec_used vague1) · rule_based.py · health_check.py     # V2a (implémenté)
                     criteria.py (+llm_check V3-B1) · spec.py · judge.py · spec_evaluator.py (+AdaptiveSpecEvaluator & inject client vague1) · test_set.py · lifecycle.py · adaptive.py (+build_llm_spec V3-B1)  # V2b
@@ -108,7 +110,7 @@ docs/superpowers/specs/  design specs · plans/  plans d'implémentation · epic
 
 - Python 3.14, uv, Pydantic 2.13, OpenAI SDK 2.38.0, pytest 9.0.3, pytest-asyncio 1.3.0, python-dotenv 1.2.2
 - Lancer les tests : `.venv\Scripts\python -m pytest <fichier> -v`
-- Lancer la démo : `.venv\Scripts\python src\aaosa\demo\run_demo.py` (requiert `.env` avec `OPENAI_API_KEY`)
+- Lancer la démo : `.venv\Scripts\python src\aaosa\demo\run_demo_v3.py` (requiert `.env` avec `OPENAI_API_KEY`)
 - Toujours utiliser le venv, jamais Python système
 - Toujours utiliser la derniere version stable possible d'un package
 
