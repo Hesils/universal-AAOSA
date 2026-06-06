@@ -7,13 +7,14 @@ from aaosa.qa.spec import EvaluatorSpec
 from aaosa.schemas.output import LLMMetadata
 from aaosa.tracing.events import (
     ClaimEvent,
-    DiagnosedEvent,  # noqa: F401 — utilisé dès Task 4
+    DiagnosedEvent,
     DispatchedEvent,
     EloUpdatedEvent,
     ExecutedEvent,
     Phase1FilteredEvent,
     Phase2ClaimedEvent,
     QAEvaluatedEvent,
+    RosterGapEvent,
     TagAcquiredEvent,
     TaskAggregatedEvent,
     TaskDividedEvent,
@@ -394,10 +395,9 @@ def _tool_groups(tool_evs: list[ToolCalledEvent]) -> list[list[ToolCalledEvent]]
     return groups
 
 
-class _SubTaskRun:
-    """Events d'une sous-tâche (ou de l'unique tâche d'un run simple), dans l'ordre."""
-    def __init__(self, task_id: str, events: list[ClaimEvent]):
-        self.task_id = task_id
+class _Pass:
+    """Une tentative complète (Phase1 → … → QA) d'une tâche. Corps = ex-_SubTaskRun."""
+    def __init__(self, events: list[ClaimEvent]):
         self.phase1 = [e for e in events if isinstance(e, Phase1FilteredEvent)]
         self.phase2 = {e.agent_id: e for e in events if isinstance(e, Phase2ClaimedEvent)}
         self.phase1_by_agent = {e.agent_id: e for e in self.phase1}
@@ -408,6 +408,8 @@ class _SubTaskRun:
         self.elo = next((e for e in events if isinstance(e, EloUpdatedEvent)), None)
         self.tags = [e for e in events if isinstance(e, TagAcquiredEvent)]
         self.tools = [e for e in events if isinstance(e, ToolCalledEvent)]
+        # task_id backfilled by _TaskRun after construction (bridges to old milestones code)
+        self.task_id: str = ""
 
     @property
     def winner_id(self) -> str | None:
@@ -422,24 +424,137 @@ class _SubTaskRun:
         return "qa_pass" if self.qa.success else "qa_fail"
 
 
-def _split_sub_runs(events: list[ClaimEvent]) -> list[_SubTaskRun]:
-    """Découpe les events (hors task_divided/task_aggregated) en runs de sous-tâche.
+class _TaskRun:
+    """Toutes les traces d'une tâche : passes (retry D3 inclus), diagnostic, ré-éval,
+    division, agrégation, roster gap."""
+    def __init__(self, task_id: str, events: list[ClaimEvent]):
+        self.task_id = task_id
+        self.divided = next((e for e in events if isinstance(e, TaskDividedEvent)), None)
+        self.aggregated = next((e for e in events if isinstance(e, TaskAggregatedEvent)), None)
+        self.roster_gap = next((e for e in events if isinstance(e, RosterGapEvent)), None)
+        self.diagnosed: DiagnosedEvent | None = None
+        self.reeval: QAEvaluatedEvent | None = None
+        self.passes: list[_Pass] = []
+        self._split_passes(events)
 
-    Un nouveau run démarre à un Phase1FilteredEvent qui suit un event non-Phase1.
-    Gère le run simple (1 run) et le run divisé (N sous-tâches contiguës).
-    """
-    runs: list[list[ClaimEvent]] = []
-    current: list[ClaimEvent] = []
+    def _split_passes(self, events: list[ClaimEvent]) -> None:
+        current: list[ClaimEvent] = []
+        retry_started = False
+        for e in events:
+            if isinstance(e, (TaskDividedEvent, TaskAggregatedEvent, RosterGapEvent)):
+                continue
+            if isinstance(e, DiagnosedEvent):
+                self.diagnosed = e
+                continue
+            if self.diagnosed is not None and not retry_started:
+                if isinstance(e, Phase1FilteredEvent):
+                    retry_started = True
+                    if current:
+                        p = _Pass(current)
+                        p.task_id = self.task_id
+                        self.passes.append(p)
+                    current = [e]
+                    continue
+                if isinstance(e, QAEvaluatedEvent):
+                    self.reeval = e   # ré-éval v2 (route evaluator) : QA post-diag sans nouveau Phase1
+                    continue
+            current.append(e)
+        if current:
+            p = _Pass(current)
+            p.task_id = self.task_id
+            self.passes.append(p)
+
+    @property
+    def succeeded(self) -> bool:
+        """La tâche a produit un résultat exploitable À PLAT (hors division)."""
+        if self.reeval is not None and self.reeval.success:
+            return True
+        if not self.passes:
+            return False
+        last = self.passes[-1]
+        if last.executed is None:
+            return False
+        return last.outcome in ("qa_pass", "no_qa")
+
+
+def _parse_runs(events: list[ClaimEvent]) -> dict[str, _TaskRun]:
+    """Partition par task_id (ordre de première apparition), un _TaskRun par tâche."""
+    by_task: dict[str, list[ClaimEvent]] = {}
     for e in events:
-        if isinstance(e, (TaskDividedEvent, TaskAggregatedEvent)):
-            continue
-        if isinstance(e, Phase1FilteredEvent) and current and not isinstance(current[-1], Phase1FilteredEvent):
-            runs.append(current)
-            current = []
-        current.append(e)
-    if current:
-        runs.append(current)
-    return [_SubTaskRun(r[0].task_id, r) for r in runs if r]
+        by_task.setdefault(e.task_id, []).append(e)
+    return {tid: _TaskRun(tid, evs) for tid, evs in by_task.items()}
+
+
+class _Tree:
+    """Arbre de tâches reconstruit depuis TOUS les TaskDividedEvent."""
+    def __init__(self, root_id: str, children: dict[str, list[str]],
+                 parents: dict[str, str], descriptions: dict[str, str],
+                 first_idx: dict[str, int]):
+        self.root_id = root_id
+        self._children = children
+        self._parents = parents
+        self._descriptions = descriptions
+        self._first_idx = first_idx
+
+    def children(self, tid: str) -> list[str]:
+        # ordre d'exécution réel (premier event), fallback ordre du divider
+        kids = self._children.get(tid, [])
+        return sorted(kids, key=lambda c: self._first_idx.get(c, 10**9))
+
+    def parent(self, tid: str) -> str | None:
+        return self._parents.get(tid)
+
+    def depth(self, tid: str) -> int:
+        d, cur = 0, tid
+        while (p := self._parents.get(cur)) is not None:
+            d, cur = d + 1, p
+        return d
+
+    def description(self, tid: str) -> str:
+        return self._descriptions.get(tid, tid)
+
+    def walk_ids(self) -> list[str]:
+        """DFS préordre depuis la racine (ordre d'exécution)."""
+        out: list[str] = []
+        def rec(tid: str) -> None:
+            out.append(tid)
+            for c in self.children(tid):
+                rec(c)
+        rec(self.root_id)
+        return out
+
+
+def _build_tree(events: list[ClaimEvent], session_meta: SessionMeta | None) -> _Tree:
+    children: dict[str, list[str]] = {}
+    parents: dict[str, str] = {}
+    descriptions: dict[str, str] = {}
+    first_idx: dict[str, int] = {}
+    for i, e in enumerate(events):
+        first_idx.setdefault(e.task_id, i)
+        if isinstance(e, TaskDividedEvent):
+            children[e.task_id] = [st.id for st in e.sub_tasks]
+            for st in e.sub_tasks:
+                parents[st.id] = e.task_id
+                descriptions[st.id] = st.description
+
+    if session_meta is not None and session_meta.tasks:
+        root_id = session_meta.tasks[0].id
+        descriptions[root_id] = session_meta.tasks[0].description
+    else:
+        root_id = next((tid for tid in first_idx if tid not in parents), "task")
+    return _Tree(root_id, children, parents, descriptions, first_idx)
+
+
+def _task_branches(tree: _Tree) -> list[TaskBranch]:
+    out: list[TaskBranch] = []
+    for tid in tree.walk_ids():
+        siblings = tree.children(tree.parent(tid)) if tree.parent(tid) else [tid]
+        out.append(TaskBranch(
+            id=tid, parent_id=tree.parent(tid), depth=tree.depth(tid),
+            order_index=siblings.index(tid) if tid in siblings else 0,
+            description=tree.description(tid),
+        ))
+    return out
 
 
 class _EdgeAccumulator:
@@ -775,9 +890,15 @@ def build_graph(events: list[ClaimEvent], session_meta: SessionMeta | None = Non
     nodes = _build_nodes(events)
     edges = _build_edges(nodes, events)
 
+    # Task 4: build task tree for topology export; steps builder migrated in Task 6.
+    tree = _build_tree(events, session_meta)
+    tasks = _task_branches(tree)
+
     divided_ev = next((e for e in events if isinstance(e, TaskDividedEvent)), None)
     aggregated_ev = next((e for e in events if isinstance(e, TaskAggregatedEvent)), None)
-    sub_runs = _split_sub_runs(events)
+    # Temporary shim: replace _split_sub_runs with _parse_runs-based equivalent.
+    # _Pass objects carry .task_id (backfilled by _TaskRun) so old milestones code stays intact.
+    sub_runs = [r.passes[0] for r in _parse_runs(events).values() if r.passes]
 
     if divided_ev is not None:
         parent_id = divided_ev.task_id
@@ -789,4 +910,4 @@ def build_graph(events: list[ClaimEvent], session_meta: SessionMeta | None = Non
         record = _meta_record(session_meta, tid)
         steps = _milestones_simple(run, record, tid)
 
-    return GraphModel(nodes=nodes, edges=edges, steps=steps)
+    return GraphModel(nodes=nodes, edges=edges, steps=steps, tasks=tasks)
