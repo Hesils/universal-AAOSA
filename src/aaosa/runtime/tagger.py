@@ -32,13 +32,22 @@ class Tagger:
         self.system_prompt = system_prompt
 
     def _build_prompt(self, description: str, agents: list[Agent]) -> str:
-        vocab = sorted({t for a in agents for t in a.tags_with_elo})
+        # Bundles par rôle (anonymes) plutôt que vocabulaire à plat : le filtre aval
+        # est un AND strict, le LLM doit voir quelles co-occurrences existent pour
+        # émettre un ensemble qu'un seul agent peut détenir.
+        bundles = sorted({tuple(sorted(a.tags_with_elo)) for a in agents})
+        bundle_lines = "\n".join(f"  - {', '.join(b)}" for b in bundles)
         return (
-            "Available agent tags (reference vocabulary — not exhaustive):\n"
-            f"  {', '.join(vocab)}\n\n"
+            "Available agent tags (reference vocabulary — not exhaustive), grouped\n"
+            "by role — each line is the tag set of one existing role:\n"
+            f"{bundle_lines}\n\n"
             "Name the capabilities (tags) this task requires to be done well.\n"
-            "Prefer the vocabulary above when it fits, but name a real capability even\n"
-            "if it is absent from the roster — do not force-fit. Return at least one tag.\n\n"
+            "The tags are an AND-filter: a single agent must hold ALL of them to take\n"
+            "the task. Pick the line above whose role is best suited to do the work and\n"
+            "return its 1-2 most relevant tags. Never mix tags from different lines —\n"
+            "not every capability the task touches, only what the doer must hold.\n"
+            "If the truly required capability appears on no line, name it even though it\n"
+            "is absent from the roster — do not force-fit. Return at least one tag.\n\n"
             f"Task: {description}"
         )
 

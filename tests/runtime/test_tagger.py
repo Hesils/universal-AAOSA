@@ -48,3 +48,31 @@ def test_tagset_requires_at_least_one_tag():
     import pytest
     with pytest.raises(Exception):
         TagSet(tags=[])
+
+
+def test_build_prompt_states_and_filter_contract():
+    """Les tags émis deviennent les required_tags d'un filtre AND (passes_filter) :
+    le prompt doit communiquer ce contrat au LLM, sinon il émet l'union des
+    capacités que la tâche touche → sous-tâches infaisables sur un roster de
+    spécialistes étroits (bug découvert au DoD réel démo phase 3, 2026-06-07)."""
+    tagger = Tagger(system_prompt="tag it")
+    prompt = tagger._build_prompt("investigate the breach", [make_agent()])
+    lower = prompt.lower()
+    assert "single agent must hold all" in lower
+    assert "not every capability the task touches" in lower
+    assert "never mix tags from different lines" in lower
+
+
+def test_build_prompt_groups_vocabulary_by_role_bundles():
+    """Le vocabulaire est présenté par bundles de rôle (une ligne = les tags d'un
+    rôle existant), pas à plat : sans les co-occurrences réelles, le LLM ne peut
+    pas émettre un ensemble détenu par un seul agent (itération 2 du fix AND)."""
+    agents = [
+        make_agent("Sec", security=90, logs=72, investigation=75),
+        make_agent("Data", data_analysis=88, database=70, reporting=75),
+    ]
+    prompt = Tagger(system_prompt="tag it")._build_prompt("x", agents)
+    assert "- investigation, logs, security" in prompt
+    assert "- data_analysis, database, reporting" in prompt
+    # pas de ligne fusionnant les deux bundles
+    assert "investigation, logs, reporting" not in prompt
