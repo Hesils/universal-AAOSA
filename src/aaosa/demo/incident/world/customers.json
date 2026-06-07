@@ -1,0 +1,15 @@
+{
+  "table": "customers",
+  "total": 4217,
+  "pii_fields": ["email", "full_name", "phone", "address"],
+  "non_pii_fields": ["id", "created_at"],
+  "note": "Sample of fictitious rows; the table holds 4217 records in total.",
+  "sample": [
+    {"id": 1, "email": "a.martin@example.com", "full_name": "Alice Martin", "phone": "+33 6 12 34 56 01", "address": "12 rue des Lilas, 69003 Lyon", "created_at": "2024-03-11T09:14:00Z"},
+    {"id": 2, "email": "b.nguyen@example.com", "full_name": "Binh Nguyen", "phone": "+33 6 12 34 56 02", "address": "8 avenue Foch, 75116 Paris", "created_at": "2024-05-02T16:40:00Z"},
+    {"id": 3, "email": "c.dubois@example.com", "full_name": "Camille Dubois", "phone": "+33 6 12 34 56 03", "address": "3 place Bellecour, 69002 Lyon", "created_at": "2024-07-19T11:05:00Z"},
+    {"id": 4, "email": "d.silva@example.com", "full_name": "Diego Silva", "phone": "+33 6 12 34 56 04", "address": "27 quai de la Fosse, 44000 Nantes", "created_at": "2024-09-30T08:22:00Z"},
+    {"id": 5, "email": "e.kaya@example.com", "full_name": "Elif Kaya", "phone": "+33 6 12 34 56 05", "address": "5 rue Nationale, 59000 Lille", "created_at": "2025-01-12T14:55:00Z"},
+    {"id": 6, "email": "f.bernard@example.com", "full_name": "Fanny Bernard", "phone": "+33 6 12 34 56 06", "address": "41 cours Mirabeau, 13100 Aix-en-Provence", "created_at": "2025-04-26T10:31:00Z"}
+  ]
+}

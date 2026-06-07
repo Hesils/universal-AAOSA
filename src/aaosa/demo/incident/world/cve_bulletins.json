@@ -1,0 +1,32 @@
+[
+  {
+    "id": "CVE-2026-21804",
+    "package": "fastjwt",
+    "affected_versions": ">=2.0.0, <2.4.0",
+    "severity": "critical",
+    "cvss": 9.1,
+    "title": "fastjwt: authentication bypass via unverified service-token claims",
+    "description": "fastjwt versions 2.0.0 through 2.3.x fail to re-verify the signature of service-account tokens when the 'svc' claim is present, allowing an attacker who obtains an expired or leaked service token to forge valid credentials and call any endpoint the service account is scoped for. Exploited in the wild since 2026-05-28. Fixed in 2.4.0.",
+    "published": "2026-05-30"
+  },
+  {
+    "id": "CVE-2026-11532",
+    "package": "django-storages",
+    "affected_versions": "<1.14.6",
+    "severity": "high",
+    "cvss": 7.5,
+    "title": "django-storages: path traversal in S3 key normalization",
+    "description": "Improper normalization of object keys allows reading files outside the configured bucket prefix when user-controlled filenames are used.",
+    "published": "2026-04-17"
+  },
+  {
+    "id": "CVE-2025-48891",
+    "package": "redis-py",
+    "affected_versions": "<5.2.2",
+    "severity": "medium",
+    "cvss": 5.3,
+    "title": "redis-py: denial of service via unbounded RESP3 push buffer",
+    "description": "A malicious Redis server can exhaust client memory through unbounded push message buffering.",
+    "published": "2025-12-02"
+  }
+]
