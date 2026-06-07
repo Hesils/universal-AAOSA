@@ -1,0 +1,28 @@
+{
+  "session_id": "2026-06-07T20-40-15-0e5cf438",
+  "started_at": "2026-06-07T20:40:15.181662Z",
+  "ended_at": "2026-06-07T20:42:27.713053Z",
+  "tasks": [
+    {
+      "id": "184dffbb-4179-44ac-ab36-3e53c682ae84",
+      "description": "Anomalous traffic was detected on the customers API last night. Determine whether customer data was leaked, assess the scope of the breach, qualify our regulatory obligations, and prepare the customer communication.",
+      "winner_agent_id": null,
+      "outcome": "divided",
+      "required_tags": {
+        "security": 70,
+        "gdpr": 70,
+        "communication": 65
+      },
+      "context": "Monitoring alert 2026-06-06 06:30 UTC: anomalous nighttime traffic on /api/v2/customers/export. Full ticket available via the get_incident_report tool."
+    }
+  ],
+  "agent_ids": [
+    "c6dcba47-afda-408b-9b0e-0017109b3114",
+    "b46312e0-d6a3-47d3-b589-6e5aa07d840b",
+    "d2b974cf-4fec-4dc1-beed-c76ab670d5c7",
+    "79d0e4cd-80cb-4bbb-a5cf-1a00c95b2dd9",
+    "86579866-b2f8-4c6c-bb45-1c0df808fbef",
+    "987f31d2-fc3c-4efd-863f-3c051bd04eff",
+    "54e69b84-2bb0-4694-b143-6e82e926bd79"
+  ]
+}

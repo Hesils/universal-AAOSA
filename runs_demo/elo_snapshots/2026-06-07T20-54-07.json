@@ -1,0 +1,71 @@
+{
+  "timestamp": "2026-06-07T20:54:07.019621Z",
+  "agents": [
+    {
+      "agent_name": "backend-dev",
+      "agent_id": "c6dcba47-afda-408b-9b0e-0017109b3114",
+      "tags_with_elo": {
+        "backend": 85,
+        "logs": 70,
+        "database": 80,
+        "investigation": 65
+      }
+    },
+    {
+      "agent_name": "sre",
+      "agent_id": "b46312e0-d6a3-47d3-b589-6e5aa07d840b",
+      "tags_with_elo": {
+        "infrastructure": 85,
+        "logs": 75,
+        "access_control": 70,
+        "investigation": 60
+      }
+    },
+    {
+      "agent_name": "security-analyst",
+      "agent_id": "d2b974cf-4fec-4dc1-beed-c76ab670d5c7",
+      "tags_with_elo": {
+        "security": 95,
+        "vulnerability": 85,
+        "logs": 86,
+        "investigation": 91
+      }
+    },
+    {
+      "agent_name": "dpo-jurist",
+      "agent_id": "79d0e4cd-80cb-4bbb-a5cf-1a00c95b2dd9",
+      "tags_with_elo": {
+        "gdpr": 90,
+        "legal": 87,
+        "compliance": 90
+      }
+    },
+    {
+      "agent_name": "client-comm",
+      "agent_id": "86579866-b2f8-4c6c-bb45-1c0df808fbef",
+      "tags_with_elo": {
+        "communication": 95,
+        "writing": 89,
+        "customer_relations": 92
+      }
+    },
+    {
+      "agent_name": "support-lead",
+      "agent_id": "987f31d2-fc3c-4efd-863f-3c051bd04eff",
+      "tags_with_elo": {
+        "customer_relations": 85,
+        "communication": 70,
+        "support": 90
+      }
+    },
+    {
+      "agent_name": "data-analyst",
+      "agent_id": "54e69b84-2bb0-4694-b143-6e82e926bd79",
+      "tags_with_elo": {
+        "data_analysis": 88,
+        "database": 70,
+        "reporting": 75
+      }
+    }
+  ]
+}

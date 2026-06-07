@@ -1,0 +1,226 @@
+{
+  "scenario": "main",
+  "n_requested": 20,
+  "runs": [
+    {
+      "i": 1,
+      "session_id": "2026-06-07T20-40-15-0e5cf438",
+      "outcome": "success",
+      "typologies": [
+        "divided"
+      ],
+      "started_at": "2026-06-07T20:40:15.181462Z",
+      "ended_at": "2026-06-07T20:42:27.748187Z",
+      "error": null
+    },
+    {
+      "i": 2,
+      "session_id": "2026-06-07T20-42-27-d4e1c26a",
+      "outcome": "success",
+      "typologies": [
+        "divided",
+        "diagnosed:agent"
+      ],
+      "started_at": "2026-06-07T20:42:27.749952Z",
+      "ended_at": "2026-06-07T20:45:08.804112Z",
+      "error": null
+    },
+    {
+      "i": 3,
+      "session_id": "2026-06-07T20-45-08-ce926a54",
+      "outcome": "success",
+      "typologies": [
+        "divided",
+        "recursion"
+      ],
+      "started_at": "2026-06-07T20:45:08.805472Z",
+      "ended_at": "2026-06-07T20:49:06.821380Z",
+      "error": null
+    },
+    {
+      "i": 4,
+      "session_id": "2026-06-07T20-49-06-4c67f2a9",
+      "outcome": "success",
+      "typologies": [
+        "divided"
+      ],
+      "started_at": "2026-06-07T20:49:06.822757Z",
+      "ended_at": "2026-06-07T20:51:22.141219Z",
+      "error": null
+    },
+    {
+      "i": 5,
+      "session_id": "2026-06-07T20-51-22-8d1eaafd",
+      "outcome": "success",
+      "typologies": [
+        "divided",
+        "diagnosed:agent"
+      ],
+      "started_at": "2026-06-07T20:51:22.142527Z",
+      "ended_at": "2026-06-07T20:54:07.022861Z",
+      "error": null
+    },
+    {
+      "i": 6,
+      "session_id": "2026-06-07T20-54-07-6cf53b78",
+      "outcome": "success",
+      "typologies": [
+        "divided"
+      ],
+      "started_at": "2026-06-07T20:54:07.024482Z",
+      "ended_at": "2026-06-07T20:56:25.285520Z",
+      "error": null
+    },
+    {
+      "i": 7,
+      "session_id": "2026-06-07T20-56-25-e4786791",
+      "outcome": "success",
+      "typologies": [
+        "divided",
+        "diagnosed:agent"
+      ],
+      "started_at": "2026-06-07T20:56:25.286766Z",
+      "ended_at": "2026-06-07T20:58:10.351878Z",
+      "error": null
+    },
+    {
+      "i": 8,
+      "session_id": "2026-06-07T20-58-10-a7318a88",
+      "outcome": "success",
+      "typologies": [
+        "divided"
+      ],
+      "started_at": "2026-06-07T20:58:10.353098Z",
+      "ended_at": "2026-06-07T21:00:06.849751Z",
+      "error": null
+    },
+    {
+      "i": 9,
+      "session_id": null,
+      "outcome": "error",
+      "typologies": [],
+      "started_at": "2026-06-07T21:00:06.851480Z",
+      "ended_at": "2026-06-07T21:00:14.551296Z",
+      "error": "cycle detected in task dependencies"
+    },
+    {
+      "i": 10,
+      "session_id": "2026-06-07T21-00-14-81e79003",
+      "outcome": "success",
+      "typologies": [
+        "divided",
+        "diagnosed:agent"
+      ],
+      "started_at": "2026-06-07T21:00:14.553033Z",
+      "ended_at": "2026-06-07T21:03:11.264436Z",
+      "error": null
+    },
+    {
+      "i": 11,
+      "session_id": "2026-06-07T21-03-11-0e5ceae1",
+      "outcome": "success",
+      "typologies": [
+        "divided"
+      ],
+      "started_at": "2026-06-07T21:03:11.265977Z",
+      "ended_at": "2026-06-07T21:05:24.311655Z",
+      "error": null
+    },
+    {
+      "i": 12,
+      "session_id": null,
+      "outcome": "error",
+      "typologies": [],
+      "started_at": "2026-06-07T21:05:24.313240Z",
+      "ended_at": "2026-06-07T21:05:31.044708Z",
+      "error": "cycle detected in task dependencies"
+    },
+    {
+      "i": 13,
+      "session_id": "2026-06-07T21-05-31-496e0d00",
+      "outcome": "success",
+      "typologies": [
+        "divided"
+      ],
+      "started_at": "2026-06-07T21:05:31.046929Z",
+      "ended_at": "2026-06-07T21:07:51.766547Z",
+      "error": null
+    },
+    {
+      "i": 14,
+      "session_id": "2026-06-07T21-07-51-92b82f5f",
+      "outcome": "success",
+      "typologies": [
+        "divided",
+        "recursion",
+        "diagnosed:agent"
+      ],
+      "started_at": "2026-06-07T21:07:51.768639Z",
+      "ended_at": "2026-06-07T21:18:16.046211Z",
+      "error": null
+    },
+    {
+      "i": 15,
+      "session_id": "2026-06-07T21-18-16-bd808936",
+      "outcome": "success",
+      "typologies": [
+        "divided",
+        "recursion"
+      ],
+      "started_at": "2026-06-07T21:18:16.048502Z",
+      "ended_at": "2026-06-07T21:22:35.251657Z",
+      "error": null
+    },
+    {
+      "i": 16,
+      "session_id": null,
+      "outcome": "error",
+      "typologies": [],
+      "started_at": "2026-06-07T21:22:35.253574Z",
+      "ended_at": "2026-06-07T21:22:42.381787Z",
+      "error": "cycle detected in task dependencies"
+    },
+    {
+      "i": 17,
+      "session_id": "2026-06-07T21-22-42-cd091028",
+      "outcome": "success",
+      "typologies": [
+        "divided"
+      ],
+      "started_at": "2026-06-07T21:22:42.385117Z",
+      "ended_at": "2026-06-07T21:24:42.490333Z",
+      "error": null
+    },
+    {
+      "i": 18,
+      "session_id": "2026-06-07T21-24-42-8b1aaa9b",
+      "outcome": "success",
+      "typologies": [
+        "divided"
+      ],
+      "started_at": "2026-06-07T21:24:42.492568Z",
+      "ended_at": "2026-06-07T21:26:52.596854Z",
+      "error": null
+    },
+    {
+      "i": 19,
+      "session_id": "2026-06-07T21-26-52-f49d22f8",
+      "outcome": "success",
+      "typologies": [
+        "divided"
+      ],
+      "started_at": "2026-06-07T21:26:52.598609Z",
+      "ended_at": "2026-06-07T21:28:56.170389Z",
+      "error": null
+    },
+    {
+      "i": 20,
+      "session_id": null,
+      "outcome": "error",
+      "typologies": [],
+      "started_at": "2026-06-07T21:28:56.172303Z",
+      "ended_at": "2026-06-07T21:29:02.616802Z",
+      "error": "cycle detected in task dependencies"
+    }
+  ]
+}
