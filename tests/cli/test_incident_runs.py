@@ -1,12 +1,16 @@
 import pytest
 
+from aaosa.claiming.dispatch import DispatchResult
 from aaosa.cli.incident_runs import (
     StoreNotEmptyError,
+    _result_kind,
     ensure_empty_store,
     load_elo_into,
 )
 from aaosa.core.agent import Agent
 from aaosa.elo.persistence import save_snapshot
+from aaosa.qa.protocol import QAFailure, QAResult
+from aaosa.schemas.output import LLMMetadata, Output
 
 
 def _agent(name: str, tags: dict[str, int] | None = None) -> Agent:
@@ -66,3 +70,42 @@ class TestLoadEloInto:
         fresh = _agent("log-analyst", {"security": 50})
         assert load_elo_into([fresh], tmp_path) is True
         assert fresh.tags_with_elo == {"security": 50}
+
+
+class TestResultKind:
+    """Mapping retour run_with_recovery -> vocabulaire d'index (review T4) :
+    un échec QA non récupéré arrive en DispatchResult(status="qa_failed")."""
+
+    def _output(self) -> Output:
+        return Output(
+            task_id="t1", agent_id="a1", content="done",
+            llm_metadata=LLMMetadata(
+                model_name="m", tokens_in=1, tokens_out=1, latency_ms=1.0
+            ),
+        )
+
+    def test_output_is_success(self):
+        assert _result_kind(self._output()) == "success"
+
+    def test_dispatch_qa_failed_is_qa_fail(self):
+        result = DispatchResult(status="qa_failed", agent_id=None, reason="qa")
+        assert _result_kind(result) == "qa_fail"
+
+    def test_qa_failure_is_qa_fail(self):
+        output = self._output()
+        failure = QAFailure(
+            task_id="t1", agent_id="a1", output=output,
+            qa_result=QAResult(
+                task_id="t1", agent_id="a1", success=False, score=0.2,
+                reason="too short", criteria_results={"non_empty": True},
+            ),
+        )
+        assert _result_kind(failure) == "qa_fail"
+
+    def test_dispatch_unassigned_is_unassigned(self):
+        result = DispatchResult(status="unassigned", agent_id=None, reason="no claim")
+        assert _result_kind(result) == "unassigned"
+
+    def test_dispatch_roster_gap_is_unassigned(self):
+        result = DispatchResult(status="roster_gap", agent_id=None, reason="gap")
+        assert _result_kind(result) == "unassigned"

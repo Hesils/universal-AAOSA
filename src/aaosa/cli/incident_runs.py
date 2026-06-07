@@ -11,6 +11,7 @@ from typing import Literal
 
 from openai import OpenAI
 
+from aaosa.claiming.dispatch import DispatchResult
 from aaosa.core.agent import Agent
 from aaosa.demo.incident.prompts import AGGREGATOR_PROMPT, DIVIDER_PROMPT, TAGGER_PROMPT
 from aaosa.demo.incident.scenarios import (
@@ -93,6 +94,22 @@ class RunOutcome:
     n_agents: int
 
 
+def _result_kind(result: Output | DispatchResult | QAFailure) -> RunKind:
+    """Mappe le retour de run_with_recovery sur le vocabulaire d'index.
+
+    Un échec QA non récupéré remonte en DispatchResult(status="qa_failed")
+    (_route_diagnostic ne laisse jamais échapper un QAFailure) ; l'arm QAFailure
+    reste en défense de l'annotation de run_with_recovery.
+    """
+    if isinstance(result, Output):
+        return "success"
+    if isinstance(result, QAFailure):
+        return "qa_fail"
+    if result.status == "qa_failed":
+        return "qa_fail"
+    return "unassigned"
+
+
 def run_once(scenario: str, runs_root: Path, client: OpenAI) -> RunOutcome:
     """Un run incident complet : roster frais + ELO appliqué -> run_with_recovery
     (jamais de division forcée, thèse D1) -> persistance (registry, session,
@@ -116,12 +133,7 @@ def run_once(scenario: str, runs_root: Path, client: OpenAI) -> RunOutcome:
 
     task = build_data_leak_task()
     result = run_with_recovery(task, ctx)
-    if isinstance(result, Output):
-        kind: RunKind = "success"
-    elif isinstance(result, QAFailure):
-        kind = "qa_fail"
-    else:
-        kind = "unassigned"
+    kind = _result_kind(result)
 
     save_agent_registry(agents, runs_root / "agents" / "registry.json")
     meta = SessionMeta(
