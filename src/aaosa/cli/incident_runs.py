@@ -4,12 +4,14 @@ Zéro print, zéro dépendance Typer : le wiring console vit dans app.py
 (les helpers restent testables sans capture de sortie).
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 from openai import OpenAI
+from pydantic import BaseModel, ConfigDict, Field
 
 from aaosa.claiming.dispatch import DispatchResult
 from aaosa.core.agent import Agent
@@ -28,6 +30,7 @@ from aaosa.runtime.divider import TaskDivider
 from aaosa.runtime.runner import run_with_recovery
 from aaosa.runtime.tagger import Tagger
 from aaosa.schemas.output import Output
+from aaosa.tracing.analysis import classify_run
 from aaosa.tracing.events import ClaimEvent
 from aaosa.tracing.store import (
     SessionMeta,
@@ -167,3 +170,66 @@ def run_once(scenario: str, runs_root: Path, client: OpenAI) -> RunOutcome:
         task_description=task.description,
         n_agents=len(agents),
     )
+
+
+class CampaignRunRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    i: int
+    session_id: str | None
+    outcome: Literal["success", "qa_fail", "unassigned", "error"]
+    typologies: list[str]
+    started_at: datetime
+    ended_at: datetime
+    error: str | None = None
+
+
+class CampaignIndex(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scenario: str
+    n_requested: int
+    runs: list[CampaignRunRecord] = Field(default_factory=list)
+
+
+def run_campaign(
+    n: int,
+    scenario: str,
+    runs_root: Path,
+    client: OpenAI | None,
+    on_run: Callable[[CampaignRunRecord], None] | None = None,
+) -> CampaignIndex:
+    """N runs séquentiels, ELO chaîné par les snapshots (run_once recharge
+    latest.json à chaque itération). Index réécrit après CHAQUE run (crash-safe :
+    un Ctrl-C ne perd que le run en cours). Une exception d'un run n'avorte pas
+    la campagne (entrée error, la boucle continue) ; KeyboardInterrupt passe."""
+    index = CampaignIndex(scenario=scenario, n_requested=n)
+    runs_root.mkdir(parents=True, exist_ok=True)
+    index_path = runs_root / "campaign_index.json"
+
+    for i in range(1, n + 1):
+        started_at = datetime.now(timezone.utc)
+        try:
+            outcome = run_once(scenario, runs_root, client)
+            record = CampaignRunRecord(
+                i=i,
+                session_id=outcome.session_id,
+                outcome=outcome.kind,
+                typologies=classify_run(outcome.events),
+                started_at=started_at,
+                ended_at=datetime.now(timezone.utc),
+            )
+        except Exception as exc:  # containment — jamais KeyboardInterrupt
+            record = CampaignRunRecord(
+                i=i,
+                session_id=None,
+                outcome="error",
+                typologies=[],
+                started_at=started_at,
+                ended_at=datetime.now(timezone.utc),
+                error=str(exc)[:200],
+            )
+        index.runs.append(record)
+        index_path.write_text(index.model_dump_json(indent=2), encoding="utf-8")
+        if on_run is not None:
+            on_run(record)
+
+    return index

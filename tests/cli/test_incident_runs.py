@@ -1,16 +1,23 @@
+from pathlib import Path
+
 import pytest
 
 from aaosa.claiming.dispatch import DispatchResult
+from aaosa.cli import incident_runs
 from aaosa.cli.incident_runs import (
+    CampaignIndex,
+    RunOutcome,
     StoreNotEmptyError,
     _result_kind,
     ensure_empty_store,
     load_elo_into,
+    run_campaign,
 )
 from aaosa.core.agent import Agent
 from aaosa.elo.persistence import save_snapshot
 from aaosa.qa.protocol import QAFailure, QAResult
 from aaosa.schemas.output import LLMMetadata, Output
+from aaosa.tracing.events import DividedSubTask, TaskDividedEvent
 
 
 def _agent(name: str, tags: dict[str, int] | None = None) -> Agent:
@@ -109,3 +116,107 @@ class TestResultKind:
     def test_dispatch_roster_gap_is_unassigned(self):
         result = DispatchResult(status="roster_gap", agent_id=None, reason="gap")
         assert _result_kind(result) == "unassigned"
+
+
+def _fake_outcome(i: int, tmp_path: Path, kind: str = "success", events=None) -> RunOutcome:
+    return RunOutcome(
+        kind=kind,
+        session_id=f"sess-{i}",
+        session_dir=tmp_path / "sessions" / f"sess-{i}",
+        snapshot_path=tmp_path / "elo_snapshots" / "latest.json",
+        events=list(events or []),
+        task_description="incident task",
+        n_agents=7,
+    )
+
+
+class TestRunCampaign:
+    def test_runs_n_iterations_sequentially(self, tmp_path, monkeypatch):
+        calls = []
+
+        def stub(scenario, runs_root, client):
+            calls.append((scenario, runs_root))
+            return _fake_outcome(len(calls), tmp_path)
+
+        monkeypatch.setattr(incident_runs, "run_once", stub)
+        index = run_campaign(3, "main", tmp_path, client=None)
+
+        assert calls == [("main", tmp_path)] * 3
+        assert index.scenario == "main"
+        assert index.n_requested == 3
+        assert [r.i for r in index.runs] == [1, 2, 3]
+        assert [r.session_id for r in index.runs] == ["sess-1", "sess-2", "sess-3"]
+        assert all(r.outcome == "success" for r in index.runs)
+
+    def test_index_written_after_each_run(self, tmp_path, monkeypatch):
+        # crash-safe : au début du run k, l'index sur disque contient k-1 entrées
+        index_path = tmp_path / "campaign_index.json"
+        runs_on_disk_at_start = []
+
+        def stub(scenario, runs_root, client):
+            if index_path.exists():
+                on_disk = CampaignIndex.model_validate_json(
+                    index_path.read_text(encoding="utf-8")
+                )
+                runs_on_disk_at_start.append(len(on_disk.runs))
+            else:
+                runs_on_disk_at_start.append(0)
+            return _fake_outcome(len(runs_on_disk_at_start), tmp_path)
+
+        monkeypatch.setattr(incident_runs, "run_once", stub)
+        index = run_campaign(3, "main", tmp_path, client=None)
+
+        assert runs_on_disk_at_start == [0, 1, 2]
+        on_disk = CampaignIndex.model_validate_json(index_path.read_text(encoding="utf-8"))
+        assert on_disk == index
+
+    def test_exception_recorded_as_error_and_loop_continues(self, tmp_path, monkeypatch):
+        counter = {"n": 0}
+
+        def stub(scenario, runs_root, client):
+            counter["n"] += 1
+            if counter["n"] == 2:
+                raise RuntimeError("boom: tool loop exceeded")
+            return _fake_outcome(counter["n"], tmp_path)
+
+        monkeypatch.setattr(incident_runs, "run_once", stub)
+        index = run_campaign(3, "main", tmp_path, client=None)
+
+        assert [r.outcome for r in index.runs] == ["success", "error", "success"]
+        assert index.runs[1].session_id is None
+        assert "boom" in index.runs[1].error
+        assert index.runs[1].typologies == []
+
+    def test_typologies_come_from_classify_run(self, tmp_path, monkeypatch):
+        divided_event = TaskDividedEvent(
+            session_id="s",
+            task_id="root",
+            sub_tasks=[DividedSubTask(id="s1", description="sub")],
+        )
+
+        def stub(scenario, runs_root, client):
+            return _fake_outcome(1, tmp_path, events=[divided_event])
+
+        monkeypatch.setattr(incident_runs, "run_once", stub)
+        index = run_campaign(1, "main", tmp_path, client=None)
+
+        assert index.runs[0].typologies == ["divided"]
+
+    def test_on_run_callback_called_per_run(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            incident_runs,
+            "run_once",
+            lambda scenario, runs_root, client: _fake_outcome(1, tmp_path),
+        )
+        seen = []
+        run_campaign(2, "main", tmp_path, client=None, on_run=lambda rec: seen.append(rec.i))
+        assert seen == [1, 2]
+
+    def test_qa_fail_outcome_recorded(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            incident_runs,
+            "run_once",
+            lambda scenario, runs_root, client: _fake_outcome(1, tmp_path, kind="qa_fail"),
+        )
+        index = run_campaign(1, "main", tmp_path, client=None)
+        assert index.runs[0].outcome == "qa_fail"
