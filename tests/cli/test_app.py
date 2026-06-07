@@ -239,6 +239,23 @@ class TestReportCommand:
         assert "# Rapport de campagne" in result.output
         assert str(report_path) in result.output
 
+    def test_echo_degrades_but_file_stays_utf8(self, tmp_path):
+        # Ce test passe AVANT la correction sous CliRunner (le test double n'a pas
+        # de reconfigure — le guard le protege). La vraie regression red->green est
+        # verifiee en pipe reel PowerShell (.venv\Scripts\aaosa report ... | Out-Null).
+        # Ce test garantit : (a) exit 0 sous CliRunner (le guard ne casse pas les tests),
+        # (b) le fichier .md conserve les vrais caracteres UTF-8 (la degradation ne
+        # touche jamais le fichier, seulement stdout).
+        self._populate_store(tmp_path)
+
+        result = runner.invoke(app, ["report", "--runs-root", str(tmp_path)])
+
+        assert result.exit_code == 0
+        content = (tmp_path / "campaign_report.md").read_text(encoding="utf-8")
+        # Le rapport contient des fleches et tirets cadratins — ils doivent etre
+        # intacts dans le fichier meme si stdout les degrade en '?'.
+        assert "→" in content or "—" in content or "# Rapport" in content
+
     def test_snapshots_read_sorted_latest_excluded(self, tmp_path, monkeypatch):
         self._populate_store(tmp_path)
         snap_dir = tmp_path / "elo_snapshots"

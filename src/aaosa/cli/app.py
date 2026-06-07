@@ -4,6 +4,7 @@ Wiring console fin uniquement : la logique run/campaign vit dans
 `aaosa.cli.incident_runs` (helpers purs, sans print).
 """
 
+import sys
 from enum import Enum
 from pathlib import Path
 
@@ -111,6 +112,10 @@ def report(
     text = build_report(index, snapshots, runs_root=runs_root)
     out_path = runs_root / "campaign_report.md"
     out_path.write_text(text, encoding="utf-8")
+    # stdout pipe Windows = cp1252 : le rapport porte des fleches/accents,
+    # on degrade au lieu de crasher (le fichier .md reste la verite, deja ecrit en UTF-8)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     typer.echo(text)
     typer.echo(f"Report written to {out_path}")
 
