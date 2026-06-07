@@ -11,11 +11,14 @@ import typer
 from dotenv import load_dotenv
 
 from aaosa.cli.incident_runs import (
+    CampaignIndex,
     StoreNotEmptyError,
     ensure_empty_store,
     run_campaign,
     run_once,
 )
+from aaosa.cli.report import build_report
+from aaosa.elo.persistence import load_snapshot
 from aaosa.demo.run_health_check_v3 import run_demo_health_check_v3
 from aaosa.runtime.llm_client import create_client
 from aaosa.tracing.formatter import print_timeline
@@ -80,6 +83,36 @@ def campaign(
     index = run_campaign(n, scenario.value, runs_root, client, on_run=_echo_run)
     successes = sum(1 for r in index.runs if r.outcome == "success")
     typer.echo(f"\n{successes}/{n} success - index: {runs_root / 'campaign_index.json'}")
+
+
+@app.command()
+def report(
+    runs_root: Path = typer.Option(Path("runs"), "--runs-root"),
+) -> None:
+    """Rapport de campagne markdown depuis campaign_index.json + snapshots ELO."""
+    index_path = runs_root / "campaign_index.json"
+    if not index_path.exists():
+        typer.echo(
+            f"campaign_index.json not found in {runs_root} - "
+            f"run `aaosa campaign --runs-root {runs_root}` first (expected: {index_path})"
+        )
+        raise typer.Exit(code=1)
+
+    index = CampaignIndex.model_validate_json(index_path.read_text(encoding="utf-8"))
+
+    snapshots = []
+    snap_dir = runs_root / "elo_snapshots"
+    if snap_dir.exists():
+        for f in sorted(snap_dir.glob("*.json")):
+            if f.name == "latest.json":  # meme regle que _elo_history (dashboard)
+                continue
+            snapshots.append(load_snapshot(f))
+
+    text = build_report(index, snapshots, runs_root=runs_root)
+    out_path = runs_root / "campaign_report.md"
+    out_path.write_text(text, encoding="utf-8")
+    typer.echo(text)
+    typer.echo(f"Report written to {out_path}")
 
 
 @app.command()

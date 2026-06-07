@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 import aaosa.cli.app as app_module
 from aaosa.cli.app import app
 from aaosa.cli.incident_runs import CampaignIndex, CampaignRunRecord, RunOutcome
+from aaosa.elo.persistence import AgentEloSnapshot, EloSnapshot
 
 runner = CliRunner()
 
@@ -199,3 +200,78 @@ class TestHealthCheckCommand:
 
         assert result.exit_code == 0
         assert called["n"] == 1
+
+
+class TestReportCommand:
+    def test_missing_index_exits_1_with_path(self, tmp_path):
+        result = runner.invoke(app, ["report", "--runs-root", str(tmp_path)])
+
+        assert result.exit_code == 1
+        assert "campaign_index.json" in result.output
+        assert str(tmp_path) in result.output
+
+    def _populate_store(self, tmp_path: Path) -> None:
+        index = CampaignIndex(
+            scenario="main",
+            n_requested=1,
+            runs=[
+                CampaignRunRecord(
+                    i=1, session_id="sess-1", outcome="success",
+                    typologies=["divided"], started_at=_NOW, ended_at=_NOW,
+                )
+            ],
+        )
+        (tmp_path / "campaign_index.json").write_text(
+            index.model_dump_json(indent=2), encoding="utf-8"
+        )
+
+    def test_nominal_writes_file_and_echoes(self, tmp_path):
+        self._populate_store(tmp_path)
+
+        result = runner.invoke(app, ["report", "--runs-root", str(tmp_path)])
+
+        assert result.exit_code == 0
+        report_path = tmp_path / "campaign_report.md"
+        assert report_path.exists()
+        content = report_path.read_text(encoding="utf-8")
+        assert "# Rapport de campagne" in content
+        assert f"aaosa dashboard --runs-root {tmp_path}" in content
+        assert "# Rapport de campagne" in result.output
+        assert str(report_path) in result.output
+
+    def test_snapshots_read_sorted_latest_excluded(self, tmp_path, monkeypatch):
+        self._populate_store(tmp_path)
+        snap_dir = tmp_path / "elo_snapshots"
+        snap_dir.mkdir()
+        # deux snapshots horodates + un latest.json (doit etre ignore :
+        # meme regle que _elo_history du dashboard)
+        for name, minute, elo in [
+            ("2026-06-07T18-00-00.json", 0, 50),
+            ("2026-06-07T18-05-00.json", 5, 60),
+            ("latest.json", 5, 60),
+        ]:
+            snap = EloSnapshot(
+                timestamp=_NOW + timedelta(minutes=minute),
+                agents=[
+                    AgentEloSnapshot(
+                        agent_name="backend-dev",
+                        agent_id="id-1",
+                        tags_with_elo={"logs": elo},
+                    )
+                ],
+            )
+            (snap_dir / name).write_text(snap.model_dump_json(indent=2), encoding="utf-8")
+        captured = {}
+        real_build_report = app_module.build_report
+
+        def spy(index, snapshots, runs_root=None):
+            captured["n_snapshots"] = len(snapshots)
+            return real_build_report(index, snapshots, runs_root=runs_root)
+
+        monkeypatch.setattr(app_module, "build_report", spy)
+        result = runner.invoke(app, ["report", "--runs-root", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert captured["n_snapshots"] == 2  # latest.json exclu
+        content = (tmp_path / "campaign_report.md").read_text(encoding="utf-8")
+        assert "| backend-dev | logs | 50 | 60 | +10 |" in content
