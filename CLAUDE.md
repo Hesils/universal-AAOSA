@@ -44,6 +44,8 @@ Les skills `/prime` et `/save` viennent du master `.claude/` — disponibles san
 
 **V3 — démo phase 4 : CLI `aaosa` Typer projet-wide — 968 tests** (2026-06-07, worktree `feat-v3-demo-phase4-cli`, plan `docs/superpowers/plans/2026-06-07-v3-demo-phase4-cli.md`, 8 tasks subagent-driven, 5 écarts spec validés). **CLI `aaosa`** (typer 0.26.7, entry point `[project.scripts]`, `dashboard` ajouté aux packages wheel — requis pour l'import depuis le console script) : `run [--scenario main|roster_gap] [--runs-root]` · `campaign --n N (min=1) [--scenario] [--runs-root]` · `dashboard [--port] [--runs-root]` · `health-check` (wrappe `run_demo_health_check_v3` intact). Package `src/aaosa/cli/` : `app.py` (wiring Typer, seul endroit qui printe) + `incident_runs.py` (helpers purs : `run_once` — ELO load-by-name depuis `latest.json` puis run → persistance → snapshot —, `run_campaign` — N runs séquentiels, ELO chaîné par snapshots, index `campaign_index.json` réécrit après CHAQUE run (crash-safe), containment par run (`error` dans l'index, la boucle continue) —, `ensure_empty_store` garde-fou `StoreNotEmptyError`, jamais de cleanup auto). `classify_run(events)` (`tracing/analysis.py`, pure) : typologies ordre canonique (`simple`/`divided` exclusifs · `recursion` · `roster_gap` · `diagnosed:<attribution>` · `aggregated`). **Prompts single-home `demo/incident/prompts.py`** — divider réécrit (ticket topologie TRANCHÉ : retrait « synthesis sub-task » + « ordered », verrous tests) ; `run_incident.py` + `run_demo_v3.py` supprimés. **Catch review T4** : `run_with_recovery` ne retourne jamais `QAFailure` au top-level (toujours `DispatchResult(status="qa_failed")` via `_route_diagnostic`) → mapping `_result_kind` testé. **DoD validé LLM réel (2026-06-07)** : run main → success divisé 5 sous-tâches 5 QA PASS · roster_gap → `RosterGapEvent [gdpr]` · campagne n=5 → 5/5 `success [divided]`, garde-fou vérifié (refus exit 1), ELO chaîné (5 snapshots distincts, logs 76→94) · **0 `TaskAggregatedEvent` sur 7 runs** (chaînes pures malgré le prompt réécrit — constat au ticket, la N=20 phase 5 tranche, on n'inverse pas) · dashboards OK (campagne + défaut) · health-check OK. Prochaine étape : phase 5 (campagne N=20 + curation, consomme `campaign_index.json`).
 
+**V3 — démo phase 5 : campagne N=20 + curation — 992 tests total** (2026-06-08, worktree `feat-v3-demo-phase5-campagne-curation`, plan `docs/superpowers/plans/2026-06-07-v3-demo-phase5-campagne-curation.md`, 5 tasks — T1-2 code subagent-driven, T3-5 campagne réelle + checkpoints humains). **`aaosa report [--runs-root]`** : `build_report(index, snapshots, runs_root=None)` pur (`src/aaosa/cli/report.py`, 7 sections markdown — en-tête/outcomes/typologies/observation aggregator/table runs/delta ELO/rejeu, garde anti-drift `_TYPOLOGY_ORDER` ↔ `classify_run`) ; wiring `app.py` (index requis exit 1, snapshots triés `latest.json` exclu, écrit `campaign_report.md` + echo). **Fix DoD** : echo tolérant cp1252 (`sys.stdout.reconfigure(errors="replace")` guardé — stdout pipé Windows ne code pas `→`, le .md reste UTF-8). **Campagne N=20 réelle** (gpt-4o-mini temp 0, départ ELO YAML, root frais) : 16/20 success (80 %) — tous `divided`, 0 `simple` ; 3 `recursion`, **5 `diagnosed:agent` (D3 fire naturellement)** ; 4 `error` = `cycle detected in task dependencies` (~7 s, 0 appel agent, containment OK) → **nouveau ticket** `docs/backlog/2026-06-07-divider-cycles-dependances.md`. **Ticket aggregator CLOS** : 0/20 `aggregated`, tranché au dépouillement « assumer — filet pour les vrais fan-ins, rares par nature » (0 retouche tâche-mère/température). **Curation** : `runs_demo/` versionné (4 exhibits — divided propre, recursion, divided+recursion+diagnosed, roster_gap via run unitaire en root jetable — + registry + 16 snapshots + index + rapport) + `docs/demo/exhibits.md` (rejeu clone frais `aaosa dashboard --runs-root runs_demo`, caveat baseline ELO = post-run-1, typologies non observées documentées). **Sign-off navigateur Quentin 2026-06-08.** Prochaine étape : live mode dashboard (ex-B7), nature C (consomme les artefacts démo).
+
 V2 découpée en 3 sous-parties :
 - **V2a** (complète) : ELO mechanics + dual QA protocol
 - **V2b** (complète) : QA complet (evaluator composable + boucle auto-amélioration)
@@ -75,7 +77,7 @@ src/aaosa/
 ├── core/           agent.py (claim + execute avec boucle tool-use V3-A5) · tool.py (MAX_TOOL_ROUNDS=20)  # tool.py = V3-A5
 ├── claiming/       scoring.py · phase1.py · phase2.py · prompts.py · dispatch.py (+dependency_failed A3, +execution_failed vague1)
 ├── config/         loader.py  # V3-A1 (load_agents YAML)
-├── cli/            app.py (Typer : run · campaign · dashboard · health-check, seul endroit qui printe) · incident_runs.py (helpers purs : run_once · run_campaign · ensure_empty_store · load_elo_into · _result_kind · CampaignIndex)  # démo phase 4 — entry point `aaosa`
+├── cli/            app.py (Typer : run · campaign · report · dashboard · health-check, seul endroit qui printe) · incident_runs.py (helpers purs : run_once · run_campaign · ensure_empty_store · load_elo_into · _result_kind · CampaignIndex) · report.py (build_report pur, 7 sections markdown P5)  # démo phase 4-5 — entry point `aaosa`
 ├── runtime/        llm_client.py · runner.py (+run_chain V3-A3, +run_divided_task V3-A4, containment vague1) · divider.py (hérite tags parent vague1) · aggregator.py  # divider/aggregator = V3-A4
 ├── tracing/        events.py (+ToolCalled/TaskDivided/TaskAggregated V3, +DividedSubTask & QAEvaluatedEvent.spec vague1) · tracer.py · analysis.py (+classify_run P4) · formatter.py · store.py  # store.py = V2c
 ├── demo/           agents.py (loader A1) · agents.yaml (+tools déclarés P2) · tasks.py · tools.py (toolbox = tool_registry) · run_health_check_v3.py (wrappé par `aaosa health-check`)  # run_demo_v3.py supprimé P4
@@ -98,8 +100,12 @@ test_sets/          JSON test sets (gitignored)                       # V2b
 runs/               # V2c — store unifié persisté (gitignored) : agents/registry.json · elo_snapshots/
                     # · sessions/<id>/{trace.jsonl,meta.json,agents.json} · health_checks/<ts>/{report,test_set,trace,agents}
                     # + campaign_index.json (P4, écrit par `aaosa campaign` à la racine du runs-root)
+                    # + campaign_report.md (P5, écrit par `aaosa report`)
+runs_demo/          # P5 — store curé VERSIONNÉ : 4 exhibits campagne N=20 + registry + 16 snapshots + index + rapport
+                    # rejeu clone frais : `aaosa dashboard --runs-root runs_demo`
+docs/demo/          exhibits.md (narration des exhibits curés, typologies non observées)  # P5
 docs/superpowers/specs/  design specs · plans/  plans d'implémentation · epics/  épiques V2c
-docs/backlog/       tickets techniques (dataflow-edges · divider-topologie)
+docs/backlog/       tickets techniques (dataflow-edges · divider-topologie CLOS · divider-cycles)
 ```
 
 **Lancer le dashboard** : `.venv\Scripts\aaosa dashboard [--port] [--runs-root]` (équivalent `python -m dashboard`, défaut http://127.0.0.1:5001)
@@ -118,7 +124,7 @@ docs/backlog/       tickets techniques (dataflow-edges · divider-topologie)
 
 - Python 3.14, uv, Pydantic 2.13, OpenAI SDK 2.38.0, Typer 0.26.7, pytest 9.0.3, pytest-asyncio 1.3.0, python-dotenv 1.2.2
 - Lancer les tests : `.venv\Scripts\python -m pytest <fichier> -v`
-- CLI projet-wide (P4) : `.venv\Scripts\aaosa run [--scenario main|roster_gap]` · `aaosa campaign --n N --runs-root <frais>` · `aaosa dashboard [--port] [--runs-root]` · `aaosa health-check` (requiert `.env` avec `OPENAI_API_KEY`)
+- CLI projet-wide (P4-P5) : `.venv\Scripts\aaosa run [--scenario main|roster_gap]` · `aaosa campaign --n N --runs-root <frais>` · `aaosa report [--runs-root]` · `aaosa dashboard [--port] [--runs-root]` · `aaosa health-check` (requiert `.env` avec `OPENAI_API_KEY` ; `report` est offline)
 - Toujours utiliser le venv, jamais Python système
 - Toujours utiliser la derniere version stable possible d'un package
 

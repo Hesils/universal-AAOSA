@@ -3,6 +3,7 @@
 **Découvert** : 2026-06-07, validation DoD démo phase 3 (session `runs/sessions/2026-06-07T13-20-39-730273e3`, scénario `main`).
 **Constat de Quentin au sign-off** : aucun nœud AGGREGATOR ne s'affiche sur le graphe d'un run divisé réel.
 **TRANCHÉ 2026-06-07 (phase 4)** : option « retirer la consigne synthèse » retenue — voir « Décision et résultat d'observation » en bas. Le ticket reste ouvert UNIQUEMENT pour l'observation N=20 de phase 5.
+**CLOS 2026-06-08 (phase 5)** : 0/20 `aggregated` sur la campagne N=20 — décision au dépouillement avec Quentin : **assumer « l'aggregator = filet pour les vrais fan-ins, rare par nature »**. Voir « Résultat N=20 » en bas. Aucune retouche (tâche-mère et température intouchées).
 
 ## Diagnostic (complet, pas de recherche à refaire)
 
@@ -40,7 +41,7 @@ Au plus tard **phase 4 (CLI `run`/`campaign`)** : les prompts divider/aggregator
 ## Critères d'acceptation (une fois tranché)
 
 - [x] Décision loggée (retirer la consigne) avec re-runs réels de validation (7 runs, 2026-06-07).
-- [ ] Si « retirer » : observer ≥1 run réel avec `TaskAggregatedEvent` dans la trace et nœud AGGREGATOR au dashboard. **Constat zéro sur n=7 (phase 4) — reporté sur la N=20 de phase 5, on n'inverse pas la décision (spec phase 4 §6).**
+- [x] Si « retirer » : observer ≥1 run réel avec `TaskAggregatedEvent` dans la trace et nœud AGGREGATOR au dashboard. **Constat zéro sur n=7 (phase 4) — reporté sur la N=20 de phase 5, on n'inverse pas la décision (spec phase 4 §6). → N=20 : 0/20, critère définitivement non atteint sur cette tâche-mère ; tranché « assumer » au dépouillement phase 5 (cf. « Résultat N=20 »).**
 - [x] La question QA-aggregator est explicitement re-déferrée en D5 (spec phase 4 §2).
 
 ## Décision et résultat d'observation (2026-06-07, phase 4)
@@ -53,6 +54,16 @@ Au plus tard **phase 4 (CLI `run`/`campaign`)** : les prompts divider/aggregator
 - Conformément à la décision : **constat documenté, la N=20 de phase 5 tranche, on n'inverse pas.** Si la N=20 donne aussi zéro, options à réévaluer en connaissance de cause (autre tâche-mère moins séquentielle, température divider, ou assumer « l'aggregator = filet pour les vrais fan-ins, rare par nature »).
 
 **Note technique (review phase 4)** : au top-level, un échec QA non récupéré remonte en `DispatchResult(status="qa_failed")`, jamais en `QAFailure` (`_route_diagnostic` le convertit toujours) — le mapping d'index du CLI le gère via `_result_kind` (`src/aaosa/cli/incident_runs.py`).
+
+## Résultat N=20 (2026-06-08, phase 5) — TICKET CLOS
+
+**Données** (`runs_demo/campaign_report.md`, campagne `runs_campaign_n20`, gpt-4o-mini temp 0, départ ELO YAML) :
+- **0/20 runs avec `TaskAggregatedEvent` réel.** 16 success — tous `divided`, zéro `simple` — + 4 error (cycles divider, ticket séparé `2026-06-07-divider-cycles-dependances.md`).
+- Lecture : chaînes pures confirmées à l'échelle. Le récit incident induit une décomposition séquentielle (investigation → scope → réglementaire → communication) ; même libéré des consignes « synthesis »/« ordered », gpt-4o-mini à temp 0 ne produit jamais de fan-in sur cette tâche-mère. Typologies par ailleurs riches : 3 `recursion`, 5 `diagnosed:agent` — le constat ne traduit pas un manque d'émergence, juste une topologie linéaire.
+
+**Décision (dépouillement avec Quentin, 2026-06-08)** : **assumer** — l'aggregator D2 est un filet pour les vrais fan-ins, rares par nature ; sa mécanique reste couverte par les tests (761+), son rendu dashboard branché sur l'event réel. Pas de chantier tâche-mère ni température. Documenté honnêtement dans `docs/demo/exhibits.md` (« Typologies non observées »).
+
+**Conséquence D5** : la donnée de fréquence est tombée (0/27 runs cumulés phases 4+5) — le QA de l'output aggregator reste re-déferré, le trou de contrôle est théorique tant qu'aucun fan-in n'apparaît en pratique.
 
 ## Pointeurs
 
