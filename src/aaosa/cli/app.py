@@ -94,7 +94,7 @@ def report(
     if not index_path.exists():
         typer.echo(
             f"campaign_index.json not found in {runs_root} - "
-            f"run `aaosa campaign --runs-root {runs_root}` first (expected: {index_path})"
+            f"run `aaosa campaign --n <N> --runs-root {runs_root}` first (expected: {index_path})"
         )
         raise typer.Exit(code=1)
 
