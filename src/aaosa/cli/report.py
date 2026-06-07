@@ -112,6 +112,8 @@ def _elo_delta(snapshots: list[EloSnapshot]) -> list[str]:
     last = {a.agent_name: a.tags_with_elo for a in ordered[-1].agents}
     lines.append("| agent | tag | départ | arrivée | delta |")
     lines.append("|-------|-----|--------|---------|-------|")
+    # Seuls les agents/tags du dernier snapshot sont rendus — un agent/tag
+    # disparu en cours de campagne sort de la table (cas inatteignable aujourd'hui).
     for name in sorted(last):
         first_tags = first.get(name, {})
         for tag in sorted(last[name]):

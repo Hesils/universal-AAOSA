@@ -4,6 +4,7 @@ from pathlib import Path
 from aaosa.cli.incident_runs import CampaignIndex, CampaignRunRecord
 from aaosa.cli.report import build_report
 from aaosa.elo.persistence import AgentEloSnapshot, EloSnapshot
+from aaosa.tracing.analysis import _DIAGNOSED_ORDER
 
 _T0 = datetime(2026, 6, 7, 18, 0, 0, tzinfo=timezone.utc)
 
@@ -203,3 +204,15 @@ class TestDeterminismAndSections:
         assert "## Runs" in text                         # 5.
         assert "## Delta ELO" in text                    # 6.
         assert "## Rejeu" in text                        # 7.
+
+
+class TestTypologyOrderDriftGuard:
+    def test_typology_order_covers_classify_run_vocabulary(self):
+        # Garde anti-drift : si classify_run gagne un label (ex. 5e attribution),
+        # ce test casse au lieu de laisser _typologies l'omettre silencieusement.
+        from aaosa.cli.report import _TYPOLOGY_ORDER
+
+        expected = {"simple", "divided", "recursion", "roster_gap", "aggregated"} | {
+            f"diagnosed:{a}" for a in _DIAGNOSED_ORDER
+        }
+        assert set(_TYPOLOGY_ORDER) == expected
