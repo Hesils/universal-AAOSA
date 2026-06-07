@@ -1,4 +1,14 @@
-from aaosa.tracing.events import ClaimEvent, Phase1FilteredEvent, Phase2ClaimedEvent
+from collections.abc import Sequence
+
+from aaosa.tracing.events import (
+    ClaimEvent,
+    DiagnosedEvent,
+    Phase1FilteredEvent,
+    Phase2ClaimedEvent,
+    RosterGapEvent,
+    TaskAggregatedEvent,
+    TaskDividedEvent,
+)
 
 
 def _build_indexes(
@@ -53,3 +63,32 @@ def detect_underclaims(events: list[ClaimEvent]) -> list[dict]:
                     "justification": p2.justification,
                 })
     return underclaims
+
+
+_DIAGNOSED_ORDER = ("agent", "evaluator", "task_spec", "unattributed")
+
+
+def classify_run(events: Sequence[ClaimEvent]) -> list[str]:
+    """Typologies d'un run détectées depuis la trace, ordre canonique fixe.
+
+    `simple` et `divided` sont mutuellement exclusifs ; les autres labels se
+    cumulent. `aggregated` = agrégation réelle uniquement (le court-circuit
+    1-sink n'émet pas de TaskAggregatedEvent, règle D2). Fonction pure sans I/O.
+    """
+    divided = [e for e in events if isinstance(e, TaskDividedEvent)]
+    labels = ["divided" if divided else "simple"]
+
+    sub_ids = {st.id for e in divided for st in e.sub_tasks}
+    if any(e.task_id in sub_ids for e in divided):
+        labels.append("recursion")
+
+    if any(isinstance(e, RosterGapEvent) for e in events):
+        labels.append("roster_gap")
+
+    seen = {e.attribution for e in events if isinstance(e, DiagnosedEvent)}
+    labels.extend(f"diagnosed:{a}" for a in _DIAGNOSED_ORDER if a in seen)
+
+    if any(isinstance(e, TaskAggregatedEvent) for e in events):
+        labels.append("aggregated")
+
+    return labels

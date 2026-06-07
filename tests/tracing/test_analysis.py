@@ -2,8 +2,16 @@ from datetime import datetime, timezone
 
 import pytest
 
-from aaosa.tracing.analysis import detect_overclaims, detect_underclaims
-from aaosa.tracing.events import Phase1FilteredEvent, Phase2ClaimedEvent
+from aaosa.tracing.analysis import classify_run, detect_overclaims, detect_underclaims
+from aaosa.tracing.events import (
+    DiagnosedEvent,
+    DividedSubTask,
+    Phase1FilteredEvent,
+    Phase2ClaimedEvent,
+    RosterGapEvent,
+    TaskAggregatedEvent,
+    TaskDividedEvent,
+)
 
 
 class TestDetectOverclaims:
@@ -410,3 +418,88 @@ class TestMultiTaskCorrelation:
         assert len(underclaims) == 1
         assert underclaims[0]["task_id"] == "task2"
         assert underclaims[0]["agent_id"] == "agentB"
+
+
+def _divided(task_id: str, sub_ids: list[str]) -> TaskDividedEvent:
+    return TaskDividedEvent(
+        session_id="sess1",
+        task_id=task_id,
+        sub_tasks=[DividedSubTask(id=i, description=f"sub {i}") for i in sub_ids],
+    )
+
+
+def _gap() -> RosterGapEvent:
+    return RosterGapEvent(session_id="sess1", task_id="task1", missing_tags=["gdpr"])
+
+
+def _diag(attribution: str) -> DiagnosedEvent:
+    return DiagnosedEvent(
+        session_id="sess1", task_id="task1", attribution=attribution, reason="r"
+    )
+
+
+def _agg() -> TaskAggregatedEvent:
+    return TaskAggregatedEvent(
+        session_id="sess1",
+        task_id="task1",
+        sub_task_ids=["s1", "s2"],
+        output_summary="merged",
+        output_content="merged content",
+    )
+
+
+class TestClassifyRun:
+    """Typologies détectées depuis la trace, ordre canonique fixe (spec phase 4 §5)."""
+
+    def test_empty_trace_is_simple(self):
+        assert classify_run([]) == ["simple"]
+
+    def test_claiming_events_alone_are_simple(self):
+        p1 = Phase1FilteredEvent(
+            session_id="sess1", task_id="task1", agent_id="a1",
+            passed=True, fit_score=1.0,
+        )
+        assert classify_run([p1]) == ["simple"]
+
+    def test_divided(self):
+        assert classify_run([_divided("root", ["s1", "s2"])]) == ["divided"]
+
+    def test_recursion_when_division_is_nested(self):
+        # s1 est une sous-tâche de root ET le parent d'une autre division → D1 récursif
+        events = [_divided("root", ["s1", "s2"]), _divided("s1", ["s1a", "s1b"])]
+        assert classify_run(events) == ["divided", "recursion"]
+
+    def test_sibling_divisions_are_not_recursion(self):
+        events = [_divided("root-a", ["x"]), _divided("root-b", ["y"])]
+        assert classify_run(events) == ["divided"]
+
+    def test_roster_gap(self):
+        assert classify_run([_gap()]) == ["simple", "roster_gap"]
+
+    def test_diagnosed_one_label_per_distinct_attribution(self):
+        # task_spec émis avant agent, agent en double → ordre canonique, dédupliqué
+        events = [_diag("task_spec"), _diag("agent"), _diag("agent")]
+        assert classify_run(events) == ["simple", "diagnosed:agent", "diagnosed:task_spec"]
+
+    def test_aggregated(self):
+        events = [_divided("root", ["s1", "s2"]), _agg()]
+        assert classify_run(events) == ["divided", "aggregated"]
+
+    def test_full_combination_canonical_order(self):
+        # Events volontairement mélangés : l'ordre des labels ne dépend pas de la trace
+        events = [
+            _agg(),
+            _diag("unattributed"),
+            _gap(),
+            _divided("root", ["s1", "s2"]),
+            _divided("s1", ["s1a"]),
+            _diag("evaluator"),
+        ]
+        assert classify_run(events) == [
+            "divided",
+            "recursion",
+            "roster_gap",
+            "diagnosed:evaluator",
+            "diagnosed:unattributed",
+            "aggregated",
+        ]
