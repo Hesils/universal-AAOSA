@@ -15,7 +15,7 @@ class TestDividerPromptTopologyDecision:
         assert "ordered" not in DIVIDER_PROMPT.lower()
 
     def test_dependencies_only_when_genuinely_needed(self):
-        assert "only when" in DIVIDER_PROMPT
+        assert "only when" in DIVIDER_PROMPT.lower()
 
 
 def test_all_prompts_non_empty():
