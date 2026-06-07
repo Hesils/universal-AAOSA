@@ -1,12 +1,15 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
 from typer.testing import CliRunner
 
 import aaosa.cli.app as app_module
 from aaosa.cli.app import app
-from aaosa.cli.incident_runs import CampaignIndex, RunOutcome
+from aaosa.cli.incident_runs import CampaignIndex, CampaignRunRecord, RunOutcome
 
 runner = CliRunner()
+
+_NOW = datetime.now(timezone.utc)
 
 
 def _fake_outcome(tmp_path: Path, kind: str = "success") -> RunOutcome:
@@ -92,6 +95,40 @@ class TestCampaignCommand:
         assert captured["n"] == 5
         assert captured["scenario"] == "main"
         assert captured["runs_root"] == tmp_path
+
+    def test_campaign_echoes_records_and_summary(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(app_module, "create_client", lambda: object())
+
+        def stub(n, scenario, runs_root, client, on_run=None):
+            records = [
+                CampaignRunRecord(
+                    i=1, session_id="sess-1", outcome="success",
+                    typologies=["divided", "aggregated"],
+                    started_at=_NOW, ended_at=_NOW,
+                ),
+                CampaignRunRecord(
+                    i=2, session_id=None, outcome="error", typologies=[],
+                    started_at=_NOW, ended_at=_NOW, error="boom",
+                ),
+                CampaignRunRecord(
+                    i=3, session_id="sess-3", outcome="success",
+                    typologies=["simple"],
+                    started_at=_NOW, ended_at=_NOW,
+                ),
+            ]
+            index = CampaignIndex(scenario=scenario, n_requested=n, runs=records)
+            if on_run is not None:
+                for record in records:
+                    on_run(record)
+            return index
+
+        monkeypatch.setattr(app_module, "run_campaign", stub)
+        result = runner.invoke(app, ["campaign", "--n", "3", "--runs-root", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "run 1/3: success ['divided', 'aggregated']" in result.output
+        assert "run 2/3: error []" in result.output
+        assert "2/3 success" in result.output
 
 
 class _FakeServer:
