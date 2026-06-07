@@ -61,6 +61,10 @@ def test_build_prompt_states_and_filter_contract():
     assert "single agent must hold all" in lower
     assert "not every capability the task touches" in lower
     assert "never mix tags from different lines" in lower
+    # clause qui préserve la détection de roster gap : une capacité réellement
+    # requise mais absente du roster doit quand même être nommée
+    # (espaces normalisés : la phrase peut chevaucher un retour à la ligne)
+    assert "name it even though it is absent" in " ".join(lower.split())
 
 
 def test_build_prompt_groups_vocabulary_by_role_bundles():
