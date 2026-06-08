@@ -26,6 +26,58 @@ class DivisionResult(BaseModel):
         return self
 
 
+def find_cycle_indices(division: "DivisionResult") -> list[int] | None:
+    """Détecte un défaut de DAG sur les `depends_on_indices` BRUTS du divider, avant
+    toute construction de Task. Pur, sans LLM. Retourne les indices des sous-tâches
+    impliquées (triés) si le graphe n'est pas un DAG valide, sinon None.
+
+    Couvre les trois modes observables d'un produit LLM structurellement valide mais
+    sémantiquement invalide pour le consommateur aval (Kahn) :
+    auto-référence (i→i), cycle (i↔j, i→j→k→i), et indice hors bornes/négatif (qui
+    ferait planter build_sub_tasks à la résolution indices→IDs).
+
+    Le payload brut est rendu nommable dans le prompt de retry et traçable. Ne MUTE
+    jamais la division — c'est un détecteur."""
+    if division.is_atomic:
+        return None
+
+    n = len(division.sub_tasks)
+    deps = [spec.depends_on_indices for spec in division.sub_tasks]
+
+    # Indices hors bornes / négatifs : invalides pour la résolution aval.
+    invalid = [i for i, d in enumerate(deps) if any(j < 0 or j >= n for j in d)]
+    if invalid:
+        return sorted(invalid)
+
+    # Auto-référence = cycle trivial.
+    self_ref = [i for i, d in enumerate(deps) if i in d]
+    if self_ref:
+        return sorted(self_ref)
+
+    # Kahn : arête j -> i si i dépend de j. in_degree[i] = nb de deps de i. Les nœuds
+    # à degré entrant résiduel > 0 après le tri forment (ou alimentent) le cycle.
+    in_degree = [len(d) for d in deps]
+    adjacency: list[list[int]] = [[] for _ in range(n)]
+    for i, d in enumerate(deps):
+        for j in d:
+            adjacency[j].append(i)
+
+    queue = [i for i in range(n) if in_degree[i] == 0]
+    visited = 0
+    while queue:
+        cur = queue.pop(0)
+        visited += 1
+        for nxt in adjacency[cur]:
+            in_degree[nxt] -= 1
+            if in_degree[nxt] == 0:
+                queue.append(nxt)
+
+    if visited == n:
+        return None
+    # Les nœuds à degré entrant résiduel > 0 sont coincés dans/derrière le cycle.
+    return sorted(i for i in range(n) if in_degree[i] > 0)
+
+
 class TaskDivider:
     def __init__(self, system_prompt: str) -> None:
         self.system_prompt = system_prompt
@@ -35,6 +87,7 @@ class TaskDivider:
         task: Task,
         chained_context: list[Task] | None,
         failure_context: FailureContext | None,
+        cycle_context: list[int] | None = None,
     ) -> str:
         inherited = ""
         if chained_context:
@@ -52,6 +105,18 @@ class TaskDivider:
                 f"- Réponse produite (à désambiguïser):\n{failure_context.failed_output.content}"
             )
 
+        cycle = ""
+        if cycle_context:
+            named = ", ".join(str(i) for i in cycle_context)
+            cycle = (
+                "\n\nATTENTION — ta découpe précédente formait un cycle de dépendances "
+                f"(les sous-tâches d'indices {named} se dépendent mutuellement, "
+                "directement ou en boucle). Une telle découpe est inexécutable. "
+                "Reproduis le travail mais émets des `depends_on_indices` qui forment un "
+                "DAG acyclique : aucune sous-tâche ne doit dépendre (même indirectement) "
+                "d'une sous-tâche qui dépend d'elle, et aucune ne se référence elle-même."
+            )
+
         return (
             "If the task is atomic (a single capability, not usefully decomposable),\n"
             "set is_atomic=true and return no sub-tasks.\n"
@@ -65,6 +130,7 @@ class TaskDivider:
             f"{own_context}"
             f"{inherited}"
             f"{failure}"
+            f"{cycle}"
         )
 
     def divide(
@@ -73,19 +139,23 @@ class TaskDivider:
         client: OpenAI,
         chained_context: list[Task] | None = None,
         failure_context: FailureContext | None = None,
+        cycle_context: list[int] | None = None,
     ) -> "DivisionResult":
         """LLM call → DivisionResult (structurel, sans tags). Ne construit pas de Task,
         ne résout pas les deps, n'émet aucun event — c'est le runner (build_sub_tasks).
 
         chained_context / failure_context (D3) enrichissent le prompt et orientent la
-        génération du `context` par sous-tâche. Le divider reste pur : il ne sait pas
-        d'où viennent ces données ni qui les consomme."""
+        génération du `context` par sous-tâche. cycle_context (signal distinct, non-QA)
+        nomme les indices d'un cycle détecté à la découpe précédente pour orienter un
+        unique retry. Le divider reste pur : il ne sait pas d'où viennent ces données
+        ni qui les consomme."""
         response = client.beta.chat.completions.parse(
             model="gpt-4o-mini",
             temperature=0.0,
             messages=[
                 {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": self._build_divide_prompt(task, chained_context, failure_context)},
+                {"role": "user", "content": self._build_divide_prompt(
+                    task, chained_context, failure_context, cycle_context)},
             ],
             response_format=DivisionResult,
         )
