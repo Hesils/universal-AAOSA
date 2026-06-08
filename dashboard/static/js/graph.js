@@ -199,7 +199,11 @@ function revealUpTo(graph, idx) {
     return entryAt.has(tid) ? entryAt.get(tid) : 0;
   };
   const nodeAt = n => {
-    if (!n.task_id) return firstSeen.has(n.id) ? firstSeen.get(n.id) : 0;       // input/tagger/output
+    // input/tagger naissent tôt (toujours actifs aux jalons 0/1). OUTPUT ne se révèle
+    // QUE s'il est réellement atteint : jamais vu (run live encore en cours, ou roster gap)
+    // → repoussé hors timeline, sinon il flotterait dès le jalon 0.
+    if (!n.task_id)
+      return firstSeen.has(n.id) ? firstSeen.get(n.id) : (n.type === "output" ? graph.steps.length : 0);
     if (n.type === "diagnostic" || n.type === "roster_gap")
       return firstSeen.has(n.id) ? firstSeen.get(n.id) : archAt(n.task_id);     // événements : à leur jalon
     if (n.type === "divider" || n.type === "aggregator")

@@ -101,6 +101,17 @@ select.sel {
 select.sel:focus { outline: none; border-color: var(--fire); }
 .chips { font-size: 12.5px; color: var(--fg-2); display: inline-flex; gap: 14px; }
 .chips b { font-family: var(--mono); color: var(--fg-1); font-weight: 500; }
+/* Badge LIVE : run en cours. Ember = miroir chrome du « actif » du graphe (un run vivant est
+   le moment où l'instrument est actif), tenu petit pour ne pas concurrencer le graphe (principe 1).
+   Le pip est un losange ember — écho du brand-mk et du scale-field, pas un point rond générique. */
+.live-badge { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono);
+  font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--fire); }
+.live-badge[hidden] { display: none; }
+.live-badge::before { content: ""; width: 6px; height: 6px; background: var(--fire);
+  transform: rotate(45deg); box-shadow: 0 0 7px var(--fire-glow);
+  animation: live-pulse 1.6s var(--ease) infinite; }
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .live-badge::before { animation: none; } }
 
 /* ─── Wire panel + corner tick ─── */
 .panel { position: relative; border: 1px solid var(--wire); background: oklch(15% 0.007 250 / 0.6); backdrop-filter: blur(2px); }
@@ -145,6 +156,11 @@ svg.graph { display: block; width: 100%; height: 100%; max-height: 100%; overflo
 .todo-expand:hover { color: var(--fire); border-color: var(--fire); }
 .todo--done { color: var(--fg-2); } .todo--done .todo-text { text-decoration: line-through; } .todo--done .mk { background: var(--fire-dim); border-color: var(--fire); }
 .todo--current { color: var(--fg-0); } .todo--current .mk { border-color: var(--fire); box-shadow: 0 0 6px var(--fire-glow); }
+/* live : la tâche en cours scintille (glow ember pulsé sur son losange) — même cadence que le badge LIVE,
+   écho du nœud actif du graphe. État, pas décoration : seulement sur une session running. */
+.todo--live .mk { animation: todo-live 1.6s var(--ease) infinite; }
+@keyframes todo-live { 0%, 100% { box-shadow: 0 0 4px var(--fire-glow); } 50% { box-shadow: 0 0 12px var(--fire-glow); border-color: var(--crest); } }
+@media (prefers-reduced-motion: reduce) { .todo--live .mk { animation: none; } }
 .todo--pending { color: var(--fg-1); }
 /* sous-tâches d'un run divisé : indentées sous la racine */
 .todo--sub { margin-left: 16px; }

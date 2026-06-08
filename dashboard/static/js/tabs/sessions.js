@@ -9,6 +9,7 @@ export async function mountSessions(panel) {
     <div class="toolbar">
       <select class="sel session-select"></select>
       <span class="chips"></span>
+      <span class="live-badge" hidden>live</span>
     </div>
     <div class="session-body">
       <div class="panel graph-frame">
@@ -38,6 +39,7 @@ export async function mountSessions(panel) {
   const scrubFill = panel.querySelector(".scrub-fill");
   const scrubHandle = panel.querySelector(".scrub-handle");
   const scrubTrack = panel.querySelector(".scrub-track");
+  const liveBadge = panel.querySelector(".live-badge");
 
   const followBtn = panel.querySelector(".follow-btn");
   const camera = attachCamera(svg, { onManual: () => followBtn.classList.remove("on") });
@@ -47,16 +49,33 @@ export async function mountSessions(panel) {
     rerender();   // re-déclenche le focus sur le jalon courant
   });
 
-  const list = await api.sessions();
-  if (!list.sessions.length) { panel.innerHTML = '<p class="placeholder">Aucune session persistée.</p>'; return; }
-  for (const s of list.sessions) {
-    const opt = document.createElement("option");
-    opt.value = s.session_id;
-    opt.textContent = s.session_id;
-    select.appendChild(opt);
+  const LIVE_MS = 750;    // poll du graphe d'une session running (recalcul frais côté serveur)
+  const LIST_MS = 2500;   // auto-refresh de la liste : une session running apparaît en tête
+  let detail = null, graph = null, activeStepIndex = 0, agentNames = {};
+  let currentSid = null, liveTimer = null;
+
+  // (re)peuple le <select> : running en tête (marqueur ◆), puis plus récent d'abord
+  // (les ids sont des timestamps). Conserve la sélection courante si elle existe encore.
+  function buildOptions(sessions) {
+    const prev = select.value;
+    const ordered = [...sessions].sort((a, b) => {
+      const ra = a.status === "running", rb = b.status === "running";
+      if (ra !== rb) return ra ? -1 : 1;
+      return a.session_id < b.session_id ? 1 : -1;
+    });
+    select.innerHTML = "";
+    for (const s of ordered) {
+      const opt = document.createElement("option");
+      opt.value = s.session_id;
+      opt.textContent = (s.status === "running" ? "◆ " : "") + s.session_id;
+      select.appendChild(opt);
+    }
+    if (ordered.some(s => s.session_id === prev)) select.value = prev;
   }
 
-  let detail = null, graph = null, activeStepIndex = 0, agentNames = {};
+  const list = await api.sessions();
+  if (!list.sessions.length) { panel.innerHTML = '<p class="placeholder">Aucune session persistée.</p>'; return; }
+  buildOptions(list.sessions);
 
   // Divider/Aggregator ne s'allument qu'à un seul jalon, et sont par NIVEAU (namespacés) :
   // matcher sur node.task_id. Si la timeline a déjà atteint leur jalon, on montre son détail ;
@@ -74,10 +93,14 @@ export async function mountSessions(panel) {
   function renderTodo() {
     const step = graph.steps[activeStepIndex];
     const items = step ? step.todo : [];
+    // live : la sous-tâche du jalon actif est celle en cours d'exécution → scintille
+    // (le marqueur ember pulse, miroir du nœud actif du graphe). Une seule, pas la chaîne.
+    const liveLeaf = detail && detail.meta.status === "running" && step ? step.sub_task_id : null;
     todo.innerHTML = "";
     for (const t of items) {
       const row = document.createElement("div");
-      row.className = `todo-item todo--${t.state}${t.is_root ? "" : " todo--sub"}`;
+      const live = liveLeaf && t.id === liveLeaf && t.state === "current" ? " todo--live" : "";
+      row.className = `todo-item todo--${t.state}${t.is_root ? "" : " todo--sub"}${live}`;
       row.style.marginLeft = `${t.depth * 14}px`;
       row.title = "Aller au premier jalon de cette tâche";
 
@@ -170,12 +193,53 @@ export async function mountSessions(panel) {
   }
   function nudge(dir) { goTo(activeStepIndex + dir); }
 
-  async function load(sid) {
-    [detail, graph] = await Promise.all([api.session(sid), api.sessionGraph(sid)]);
+  function setBadge(status) { liveBadge.hidden = status !== "running"; }
+  function stopLive() { if (liveTimer !== null) { clearInterval(liveTimer); liveTimer = null; } }
+  function startLive() { if (liveTimer === null) liveTimer = setInterval(refreshLive, LIVE_MS); }
+
+  // Tick live : recharge meta+graphe de la session courante, avance la frontière de révélation
+  // au dernier jalon UNIQUEMENT si l'utilisateur y était déjà (même logique débrayable que le
+  // follow caméra : scruber en arrière met le suivi en pause ; revenir au bout le reprend).
+  // Settle : dès que le statut passe à complete, on fige le badge et on coupe le poll — la vue
+  // redevient une session statique scrubbable normale, sans transition visible.
+  async function refreshLive() {
+    if (panel.hidden || document.hidden) return;   // calme tant que l'onglet n'est pas regardé
+    const sid = currentSid;
+    let d, g;
+    try { [d, g] = await Promise.all([api.session(sid), api.sessionGraph(sid)]); }
+    catch { return; }                              // tick raté : on retentera au suivant
+    if (sid !== currentSid) return;                // session changée entre-temps : abandonner
+    const wasAtTip = activeStepIndex >= graph.steps.length - 1;
+    detail = d; graph = g;
     agentNames = Object.fromEntries(detail.agents.map(a => [a.agent_id, a.name]));
-    activeStepIndex = 0;
+    activeStepIndex = wasAtTip
+      ? Math.max(0, graph.steps.length - 1)
+      : Math.min(activeStepIndex, graph.steps.length - 1);
     renderChips();
     rerender();
+    if (detail.meta.status !== "running") { setBadge(detail.meta.status); stopLive(); }
+  }
+
+  async function load(sid) {
+    stopLive();                                    // coupe le live de la session précédente
+    [detail, graph] = await Promise.all([api.session(sid), api.sessionGraph(sid)]);
+    agentNames = Object.fromEntries(detail.agents.map(a => [a.agent_id, a.name]));
+    currentSid = sid;
+    // session running : on rejoint la frontière et on la suit ; complete : on part du début (scrub manuel)
+    activeStepIndex = detail.meta.status === "running" ? Math.max(0, graph.steps.length - 1) : 0;
+    renderChips();
+    rerender();
+    setBadge(detail.meta.status);
+    if (detail.meta.status === "running") startLive();
+  }
+
+  // Auto-refresh de la liste : une nouvelle session running apparaît en tête sans action.
+  // En pause quand l'onglet/fenêtre n'est pas visible, ou quand le <select> est ouvert.
+  async function refreshList() {
+    if (panel.hidden || document.hidden || document.activeElement === select) return;
+    let l;
+    try { l = await api.sessions(); } catch { return; }
+    if (l.sessions.length) buildOptions(l.sessions);
   }
 
   select.addEventListener("change", () => load(select.value));
@@ -214,5 +278,6 @@ export async function mountSessions(panel) {
     else if (ev.key === "ArrowRight") { nudge(+1); ev.preventDefault(); }
   });
 
-  await load(list.sessions[0].session_id);
+  setInterval(refreshList, LIST_MS);   // tabs montés une seule fois : intervalle gardé par panel.hidden
+  await load(select.value);            // top de la liste réordonnée (running en tête)
 }
