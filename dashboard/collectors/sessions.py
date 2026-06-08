@@ -3,7 +3,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from aaosa.tracing.store import AgentRegistry, AgentRegistryEntry, SessionMeta, load_trace
+from aaosa.tracing.store import AgentRegistry, AgentRegistryEntry, SessionMeta, load_trace_partial
 from dashboard.graph_model import GraphModel, build_graph
 
 
@@ -14,6 +14,7 @@ class SessionListItem(BaseModel):
     ended_at: datetime
     task_count: int
     agent_count: int
+    status: str
 
 
 class SessionList(BaseModel):
@@ -57,9 +58,19 @@ def list_sessions(runs_root: Path) -> SessionList:
                 ended_at=meta.ended_at,
                 task_count=len(meta.tasks),
                 agent_count=len(meta.agent_ids),
+                status=meta.status,
             ))
     items.sort(key=lambda s: s.started_at, reverse=True)
     return SessionList(sessions=items)
+
+
+def session_status(runs_root: Path, session_id: str) -> str | None:
+    """Statut d'une session ("running"/"complete") sans charger la trace ni
+    construire le graphe. None si la session (ou son meta.json) n'existe pas."""
+    d = _sessions_dir(runs_root) / session_id
+    if not (d / "meta.json").exists():
+        return None
+    return _load_meta(d).status
 
 
 def session_detail(runs_root: Path, session_id: str) -> SessionView | None:
@@ -67,5 +78,5 @@ def session_detail(runs_root: Path, session_id: str) -> SessionView | None:
     if not (d / "meta.json").exists() or not (d / "trace.jsonl").exists():
         return None
     meta = _load_meta(d)
-    graph = build_graph(load_trace(d / "trace.jsonl"), meta)
+    graph = build_graph(load_trace_partial(d / "trace.jsonl"), meta)
     return SessionView(meta=meta, agents=_load_agents(d), graph=graph)

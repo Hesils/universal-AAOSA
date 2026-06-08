@@ -46,9 +46,15 @@ class SessionDetailResponse(BaseModel):
 
 
 def _session_view(session_id):
+    runs_root = _runs_root()
+    if sessions_collector.session_status(runs_root, session_id) == "running":
+        # session live : recalcul frais à chaque requête (pas de cache figé)
+        # session_status relit meta.json (petit) à chaque vue : le surcoût sur une session
+        # complete (cache hit) est assumé — c'est le prix du gating live, négligeable vs build_graph.
+        return sessions_collector.session_detail(runs_root, session_id)
     return _cache().get_or_compute(
         f"session_view:{session_id}",
-        lambda: sessions_collector.session_detail(_runs_root(), session_id),
+        lambda: sessions_collector.session_detail(runs_root, session_id),
     )
 
 

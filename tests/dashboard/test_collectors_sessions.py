@@ -1,4 +1,4 @@
-from dashboard.collectors.sessions import list_sessions, session_detail
+from dashboard.collectors.sessions import list_sessions, session_detail, session_status
 
 
 def test_list_sessions(runs_root):
@@ -38,3 +38,18 @@ def test_session_detail_has_agents(runs_root):
     assert len(view.agents) == len(DEMO_AGENTS)
     assert all(a.system_prompt for a in view.agents)
     assert {a.agent_id for a in view.agents} == {a.id for a in DEMO_AGENTS}
+
+
+def test_list_sessions_exposes_status_complete_by_default(runs_root):
+    # la session du fixture n'a pas de status explicite -> "complete"
+    items = list_sessions(runs_root).sessions
+    assert all(s.status == "complete" for s in items)
+
+
+def test_session_status_helper_reads_meta(runs_root):
+    sid = list_sessions(runs_root).sessions[0].session_id
+    assert session_status(runs_root, sid) == "complete"
+
+
+def test_session_status_missing_session_is_none(runs_root):
+    assert session_status(runs_root, "does-not-exist") is None
