@@ -172,3 +172,44 @@ class TestSerieDModelExtensions:
         assert step.outcome == "diagnosed"
         n = GraphNode(id="roster_gap:t1", layer="center", type="roster_gap", label="GAP", task_id="t1")
         assert n.type == "roster_gap"
+
+
+# ---------------------------------------------------------------------------
+# Live-mode tolerance tests: build_graph on partial / growing traces
+# ---------------------------------------------------------------------------
+
+def _provisional_meta_live(task_id: str) -> SessionMeta:
+    now = datetime(2026, 6, 8, 11, 0, 0, tzinfo=timezone.utc)
+    return SessionMeta(
+        session_id="live", started_at=now, ended_at=now, status="running",
+        tasks=[SessionTaskRecord(id=task_id, description="root incident",
+                                 winner_agent_id=None, outcome="divided",
+                                 required_tags={"security": 50})],
+        agent_ids=["a1"],
+    )
+
+
+def test_build_graph_input_only_no_events():
+    # trace vide + meta provisoire -> graphe INPUT-seul, pas de crash
+    g = build_graph([], _provisional_meta_live("root"))
+    assert g.steps[0].milestone_type == "input"
+    assert g.steps[0].detail.input.description == "root incident"
+
+
+def test_build_graph_partial_trace_phase1_only():
+    # début de run : phase1 émise, rien d'autre -> graphe valide croissant
+    meta = _provisional_meta_live("root")
+    events = [
+        Phase1FilteredEvent(session_id="live", task_id="root", agent_id="a1", passed=True, fit_score=0.8),
+    ]
+    g = build_graph(events, meta)
+    assert g.steps[0].milestone_type == "input"
+    assert len(g.steps) >= 1  # pas de crash, graphe partiel rendu
+
+
+def test_build_graph_growing_trace_adds_steps():
+    # un event supplémentaire produit au moins autant d'étapes (graphe cumulatif)
+    meta = _provisional_meta_live("root")
+    base = [Phase1FilteredEvent(session_id="live", task_id="root", agent_id="a1", passed=True, fit_score=0.8)]
+    grown = base + [DispatchedEvent(session_id="live", task_id="root", agent_id="a1", reason="best fit")]
+    assert len(build_graph(grown, meta).steps) >= len(build_graph(base, meta).steps)
