@@ -902,9 +902,13 @@ def _output_detail(exit_id: str, runs: dict[str, "_TaskRun"]) -> "OutputDetail":
                         output_content=executed.output_content, llm_metadata=executed.llm_metadata)
 
 
-def _attach_todos(steps: list[GraphStep], tree: "_Tree", runs: dict[str, "_TaskRun"]) -> None:
+def _attach_todos(steps: list[GraphStep], tree: "_Tree", runs: dict[str, "_TaskRun"],
+                  running: bool = False) -> None:
     """Post-processing : TODO hiérarchique par jalon (révélation au DIVIDER parent,
-    parent_id/depth/first_step_index/note). Mute les steps en place."""
+    parent_id/depth/first_step_index/note). Mute les steps en place.
+
+    `running` (session live) : une tâche sans résultat n'est PAS déclarée morte —
+    elle n'a juste pas encore fini. Seul un run terminé peut conclure à l'échec."""
     if not steps:
         return
     first_step: dict[str, int] = {}
@@ -961,8 +965,9 @@ def _attach_todos(steps: list[GraphStep], tree: "_Tree", runs: dict[str, "_TaskR
                 state: Literal["pending", "current", "done", "failed"] = "done"
             elif tid in cur_chain:
                 terminal = last_subtree.get(tid, -1) == i and tid == s.sub_task_id
-                if terminal and not _has_result(tid, runs):
+                if terminal and not _has_result(tid, runs) and not running:
                     state = "failed"     # dernier jalon de la tâche, sans résultat : mort constatée
+                                         # (jamais en live : "pas fini" ≠ "échoué")
                 elif (tid == s.sub_task_id and s.milestone_type == "evaluator"
                         and s.outcome == "qa_fail"):
                     state = "failed"
@@ -1001,7 +1006,13 @@ def _build_steps(tree: "_Tree", runs: dict[str, "_TaskRun"],
 
     steps += _walk(tree.root_id, trunk_anchor, tree, runs, acc)
 
-    final_exit = _exit_node(tree.root_id, runs)
+    # Live : une session running n'a pas d'OUTPUT final. Tant que la racine n'est pas
+    # finalisée, `_exit_node` peut renvoyer un sink déjà passé (ex. 1re sous-tâche QA-OK
+    # d'un run divisé encore en cours) → on émettrait un jalon OUTPUT prématuré pointant
+    # vers le terminal, donnant l'illusion d'un run fini à chaque évaluation. On attend
+    # la finalisation (status="complete") pour matérialiser le terminal.
+    running = session_meta is not None and session_meta.status == "running"
+    final_exit = None if running else _exit_node(tree.root_id, runs)
     if final_exit:
         acc.add_backbone(final_exit, "output", "descent")
         out_detail = StepDetail(input=root_input, output=_output_detail(final_exit, runs))
@@ -1012,7 +1023,7 @@ def _build_steps(tree: "_Tree", runs: dict[str, "_TaskRun"],
             outcome="divided" if (root_run and root_run.divided) else
                     (root_run.passes[-1].outcome if root_run and root_run.passes else "no_qa"),
             detail=out_detail))
-    _attach_todos(steps, tree, runs)
+    _attach_todos(steps, tree, runs, running)
     return steps
 
 

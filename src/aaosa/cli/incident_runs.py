@@ -151,6 +151,10 @@ def run_once(scenario: str, runs_root: Path, client: OpenAI) -> RunOutcome:
     (session_dir / "meta.json").write_text(
         provisional.model_dump_json(indent=2), encoding="utf-8"
     )
+    # registre provisoire : le live mode résout les noms d'agents dès le 1er poll
+    # (sinon les nœuds du graphe restent labélisés par uuid jusqu'à la finalisation).
+    # save_session le réécrit avec l'ELO final au step 3.
+    save_agent_registry(agents, session_dir / "agents.json")
     tracer = StreamingTracer(session_id=session_id, stream_path=session_dir / "trace.jsonl")
 
     ctx = RunContext(
