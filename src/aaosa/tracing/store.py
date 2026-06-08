@@ -101,3 +101,19 @@ def load_trace(path: Path) -> list[ClaimEvent]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def load_trace_partial(path: Path) -> list[ClaimEvent]:
+    """Comme load_trace, mais tolère un fichier partiellement écrit (poll live).
+    Lit le fichier ligne par ligne ; à la première ligne invalide (tronquée ou
+    corrompue), interrompt la lecture et renvoie le préfixe valide accumulé.
+    La ligne cassée sera rattrapée au tick de poll suivant."""
+    out: list[ClaimEvent] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            out.append(_event_adapter.validate_json(line))
+        except ValueError:
+            break  # ligne invalide (tronquée ou corrompue) — on arrête, le préfixe valide est rendu
+    return out

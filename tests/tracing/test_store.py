@@ -5,12 +5,13 @@ import pytest
 from pydantic import TypeAdapter
 
 from aaosa.core.agent import Agent
-from aaosa.tracing.events import ClaimEvent, ExecutedEvent
+from aaosa.tracing.events import ClaimEvent, ExecutedEvent, UnassignedEvent
 from aaosa.tracing.store import (
     AgentRegistry,
     AgentRegistryEntry,
     SessionMeta,
     SessionTaskRecord,
+    load_trace_partial,
     new_session_id,
     save_agent_registry,
     save_session,
@@ -237,6 +238,33 @@ def test_session_meta_legacy_json_without_status_parses():
     })
     meta = SessionMeta.model_validate_json(legacy)
     assert meta.status == "complete"
+
+
+def _partial_line(task_id: str) -> str:
+    return UnassignedEvent(session_id="s", task_id=task_id, reason="x").model_dump_json()
+
+
+def test_load_trace_partial_reads_all_valid_lines(tmp_path):
+    path = tmp_path / "trace.jsonl"
+    path.write_text(_partial_line("t0") + "\n" + _partial_line("t1") + "\n", encoding="utf-8")
+    events = load_trace_partial(path)
+    assert [e.task_id for e in events] == ["t0", "t1"]
+
+
+def test_load_trace_partial_tolerates_truncated_last_line(tmp_path):
+    # append concurrent surpris mi-écriture : la dernière ligne est tronquée
+    path = tmp_path / "trace.jsonl"
+    good = _partial_line("t0")
+    truncated = _partial_line("t1")[:15]  # tronque le JSON : assez de caractères pour être non vide mais pas parsable
+    path.write_text(good + "\n" + truncated, encoding="utf-8")
+    events = load_trace_partial(path)
+    assert [e.task_id for e in events] == ["t0"]  # préfixe valide rendu, ligne cassée ignorée
+
+
+def test_load_trace_partial_empty_file(tmp_path):
+    path = tmp_path / "trace.jsonl"
+    path.write_text("", encoding="utf-8")
+    assert load_trace_partial(path) == []
 
 
 class TestSaveSessionAgents:
