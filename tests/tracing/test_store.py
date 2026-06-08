@@ -202,6 +202,43 @@ class TestLoadTrace:
         assert events[0].reason == "x"
 
 
+def _meta_kwargs():
+    from datetime import datetime, timezone
+    now = datetime(2026, 6, 8, 10, 0, 0, tzinfo=timezone.utc)
+    return dict(
+        session_id="s1",
+        started_at=now,
+        ended_at=now,
+        tasks=[],
+        agent_ids=["a1"],
+    )
+
+
+def test_session_meta_status_defaults_to_complete():
+    # rétrocompat : un meta sans le champ status est valide et vaut "complete"
+    meta = SessionMeta(**_meta_kwargs())
+    assert meta.status == "complete"
+
+
+def test_session_meta_status_running_accepted():
+    meta = SessionMeta(**_meta_kwargs(), status="running")
+    assert meta.status == "running"
+
+
+def test_session_meta_legacy_json_without_status_parses():
+    # un meta.json d'avant ce champ (extra="forbid") doit parser et défaulter
+    import json
+    legacy = json.dumps({
+        "session_id": "s1",
+        "started_at": "2026-06-08T10:00:00+00:00",
+        "ended_at": "2026-06-08T10:00:00+00:00",
+        "tasks": [],
+        "agent_ids": ["a1"],
+    })
+    meta = SessionMeta.model_validate_json(legacy)
+    assert meta.status == "complete"
+
+
 class TestSaveSessionAgents:
     def _meta(self, sid):
         from datetime import datetime, timezone

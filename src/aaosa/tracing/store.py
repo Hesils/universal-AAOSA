@@ -70,6 +70,7 @@ class SessionMeta(BaseModel):
     ended_at: datetime
     tasks: list[SessionTaskRecord]
     agent_ids: list[str]
+    status: Literal["running", "complete"] = "complete"
 
 
 def save_session(
