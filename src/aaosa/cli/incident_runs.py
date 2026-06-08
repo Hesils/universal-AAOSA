@@ -39,7 +39,7 @@ from aaosa.tracing.store import (
     save_agent_registry,
     save_session,
 )
-from aaosa.tracing.tracer import Tracer
+from aaosa.tracing.tracer import StreamingTracer
 
 _ROSTERS = {"main": full_roster, "roster_gap": roster_gap_roster}
 
@@ -114,15 +114,44 @@ def _result_kind(result: Output | DispatchResult | QAFailure) -> RunKind:
 
 
 def run_once(scenario: str, runs_root: Path, client: OpenAI) -> RunOutcome:
-    """Un run incident complet : roster frais + ELO appliqué -> run_with_recovery
-    (jamais de division forcée, thèse D1) -> persistance (registry, session,
-    snapshot). Mécanique migrée de run_incident.py (phase 3, supprimé)."""
+    """Un run incident complet, observable en live : crée la session + meta
+    provisoire (status="running") AVANT exécution, streame la trace au fil de
+    l'eau (StreamingTracer), finalise (status="complete", ended_at, outcome) APRÈS."""
     session_id = new_session_id()
-    tracer = Tracer(session_id=session_id)
     started_at = datetime.now(timezone.utc)
+    session_dir = runs_root / "sessions" / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
 
     agents = _ROSTERS[scenario]()
     load_elo_into(agents, runs_root)
+    task = build_data_leak_task()
+
+    def _meta(status: str, ended_at: datetime, outcome: str) -> SessionMeta:
+        return SessionMeta(
+            session_id=session_id,
+            started_at=started_at,
+            ended_at=ended_at,
+            tasks=[
+                SessionTaskRecord(
+                    id=task.id,
+                    description=task.description,
+                    winner_agent_id=None,
+                    outcome=outcome,
+                    required_tags=task.required_tags,
+                    context=task.context,
+                )
+            ],
+            agent_ids=[a.id for a in agents],
+            status=status,
+        )
+
+    # 1) meta provisoire + trace streamée -> session visible dès le démarrage
+    # outcome "divided" = placeholder le temps du run (status="running" fait foi ; finalisé phase 3).
+    provisional = _meta("running", started_at, "divided")
+    (session_dir / "meta.json").write_text(
+        provisional.model_dump_json(indent=2), encoding="utf-8"
+    )
+    tracer = StreamingTracer(session_id=session_id, stream_path=session_dir / "trace.jsonl")
 
     ctx = RunContext(
         agents=agents,
@@ -134,27 +163,25 @@ def run_once(scenario: str, runs_root: Path, client: OpenAI) -> RunOutcome:
         evaluator=AdaptiveSpecEvaluator(client),
     )
 
-    task = build_data_leak_task()
-    result = run_with_recovery(task, ctx)
+    # 2) exécution -> events streamés incrémentalement
+    try:
+        result = run_with_recovery(task, ctx)
+    except Exception:
+        # crash : finaliser le meta en "complete" pour que le dashboard live
+        # cesse de poller une session morte (outcome "unassigned" = aucun résultat
+        # attribué ; la trace partielle streamée reste la vérité).
+        (session_dir / "meta.json").write_text(
+            _meta("complete", datetime.now(timezone.utc), "unassigned").model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        raise
+    finally:
+        tracer.close()  # libère le handle (lock Windows) avant réécriture
     kind = _result_kind(result)
 
+    # 3) finalisation : meta complete + save_session réécrit la trace depuis la mémoire (handle fermé).
     save_agent_registry(agents, runs_root / "agents" / "registry.json")
-    meta = SessionMeta(
-        session_id=session_id,
-        started_at=started_at,
-        ended_at=datetime.now(timezone.utc),
-        tasks=[
-            SessionTaskRecord(
-                id=task.id,
-                description=task.description,
-                winner_agent_id=None,
-                outcome=_META_OUTCOME[kind],
-                required_tags=task.required_tags,
-                context=task.context,
-            )
-        ],
-        agent_ids=[a.id for a in agents],
-    )
+    meta = _meta("complete", datetime.now(timezone.utc), _META_OUTCOME[kind])
     session_dir = save_session(tracer, meta, runs_root, agents=agents)
 
     snapshot_dir = runs_root / "elo_snapshots"

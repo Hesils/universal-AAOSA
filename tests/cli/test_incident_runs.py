@@ -12,7 +12,9 @@ from aaosa.cli.incident_runs import (
     ensure_empty_store,
     load_elo_into,
     run_campaign,
+    run_once,
 )
+from aaosa.tracing.store import SessionMeta
 from aaosa.core.agent import Agent
 from aaosa.elo.persistence import save_snapshot
 from aaosa.qa.protocol import QAFailure, QAResult
@@ -220,3 +222,68 @@ class TestRunCampaign:
         )
         index = run_campaign(1, "main", tmp_path, client=None)
         assert index.runs[0].outcome == "qa_fail"
+
+
+class TestRunOnceLive:
+    def _output_for(self, task):
+        from aaosa.schemas.output import LLMMetadata, Output
+        return Output(
+            task_id=task.id, agent_id="log-analyst", content="done",
+            llm_metadata=LLMMetadata(model_name="m", tokens_in=1, tokens_out=1, latency_ms=1.0),
+        )
+
+    def test_provisional_meta_running_written_before_exec(self, tmp_path, monkeypatch):
+        captured = {}
+
+        def fake_recovery(task, ctx):
+            sdir = next((tmp_path / "sessions").iterdir())
+            meta = SessionMeta.model_validate_json(
+                (sdir / "meta.json").read_text(encoding="utf-8")
+            )
+            captured["status_during"] = meta.status
+            captured["trace_exists_during"] = (sdir / "trace.jsonl").exists()
+            captured["desc_during"] = meta.tasks[0].description
+            return self._output_for(task)
+
+        monkeypatch.setattr(incident_runs, "run_with_recovery", fake_recovery)
+        outcome = run_once("main", tmp_path, client=None)
+
+        assert captured["status_during"] == "running"
+        assert captured["trace_exists_during"] is True
+        assert captured["desc_during"]  # non vide = vraie description de tâche
+
+    def test_meta_finalized_complete_after_exec(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            incident_runs, "run_with_recovery",
+            lambda task, ctx: self._output_for(task),
+        )
+        outcome = run_once("main", tmp_path, client=None)
+        final = SessionMeta.model_validate_json(
+            (outcome.session_dir / "meta.json").read_text(encoding="utf-8")
+        )
+        assert final.status == "complete"
+        assert final.ended_at >= final.started_at
+
+    def test_trace_persisted_and_reloadable_after_run(self, tmp_path, monkeypatch):
+        from aaosa.tracing.store import load_trace
+        monkeypatch.setattr(
+            incident_runs, "run_with_recovery",
+            lambda task, ctx: self._output_for(task),
+        )
+        outcome = run_once("main", tmp_path, client=None)
+        events = load_trace(outcome.session_dir / "trace.jsonl")
+        assert isinstance(events, list)  # pas de crash de relecture (handle fermé)
+
+    def test_meta_finalized_complete_on_exception(self, tmp_path, monkeypatch):
+        # un run qui crashe ne doit pas laisser la session bloquée en "running"
+        # (sinon le dashboard live la re-poll indéfiniment)
+        def boom(task, ctx):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(incident_runs, "run_with_recovery", boom)
+        with pytest.raises(RuntimeError, match="boom"):
+            run_once("main", tmp_path, client=None)
+
+        sdir = next((tmp_path / "sessions").iterdir())
+        meta = SessionMeta.model_validate_json((sdir / "meta.json").read_text(encoding="utf-8"))
+        assert meta.status == "complete"  # finalisé malgré le crash
