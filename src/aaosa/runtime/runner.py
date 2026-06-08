@@ -9,7 +9,7 @@ from aaosa.qa.diagnostic import DiagnosticResult, FailureContext, diagnose_failu
 from aaosa.qa.protocol import QAEvaluator, QAFailure
 from aaosa.qa.spec_evaluator import AdaptiveSpecEvaluator
 from aaosa.runtime.context import RunContext
-from aaosa.runtime.divider import DivisionResult
+from aaosa.runtime.divider import DivisionResult, find_cycle_indices
 from aaosa.runtime.tagger import EmptyTaggingError
 from aaosa.schemas.elo import DEFAULT_REQUIRED_ELO
 from aaosa.schemas.output import Output
@@ -17,6 +17,7 @@ from aaosa.schemas.task import Task
 from aaosa.tracing.events import (
     DiagnosedEvent,
     DividedSubTask,
+    DividerCycleEvent,
     EloUpdatedEvent,
     ExecutedEvent,
     QAEvaluatedEvent,
@@ -250,6 +251,65 @@ def build_sub_tasks(parent_task: Task, division: DivisionResult, ctx: RunContext
     return sub_tasks
 
 
+def _divide_with_cycle_retry(
+    task: Task,
+    ctx: RunContext,
+    chained_context: list[Task] | None,
+    failure_context: FailureContext | None,
+) -> DivisionResult | None:
+    """Appelle le divider et garantit une découpe acyclique exécutable, sinon None.
+
+    Le LLM produit parfois une `DivisionResult` structurellement valide (Pydantic
+    passe) mais sémantiquement inexécutable : `depends_on_indices` cyclique ou hors
+    bornes. Détecté en pur (find_cycle_indices) AVANT build_sub_tasks, on ré-invoque
+    le divider UNE fois en nommant les indices fautifs (cycle_context). Le payload
+    brut est tracé à chaque détection (jamais conservé auparavant). Retourne None si
+    le retry reste cyclique — l'appelant retombe sur l'erreur contenue actuelle. Un
+    seul retry, jamais de boucle."""
+    division = ctx.divider.divide(
+        task, ctx.client,
+        chained_context=chained_context,
+        failure_context=failure_context,
+    )
+    if division.is_atomic:
+        return division
+
+    cycle = find_cycle_indices(division)
+    if cycle is None:
+        return division
+
+    _emit_cycle_event(task, division, cycle, retried=True, ctx=ctx)
+    division = ctx.divider.divide(
+        task, ctx.client,
+        chained_context=chained_context,
+        failure_context=failure_context,
+        cycle_context=cycle,
+    )
+    if division.is_atomic:
+        return division
+
+    cycle = find_cycle_indices(division)
+    if cycle is None:
+        return division
+
+    _emit_cycle_event(task, division, cycle, retried=False, ctx=ctx)
+    return None  # retry encore cyclique → erreur contenue propre côté appelant
+
+
+def _emit_cycle_event(
+    task: Task, division: DivisionResult, cycle: list[int], retried: bool, ctx: RunContext
+) -> None:
+    if ctx.tracer is None:
+        return
+    ctx.tracer.emit(DividerCycleEvent(
+        session_id=ctx.tracer.session_id,
+        task_id=task.id,
+        cycle_indices=cycle,
+        depends_on_indices=[list(s.depends_on_indices) for s in division.sub_tasks],
+        retried=retried,
+    ))
+
+
 def _divide_and_recover(
     task: Task,
     ctx: RunContext,
@@ -267,15 +327,18 @@ def _divide_and_recover(
         return atomic_fallback
 
     try:
-        division = ctx.divider.divide(
-            task, ctx.client,
-            chained_context=chained_context,
-            failure_context=failure_context,
+        division = _divide_with_cycle_retry(
+            task, ctx, chained_context, failure_context,
         )
     except Exception:
         return DispatchResult(
             status="execution_failed", agent_id=None,
             reason="divider raised an exception",
+        )
+    if division is None:
+        return DispatchResult(
+            status="execution_failed", agent_id=None,
+            reason="divider produced a cyclic division (retry exhausted)",
         )
     if division.is_atomic:
         return atomic_fallback

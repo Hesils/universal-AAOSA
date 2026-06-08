@@ -124,6 +124,14 @@ class TaskAggregatedEvent(_BaseEvent):
     llm_metadata: LLMMetadata | None = None
 
 
+class DividerCycleEvent(_BaseEvent):
+    type: Literal["divider_cycle"] = "divider_cycle"
+    task_id: str                          # parent task whose division was cyclic
+    cycle_indices: list[int]              # sub-task indices forming/feeding the cycle
+    depends_on_indices: list[list[int]]   # payload divider BRUT (jamais conservé avant)
+    retried: bool                         # True = 1er cycle → retry déclenché ; False = retry échoué
+
+
 ClaimEvent = Annotated[
     Union[
         Phase1FilteredEvent,
@@ -140,6 +148,7 @@ ClaimEvent = Annotated[
         ToolCalledEvent,
         TaskDividedEvent,
         TaskAggregatedEvent,
+        DividerCycleEvent,
     ],
     Field(discriminator="type"),
 ]
