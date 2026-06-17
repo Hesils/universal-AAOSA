@@ -21,6 +21,8 @@ class Agent(BaseModel):
     tags_with_elo: dict[str, int]
     system_prompt: str
     tools: list[ToolDef] = Field(default_factory=list)    # A5
+    provider: str | None = None   # d6i — None = provider par défaut du run
+    model: str | None = None      # d6i — None = modèle par défaut du provider
 
     @field_validator("tags_with_elo")
     @classmethod

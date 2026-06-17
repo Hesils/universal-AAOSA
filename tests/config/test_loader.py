@@ -162,3 +162,19 @@ class TestLoadAgentsTools:
         )
         with pytest.raises(ValueError, match="duplicate"):
             load_agents(_write(tmp_path, yaml_txt), tool_registry=REGISTRY)
+
+
+def test_loader_reads_provider_and_model(tmp_path):
+    from aaosa.config.loader import load_agents
+    p = tmp_path / "agents.yaml"
+    p.write_text(
+        "- name: Local\n"
+        "  tags_with_elo: {python: 50}\n"
+        "  system_prompt: p\n"
+        "  provider: ollama\n"
+        "  model: llama3.1\n",
+        encoding="utf-8",
+    )
+    agents = load_agents(p)
+    assert agents[0].provider == "ollama"
+    assert agents[0].model == "llama3.1"

@@ -317,6 +317,19 @@ class TestAgentExecute:
         assert any(task.description in m["content"] for m in user_msgs)
 
 
+class TestAgentProviderModel:
+    def test_provider_and_model_default_to_none(self):
+        a = Agent(name="A", tags_with_elo={"x": 50}, system_prompt="p")
+        assert a.provider is None
+        assert a.model is None
+
+    def test_provider_and_model_can_be_set(self):
+        a = Agent(name="A", tags_with_elo={"x": 50}, system_prompt="p",
+                  provider="ollama", model="llama3.1")
+        assert a.provider == "ollama"
+        assert a.model == "llama3.1"
+
+
 class TestBuildUserContent:
     """Tests for Agent._build_user_content method."""
 

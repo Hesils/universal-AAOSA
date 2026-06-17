@@ -2,6 +2,9 @@
 # Chargés par aaosa.config.loader.load_agents — le champ id est généré à la volée.
 # Le nom est l'identifiant stable (matché par les snapshots ELO).
 # tools : noms résolus en ToolDef via le tool_registry passé à load_agents.
+# Champ optionnel par agent (d6i) :
+#   provider: openai | ollama   (défaut : provider du run)
+#   model: <nom de modèle>      (défaut : modèle du provider)
 
 - name: Frontend
   tags_with_elo:
