@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from aaosa.claiming.dispatch import DispatchResult
 from aaosa.core.agent import Agent
 from aaosa.demo.incident.prompts import AGGREGATOR_PROMPT, DIVIDER_PROMPT, TAGGER_PROMPT
+from aaosa.schemas.task import Task
 from aaosa.demo.incident.scenarios import (
     build_data_leak_task,
     full_roster,
@@ -97,34 +98,37 @@ class RunOutcome:
     n_agents: int
 
 
-def _result_kind(result: Output | DispatchResult | QAFailure) -> RunKind:
-    """Mappe le retour de run_with_recovery sur le vocabulaire d'index.
-
-    Un échec QA non récupéré remonte en DispatchResult(status="qa_failed")
-    (_route_diagnostic ne laisse jamais échapper un QAFailure) ; l'arm QAFailure
-    reste en défense de l'annotation de run_with_recovery.
-    """
-    if isinstance(result, Output):
-        return "success"
-    if isinstance(result, QAFailure):
-        return "qa_fail"
-    if result.status == "qa_failed":
-        return "qa_fail"
-    return "unassigned"
+@dataclass(frozen=True)
+class _PersistedResult:
+    """Sortie du scaffolding partagé : tout ce dont run_once/solve_once ont besoin."""
+    kind: RunKind
+    session_id: str
+    session_dir: Path
+    snapshot_path: Path
+    tracer: "StreamingTracer"
+    task: Task
+    result: object  # Output | DispatchResult | QAFailure
 
 
-def run_once(scenario: str, runs_root: Path, provider: LLMProvider) -> RunOutcome:
-    """Un run incident complet, observable en live : crée la session + meta
-    provisoire (status="running") AVANT exécution, streame la trace au fil de
-    l'eau (StreamingTracer), finalise (status="complete", ended_at, outcome) APRÈS."""
+def _persisted_run(
+    agents: list[Agent],
+    runs_root: Path,
+    build_ctx: "Callable[[StreamingTracer], RunContext]",
+    make_task: "Callable[[RunContext], Task]",
+) -> _PersistedResult:
+    """Scaffolding commun à run_once/solve_once : session + meta provisoire (live) +
+    trace streamée + exécution contenue + finalisation + snapshot ELO mono-store.
+
+    L'ordre place tracer/ctx avant make_task (solve tague via ctx.tagger ; le tagger
+    n'émet aucun event -> le meta provisoire reste antérieur au run)."""
     session_id = new_session_id()
     started_at = datetime.now(timezone.utc)
     session_dir = runs_root / "sessions" / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
 
-    agents = _ROSTERS[scenario]()
-    load_elo_into(agents, runs_root)
-    task = build_data_leak_task()
+    tracer = StreamingTracer(session_id=session_id, stream_path=session_dir / "trace.jsonl")
+    ctx = build_ctx(tracer)
+    task = make_task(ctx)
 
     def _meta(status: str, ended_at: datetime, outcome: str) -> SessionMeta:
         return SessionMeta(
@@ -145,45 +149,22 @@ def run_once(scenario: str, runs_root: Path, provider: LLMProvider) -> RunOutcom
             status=status,
         )
 
-    # 1) meta provisoire + trace streamée -> session visible dès le démarrage
-    # outcome "divided" = placeholder le temps du run (status="running" fait foi ; finalisé phase 3).
     provisional = _meta("running", started_at, "divided")
-    (session_dir / "meta.json").write_text(
-        provisional.model_dump_json(indent=2), encoding="utf-8"
-    )
-    # registre provisoire : le live mode résout les noms d'agents dès le 1er poll
-    # (sinon les nœuds du graphe restent labélisés par uuid jusqu'à la finalisation).
-    # save_session le réécrit avec l'ELO final au step 3.
+    (session_dir / "meta.json").write_text(provisional.model_dump_json(indent=2), encoding="utf-8")
     save_agent_registry(agents, session_dir / "agents.json")
-    tracer = StreamingTracer(session_id=session_id, stream_path=session_dir / "trace.jsonl")
 
-    ctx = RunContext(
-        agents=agents,
-        provider=provider,
-        divider=TaskDivider(system_prompt=DIVIDER_PROMPT),
-        aggregator=TaskAggregator(system_prompt=AGGREGATOR_PROMPT),
-        tagger=Tagger(system_prompt=TAGGER_PROMPT),
-        tracer=tracer,
-        evaluator=AdaptiveSpecEvaluator(provider),
-    )
-
-    # 2) exécution -> events streamés incrémentalement
     try:
         result = run_with_recovery(task, ctx)
     except Exception:
-        # crash : finaliser le meta en "complete" pour que le dashboard live
-        # cesse de poller une session morte (outcome "unassigned" = aucun résultat
-        # attribué ; la trace partielle streamée reste la vérité).
         (session_dir / "meta.json").write_text(
             _meta("complete", datetime.now(timezone.utc), "unassigned").model_dump_json(indent=2),
             encoding="utf-8",
         )
         raise
     finally:
-        tracer.close()  # libère le handle (lock Windows) avant réécriture
-    kind = _result_kind(result)
+        tracer.close()
 
-    # 3) finalisation : meta complete + save_session réécrit la trace depuis la mémoire (handle fermé).
+    kind = _result_kind(result)
     save_agent_registry(agents, runs_root / "agents" / "registry.json")
     meta = _meta("complete", datetime.now(timezone.utc), _META_OUTCOME[kind])
     session_dir = save_session(tracer, meta, runs_root, agents=agents)
@@ -192,13 +173,53 @@ def run_once(scenario: str, runs_root: Path, provider: LLMProvider) -> RunOutcom
     snapshot_dir.mkdir(parents=True, exist_ok=True)
     snapshot_path = save_snapshot(agents, snapshot_dir)
 
+    return _PersistedResult(
+        kind=kind, session_id=session_id, session_dir=session_dir,
+        snapshot_path=snapshot_path, tracer=tracer, task=task, result=result,
+    )
+
+
+def _result_kind(result: Output | DispatchResult | QAFailure) -> RunKind:
+    """Mappe le retour de run_with_recovery sur le vocabulaire d'index.
+
+    Un échec QA non récupéré remonte en DispatchResult(status="qa_failed")
+    (_route_diagnostic ne laisse jamais échapper un QAFailure) ; l'arm QAFailure
+    reste en défense de l'annotation de run_with_recovery.
+    """
+    if isinstance(result, Output):
+        return "success"
+    if isinstance(result, QAFailure):
+        return "qa_fail"
+    if result.status == "qa_failed":
+        return "qa_fail"
+    return "unassigned"
+
+
+def run_once(scenario: str, runs_root: Path, provider: LLMProvider) -> RunOutcome:
+    """Un run incident complet, observable en live. Consomme le scaffolding partagé
+    `_persisted_run` (identique à l'inline d'origine ; prompts/évaluateur incident)."""
+    agents = _ROSTERS[scenario]()
+    load_elo_into(agents, runs_root)
+
+    def build_ctx(tracer: StreamingTracer) -> RunContext:
+        return RunContext(
+            agents=agents,
+            provider=provider,
+            divider=TaskDivider(system_prompt=DIVIDER_PROMPT),
+            aggregator=TaskAggregator(system_prompt=AGGREGATOR_PROMPT),
+            tagger=Tagger(system_prompt=TAGGER_PROMPT),
+            tracer=tracer,
+            evaluator=AdaptiveSpecEvaluator(provider),
+        )
+
+    pr = _persisted_run(agents, runs_root, build_ctx, make_task=lambda ctx: build_data_leak_task())
     return RunOutcome(
-        kind=kind,
-        session_id=session_id,
-        session_dir=session_dir,
-        snapshot_path=snapshot_path,
-        events=list(tracer.events),
-        task_description=task.description,
+        kind=pr.kind,
+        session_id=pr.session_id,
+        session_dir=pr.session_dir,
+        snapshot_path=pr.snapshot_path,
+        events=list(pr.tracer.events),
+        task_description=pr.task.description,
         n_agents=len(agents),
     )
 
