@@ -67,7 +67,7 @@ def make_task(required_tags=None, description="Build a login form") -> Task:
 
 
 class _FakeParseClient:
-    """Mocks client.beta.chat.completions.parse -> a pre-built EvaluatorSpec."""
+    """Mocks provider.client.beta.chat.completions.parse -> a pre-built EvaluatorSpec."""
 
     def __init__(self, parsed):
         self._parsed = parsed
@@ -75,6 +75,10 @@ class _FakeParseClient:
         self.beta = self
         self.chat = self
         self.completions = self
+
+    @property
+    def client(self):
+        return self
 
     def parse(self, **kwargs):
         self.captured_kwargs = kwargs
@@ -88,6 +92,10 @@ class _RaisingClient:
         self.beta = self
         self.chat = self
         self.completions = self
+
+    @property
+    def client(self):
+        return self
 
     def parse(self, **kwargs):
         raise RuntimeError("LLM unavailable")

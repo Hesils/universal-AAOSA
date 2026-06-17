@@ -27,12 +27,12 @@ def make_agent(name="AgentA", elo=80) -> Agent:
 
 
 def _claim_for(agent):
-    def _claim(self, task, client, decision="claim"):
+    def _claim(self, task, provider, decision="claim"):
         return Claim(agent_id=agent.id, task_id=task.id, decision="claim", justification="ok")
     return _claim
 
 
-def _execute(self, task, client, tracer=None):
+def _execute(self, task, provider, tracer=None):
     return Output(task_id=task.id, agent_id=self.id, content=f"out-{task.description}",
                   llm_metadata=LLMMetadata(model_name="m", tokens_in=1, tokens_out=1, latency_ms=1.0))
 
@@ -69,10 +69,10 @@ def _acyclic_division() -> DivisionResult:
 
 def _ctx(divider, agents, tracer=None) -> RunContext:
     return RunContext(
-        agents=agents, client=SimpleNamespace(),
+        agents=agents, provider=SimpleNamespace(),
         divider=divider,
         aggregator=SimpleNamespace(),
-        tagger=SimpleNamespace(tag=lambda desc, agents, client: ["python"]),
+        tagger=SimpleNamespace(tag=lambda desc, agents, provider: ["python"]),
         tracer=tracer,
     )
 

@@ -27,9 +27,10 @@ def _task() -> Task:
 def _parse_client(attribution="agent", consignes="be concise", reason="r"):
     result = DiagnosticResult(attribution=attribution, consignes=consignes, reason=reason)
     parsed = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=result))])
-    return SimpleNamespace(
+    inner = SimpleNamespace(
         beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=lambda **kw: parsed)))
     )
+    return SimpleNamespace(client=inner)
 
 
 def _json_fallback_client(attribution="task_spec", reason="ambiguous"):
@@ -40,19 +41,21 @@ def _json_fallback_client(attribution="task_spec", reason="ambiguous"):
         payload = json.dumps({"attribution": attribution, "consignes": None, "reason": reason})
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=payload))])
 
-    return SimpleNamespace(
+    inner = SimpleNamespace(
         beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse))),
         chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
     )
+    return SimpleNamespace(client=inner)
 
 
 def _exploding_client():
     def boom(**kw):
         raise RuntimeError("boom")
-    return SimpleNamespace(
+    inner = SimpleNamespace(
         beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=boom))),
         chat=SimpleNamespace(completions=SimpleNamespace(create=boom)),
     )
+    return SimpleNamespace(client=inner)
 
 
 def test_failure_context_carries_output_and_qa():

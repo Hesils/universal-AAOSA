@@ -1,12 +1,12 @@
 import logging
 from typing import Literal
 
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
 from aaosa.qa.criteria import CRITERIA_REGISTRY
 from aaosa.qa.diagnostic import FailureContext
 from aaosa.qa.spec import CriterionSpec, EvaluatorSpec, JudgeSpec
+from aaosa.runtime.providers import LLMProvider
 from aaosa.schemas.elo import ELO_COMPETENT_MIN, ELO_EXPERT_MIN
 from aaosa.schemas.task import Task
 
@@ -210,7 +210,7 @@ def _build_prompt(task: Task, failure_context: FailureContext | None = None) -> 
 
 def build_llm_spec(
     task: Task,
-    client: OpenAI,
+    provider: LLMProvider,
     failure_context: FailureContext | None = None,
 ) -> EvaluatorSpec:
     """Génère un EvaluatorSpec via LLM (structured output).
@@ -222,7 +222,7 @@ def build_llm_spec(
     """
     threshold = _derive_threshold(task)
     try:
-        response = client.beta.chat.completions.parse(
+        response = provider.client.beta.chat.completions.parse(
             model="gpt-4o-mini",
             temperature=0.0,
             messages=[

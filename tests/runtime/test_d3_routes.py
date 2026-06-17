@@ -32,7 +32,7 @@ class _StubAgentRoster:
 
 def _ctx(evaluator=None) -> RunContext:
     return RunContext(
-        agents=[_StubAgentRoster()], client=SimpleNamespace(), divider=SimpleNamespace(),
+        agents=[_StubAgentRoster()], provider=SimpleNamespace(), divider=SimpleNamespace(),
         aggregator=SimpleNamespace(), tagger=SimpleNamespace(), tracer=None, evaluator=evaluator,
     )
 
@@ -125,19 +125,19 @@ class _DividerStub:
         self.division = division
         self.calls = []
 
-    def divide(self, task, client, chained_context=None, failure_context=None):
+    def divide(self, task, provider, chained_context=None, failure_context=None, cycle_context=None):
         self.calls.append(failure_context)
         return self.division
 
 
 class _AggStub:
-    def aggregate(self, task, sinks, client, tracer=None):
+    def aggregate(self, task, sinks, provider, tracer=None):
         return Output(task_id=task.id, agent_id="aggregator", content="aggregated",
                       llm_metadata=LLMMetadata(model_name="m", tokens_in=1, tokens_out=1, latency_ms=1.0))
 
 
 class _TaggerStub:
-    def tag(self, description, agents, client):
+    def tag(self, description, agents, provider):
         return ["python"]
 
 
@@ -150,7 +150,7 @@ def test_route_task_spec_divides_with_failure_context(monkeypatch):
     ])
     divider = _DividerStub(division)
 
-    def run_task_side_effect(task, agents, client, tracer, evaluator):
+    def run_task_side_effect(task, agents, provider, tracer, evaluator):
         if task.description == "do x":
             return _qa_fail()                      # parent échoue
         return _output(f"ok:{task.description}")   # sous-tâches réussissent
@@ -160,7 +160,7 @@ def test_route_task_spec_divides_with_failure_context(monkeypatch):
                         lambda *a, **k: DiagnosticResult(attribution="task_spec", reason="ambiguë"))
 
     ctx = RunContext(
-        agents=[_StubAgentRoster()], client=SimpleNamespace(), divider=divider,
+        agents=[_StubAgentRoster()], provider=SimpleNamespace(), divider=divider,
         aggregator=_AggStub(), tagger=_TaggerStub(), tracer=None, evaluator=None,
     )
     out = runner.run_with_recovery(_task(), ctx)
@@ -179,7 +179,7 @@ def test_route_task_spec_atomic_returns_qa_failed(monkeypatch):
     monkeypatch.setattr(runner, "diagnose_failure",
                         lambda *a, **k: DiagnosticResult(attribution="task_spec", reason="r"))
     ctx = RunContext(
-        agents=[_StubAgentRoster()], client=SimpleNamespace(), divider=divider,
+        agents=[_StubAgentRoster()], provider=SimpleNamespace(), divider=divider,
         aggregator=_AggStub(), tagger=_TaggerStub(), tracer=None, evaluator=None,
     )
     out = runner.run_with_recovery(_task(), ctx)
@@ -194,7 +194,7 @@ def test_route_task_spec_terminates_at_max_depth(monkeypatch):
     monkeypatch.setattr(runner, "diagnose_failure",
                         lambda *a, **k: DiagnosticResult(attribution="task_spec", reason="r"))
     ctx = RunContext(
-        agents=[_StubAgentRoster()], client=SimpleNamespace(), divider=divider,
+        agents=[_StubAgentRoster()], provider=SimpleNamespace(), divider=divider,
         aggregator=_AggStub(), tagger=_TaggerStub(), tracer=None, evaluator=None,
     )
     out = runner.run_with_recovery(_task(), ctx, depth=runner.MAX_RECOVERY_DEPTH)

@@ -41,9 +41,10 @@ def make_case(attribution="task_spec", description="vague task") -> TestCase:
 def _parse_client(corrected="A clear, specific task description.", justification="was ambiguous"):
     result = TaskSpecFix(corrected_description=corrected, justification=justification)
     parsed = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=result))])
-    return SimpleNamespace(
+    inner = SimpleNamespace(
         beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=lambda **kw: parsed)))
     )
+    return SimpleNamespace(client=inner)
 
 
 def _json_fallback_client(corrected="Corrected via JSON.", justification="fixed"):
@@ -54,10 +55,11 @@ def _json_fallback_client(corrected="Corrected via JSON.", justification="fixed"
         payload = json.dumps({"corrected_description": corrected, "justification": justification})
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=payload))])
 
-    return SimpleNamespace(
+    inner = SimpleNamespace(
         beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse))),
         chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
     )
+    return SimpleNamespace(client=inner)
 
 
 def _exploding_client():
@@ -67,10 +69,11 @@ def _exploding_client():
     def create(**kw):
         raise RuntimeError("create boom")
 
-    return SimpleNamespace(
+    inner = SimpleNamespace(
         beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse))),
         chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
     )
+    return SimpleNamespace(client=inner)
 
 
 class TestTaskSpecFix:

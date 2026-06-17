@@ -8,10 +8,10 @@ Le reste de la boucle (active_cases, graduate, run_health_check) est inchangé.
 
 import json
 
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict
 
 from aaosa.qa.test_set import TestCase, TestSet
+from aaosa.runtime.providers import LLMProvider
 
 
 class TaskSpecFix(BaseModel):
@@ -50,7 +50,7 @@ def _build_fix_prompt(case: TestCase) -> str:
     )
 
 
-def fix_task_spec(case: TestCase, client: OpenAI) -> TestCase | None:
+def fix_task_spec(case: TestCase, provider: LLMProvider) -> TestCase | None:
     """Retourne un nouveau TestCase avec description corrigée et attribution='unattributed'.
 
     Retourne None si le LLM échoue (le cas reste task_spec dans le TestSet).
@@ -60,7 +60,7 @@ def fix_task_spec(case: TestCase, client: OpenAI) -> TestCase | None:
 
     result: TaskSpecFix | None = None
     try:
-        response = client.beta.chat.completions.parse(
+        response = provider.client.beta.chat.completions.parse(
             model="gpt-4o-mini",
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
@@ -72,7 +72,7 @@ def fix_task_spec(case: TestCase, client: OpenAI) -> TestCase | None:
 
     if result is None:
         try:
-            response = client.chat.completions.create(
+            response = provider.client.chat.completions.create(
                 model="gpt-4o-mini",
                 temperature=0,
                 messages=[{"role": "user", "content": prompt}],
@@ -90,7 +90,7 @@ def fix_task_spec(case: TestCase, client: OpenAI) -> TestCase | None:
     return case.model_copy(update={"task": new_task, "attribution": "unattributed"})
 
 
-def fix_task_spec_cases(test_set: TestSet, client: OpenAI) -> TestSet:
+def fix_task_spec_cases(test_set: TestSet, provider: LLMProvider) -> TestSet:
     """Retourne un nouveau TestSet avec les cas task_spec corrigés. Autres cas inchangés.
 
     Les cas dont le fix échoue (LLM failure) restent task_spec. Ne mute pas l'input.
@@ -100,6 +100,6 @@ def fix_task_spec_cases(test_set: TestSet, client: OpenAI) -> TestSet:
         if case.attribution != "task_spec":
             new_cases.append(case)
             continue
-        fixed = fix_task_spec(case, client)
+        fixed = fix_task_spec(case, provider)
         new_cases.append(fixed if fixed is not None else case)
     return TestSet(cases=new_cases)

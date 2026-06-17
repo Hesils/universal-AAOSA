@@ -21,7 +21,7 @@ from aaosa.cli.incident_runs import (
 from aaosa.cli.report import build_report
 from aaosa.elo.persistence import load_snapshot
 from aaosa.demo.run_health_check_v3 import run_demo_health_check_v3
-from aaosa.runtime.llm_client import create_client
+from aaosa.runtime.llm_client import create_provider
 from aaosa.tracing.formatter import print_timeline
 from dashboard.app import create_app
 from dashboard.config import DashboardConfig
@@ -46,8 +46,8 @@ def run(
 ) -> None:
     """Un run incident : claiming -> recuperation D1/D3 -> persistance (ELO chaine)."""
     load_dotenv()
-    client = create_client()
-    outcome = run_once(scenario.value, runs_root, client)
+    provider = create_provider()
+    outcome = run_once(scenario.value, runs_root, provider)
 
     typer.echo(
         f"=== AAOSA incident - scenario: {scenario.value} ({outcome.n_agents} agents) ===\n"
@@ -75,13 +75,13 @@ def campaign(
         raise typer.Exit(code=1)
 
     load_dotenv()
-    client = create_client()
+    provider = create_provider()
     typer.echo(f"=== AAOSA campaign - scenario: {scenario.value}, n={n} ===")
 
     def _echo_run(record) -> None:
         typer.echo(f"run {record.i}/{n}: {record.outcome} {record.typologies}")
 
-    index = run_campaign(n, scenario.value, runs_root, client, on_run=_echo_run)
+    index = run_campaign(n, scenario.value, runs_root, provider, on_run=_echo_run)
     successes = sum(1 for r in index.runs if r.outcome == "success")
     typer.echo(f"\n{successes}/{n} success - index: {runs_root / 'campaign_index.json'}")
 

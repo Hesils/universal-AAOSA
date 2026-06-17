@@ -90,13 +90,13 @@ def llm_check(task: Task, output: Output, params: dict) -> CriterionOutcome:
     """Critère sémantique libre évalué par micro-appel LLM.
 
     Params : description (str, requis) = le critère à vérifier ;
-    client (OpenAI, requis) = injecté à l'évaluation (pas sérialisé dans la spec).
+    client (LLMProvider, requis) = injecté à l'évaluation (pas sérialisé dans la spec).
     """
     description = params.get("description")
     if not description:
         raise ValueError("llm_check requires a non-empty 'description' param")
-    client = params.get("client")
-    if client is None:
+    provider = params.get("client")
+    if provider is None:
         raise ValueError("llm_check requires a 'client' in params")
 
     system = (
@@ -109,7 +109,7 @@ def llm_check(task: Task, output: Output, params: dict) -> CriterionOutcome:
         f"# Criterion to check\n{description}\n\n"
         f"# Agent output\n{output.content}"
     )
-    response = client.beta.chat.completions.parse(
+    response = provider.client.beta.chat.completions.parse(
         model="gpt-4o-mini",
         temperature=0.0,
         messages=[

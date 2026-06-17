@@ -9,11 +9,12 @@ from aaosa.schemas.output import LLMMetadata, Output
 from aaosa.schemas.task import Task
 
 
-def _client_returning(division_result):
+def _provider_returning(division_result):
     parsed = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=division_result))])
-    return SimpleNamespace(
+    inner = SimpleNamespace(
         beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=lambda **kw: parsed)))
     )
+    return SimpleNamespace(client=inner)
 
 
 class TestDivisionResult:
@@ -42,7 +43,7 @@ class TestTaskDivider:
             SubTaskSpec(description="b", depends_on_indices=[0]),
         ])
         divider = TaskDivider(system_prompt="split")
-        out = divider.divide(Task(description="t", required_tags={"python": 30}), _client_returning(result))
+        out = divider.divide(Task(description="t", required_tags={"python": 30}), _provider_returning(result))
         assert isinstance(out, DivisionResult)
         assert [s.description for s in out.sub_tasks] == ["a", "b"]
         assert out.sub_tasks[1].depends_on_indices == [0]
@@ -51,10 +52,10 @@ class TestTaskDivider:
         from aaosa.schemas.task import Task
         result = DivisionResult(is_atomic=True, sub_tasks=[])
         divider = TaskDivider(system_prompt="split")
-        out = divider.divide(Task(description="t", required_tags={"python": 30}), _client_returning(result))
+        out = divider.divide(Task(description="t", required_tags={"python": 30}), _provider_returning(result))
         assert out.is_atomic is True
 
     def test_divide_raises_on_none_parsed(self):
         divider = TaskDivider(system_prompt="split")
         with pytest.raises(ValueError, match="no parsed"):
-            divider.divide(Task(description="t", required_tags={"python": 30}), _client_returning(None))
+            divider.divide(Task(description="t", required_tags={"python": 30}), _provider_returning(None))

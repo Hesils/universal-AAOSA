@@ -57,7 +57,7 @@ class _ExplodingAggregator:
 def _ctx(divider, tagger=None, aggregator=None, tracer=None, agents=None):
     return RunContext(
         agents=agents or [make_agent()],
-        client=object(),
+        provider=object(),
         divider=divider,
         aggregator=aggregator or _RecordingAggregator(),
         tagger=tagger or _FakeTagger(),

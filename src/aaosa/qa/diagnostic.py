@@ -9,10 +9,10 @@ runtime, au store, ni à l'historique. Indépendant de qa/triage.py (B2).
 import json
 from typing import Literal
 
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict
 
 from aaosa.qa.protocol import QAResult
+from aaosa.runtime.providers import LLMProvider
 from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
 
@@ -61,14 +61,14 @@ def diagnose_failure(
     task: Task,
     output: Output,
     qa_result: QAResult,
-    client: OpenAI,
+    provider: LLMProvider,
 ) -> DiagnosticResult | None:
     """Diagnostique un qa_fail. Retourne None si le LLM échoue (caller → unattributed)."""
     prompt = _build_diagnostic_prompt(task, output, qa_result)
 
     # Structured output (SDK 2.x)
     try:
-        response = client.beta.chat.completions.parse(
+        response = provider.client.beta.chat.completions.parse(
             model="gpt-4o-mini",
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
@@ -82,7 +82,7 @@ def diagnose_failure(
 
     # Fallback : completion brute + parse JSON
     try:
-        response = client.chat.completions.create(
+        response = provider.client.chat.completions.create(
             model="gpt-4o-mini",
             temperature=0,
             messages=[{"role": "user", "content": prompt}],

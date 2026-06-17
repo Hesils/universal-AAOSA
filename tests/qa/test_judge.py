@@ -30,13 +30,20 @@ class _FakeParseResponse:
         self.choices = [_FakeChoice(parsed)]
 
 class FakeParseClient:
-    """Capture les kwargs et retourne un JudgeResult pré-calculé."""
+    """Capture les kwargs et retourne un JudgeResult pré-calculé.
+
+    Expose `.client` pour s'adapter au pattern provider.client.beta.chat.completions.parse.
+    """
     def __init__(self, parsed: JudgeResult):
         self._parsed = parsed
         self.captured_kwargs = None
         self.beta = self
         self.chat = self
         self.completions = self
+
+    @property
+    def client(self):
+        return self
 
     def parse(self, **kwargs):
         self.captured_kwargs = kwargs

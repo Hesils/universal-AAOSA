@@ -3,10 +3,10 @@
 Génère les tags d'une tâche en fonction de sa description et du roster.
 """
 
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
 from aaosa.core.agent import Agent
+from aaosa.runtime.providers import LLMProvider
 
 
 class TagSet(BaseModel):
@@ -51,14 +51,14 @@ class Tagger:
             f"Task: {description}"
         )
 
-    def tag(self, description: str, agents: list[Agent], client: OpenAI) -> set[str]:
+    def tag(self, description: str, agents: list[Agent], provider: LLMProvider) -> set[str]:
         """Génère un ensemble de tags pour la description.
 
         Retourne un ensemble vide si le LLM échoue ou ne peut pas parser.
         """
         prompt = self._build_prompt(description, agents)
         try:
-            response = client.beta.chat.completions.parse(
+            response = provider.client.beta.chat.completions.parse(
                 model="gpt-4o-mini",
                 temperature=0.0,
                 messages=[

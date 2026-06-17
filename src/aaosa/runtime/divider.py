@@ -1,5 +1,6 @@
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from aaosa.runtime.providers import LLMProvider
 
 from aaosa.qa.diagnostic import FailureContext
 from aaosa.schemas.task import Task
@@ -136,7 +137,7 @@ class TaskDivider:
     def divide(
         self,
         task: Task,
-        client: OpenAI,
+        provider: LLMProvider,
         chained_context: list[Task] | None = None,
         failure_context: FailureContext | None = None,
         cycle_context: list[int] | None = None,
@@ -149,7 +150,7 @@ class TaskDivider:
         nomme les indices d'un cycle détecté à la découpe précédente pour orienter un
         unique retry. Le divider reste pur : il ne sait pas d'où viennent ces données
         ni qui les consomme."""
-        response = client.beta.chat.completions.parse(
+        response = provider.client.beta.chat.completions.parse(
             model="gpt-4o-mini",
             temperature=0.0,
             messages=[

@@ -55,48 +55,49 @@ def _tool_call(name, args_dict, call_id="call_1"):
     return SimpleNamespace(id=call_id, function=SimpleNamespace(name=name, arguments=json.dumps(args_dict)))
 
 
-def _queue_client(responses):
+def _queue_provider(responses):
+    """Retourne un provider-like (complete()) et un dict de capture."""
     it = iter(responses)
     captured = {"calls": []}
 
-    def create(**kwargs):
-        captured["calls"].append(kwargs)
+    def complete(*, messages, model=None, tools=None, **kwargs):
+        captured["calls"].append({"messages": messages, "model": model, "tools": tools, **kwargs})
         return next(it)
 
-    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    return client, captured
+    provider = SimpleNamespace(complete=complete)
+    return provider, captured
 
 
-def _always_tool_call_client():
-    def create(**kwargs):
+def _always_tool_call_provider():
+    def complete(*, messages, model=None, tools=None, **kwargs):
         return _resp("tool_calls", tool_calls=[_tool_call("echo", {"query": "loop"})])
 
-    return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    return SimpleNamespace(complete=complete)
 
 
 class TestExecuteWithTools:
     def test_execute_no_tools_unchanged(self):
-        client, _ = _queue_client([_resp("stop", content="answer")])
-        out = make_agent().execute(make_task(), client)
+        provider, _ = _queue_provider([_resp("stop", content="answer")])
+        out = make_agent().execute(make_task(), provider)
         assert isinstance(out, Output)
         assert out.content == "answer"
         assert out.llm_metadata.tool_calls_count == 0
 
     def test_execute_tools_llm_stops_immediately(self):
-        client, captured = _queue_client([_resp("stop", content="direct answer")])
-        out = make_agent(tools=[make_tool()]).execute(make_task(), client)
+        provider, captured = _queue_provider([_resp("stop", content="direct answer")])
+        out = make_agent(tools=[make_tool()]).execute(make_task(), provider)
         assert out.content == "direct answer"
         assert out.llm_metadata.tool_calls_count == 0
-        # tools were offered to the API
-        assert "tools" in captured["calls"][0]
+        # tools were offered to the provider
+        assert captured["calls"][0]["tools"] is not None
 
     def test_execute_tools_one_tool_call(self):
         responses = [
             _resp("tool_calls", tool_calls=[_tool_call("echo", {"query": "hi"})]),
             _resp("stop", content="final answer"),
         ]
-        client, _ = _queue_client(responses)
-        out = make_agent(tools=[make_tool()]).execute(make_task(), client)
+        provider, _ = _queue_provider(responses)
+        out = make_agent(tools=[make_tool()]).execute(make_task(), provider)
         assert out.content == "final answer"
         assert out.llm_metadata.tool_calls_count == 1
 
@@ -105,8 +106,8 @@ class TestExecuteWithTools:
             _resp("tool_calls", tool_calls=[_tool_call("echo", {"query": "hi"})], tin=5, tout=3),
             _resp("stop", content="done", tin=7, tout=2),
         ]
-        client, _ = _queue_client(responses)
-        out = make_agent(tools=[make_tool()]).execute(make_task(), client)
+        provider, _ = _queue_provider(responses)
+        out = make_agent(tools=[make_tool()]).execute(make_task(), provider)
         assert out.llm_metadata.tokens_in == 12
         assert out.llm_metadata.tokens_out == 5
 
@@ -115,10 +116,10 @@ class TestExecuteWithTools:
             _resp("tool_calls", tool_calls=[_tool_call("echo", {"query": "hi"})]),
             _resp("stop", content="final"),
         ]
-        client, _ = _queue_client(responses)
+        provider, _ = _queue_provider(responses)
         tracer = Tracer(session_id="sess-1")
         agent = make_agent(tools=[make_tool()])
-        agent.execute(make_task(), client, tracer)
+        agent.execute(make_task(), provider, tracer)
         events = [e for e in tracer.events if isinstance(e, ToolCalledEvent)]
         assert len(events) == 1
         assert events[0].tool_name == "echo"
@@ -127,12 +128,12 @@ class TestExecuteWithTools:
         assert events[0].agent_id == agent.id
 
     def test_execute_max_rounds_raises(self):
-        client = _always_tool_call_client()
+        provider = _always_tool_call_provider()
         with pytest.raises(RuntimeError, match="Max tool rounds"):
-            make_agent(tools=[make_tool()]).execute(make_task(), client)
+            make_agent(tools=[make_tool()]).execute(make_task(), provider)
 
     def test_execute_treats_length_as_terminal(self):
-        client, _ = _queue_client([_resp("length", content="truncated")])
-        out = make_agent(tools=[make_tool()]).execute(make_task(), client)
+        provider, _ = _queue_provider([_resp("length", content="truncated")])
+        out = make_agent(tools=[make_tool()]).execute(make_task(), provider)
         assert out.content == "truncated"
         assert out.llm_metadata.tool_calls_count == 0

@@ -19,7 +19,7 @@ from aaosa.schemas.task import Task
 
 
 class _FakeParseClient:
-    """Mocks client.beta.chat.completions.parse -> parsed object with .score/.reason."""
+    """Mocks provider.client.beta.chat.completions.parse -> parsed object with .score/.reason."""
 
     def __init__(self, parsed):
         self._parsed = parsed
@@ -27,6 +27,10 @@ class _FakeParseClient:
         self.beta = self
         self.chat = self
         self.completions = self
+
+    @property
+    def client(self):
+        return self
 
     def parse(self, **kwargs):
         self.captured_kwargs = kwargs

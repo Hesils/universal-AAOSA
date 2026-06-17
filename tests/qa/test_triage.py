@@ -39,16 +39,17 @@ def make_case(attribution="unattributed", description="do the thing") -> TestCas
 
 
 def _parse_client(attribution="agent", justification="because"):
-    """Mock client whose beta.chat.completions.parse returns a TriageResult."""
+    """Mock provider whose .client.beta.chat.completions.parse returns a TriageResult."""
     result = TriageResult(attribution=attribution, justification=justification)
     parsed = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=result))])
-    return SimpleNamespace(
+    inner = SimpleNamespace(
         beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=lambda **kw: parsed)))
     )
+    return SimpleNamespace(client=inner)
 
 
 def _json_fallback_client(attribution="task_spec", justification="ambiguous"):
-    """Mock client: structured parse raises, raw create returns JSON."""
+    """Mock provider: structured parse raises, raw create returns JSON."""
     def parse(**kw):
         raise RuntimeError("structured output unavailable")
 
@@ -56,10 +57,11 @@ def _json_fallback_client(attribution="task_spec", justification="ambiguous"):
         payload = json.dumps({"attribution": attribution, "justification": justification})
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=payload))])
 
-    return SimpleNamespace(
+    inner = SimpleNamespace(
         beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse))),
         chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
     )
+    return SimpleNamespace(client=inner)
 
 
 def _exploding_client():
@@ -69,10 +71,11 @@ def _exploding_client():
     def create(**kw):
         raise RuntimeError("create boom")
 
-    return SimpleNamespace(
+    inner = SimpleNamespace(
         beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse))),
         chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
     )
+    return SimpleNamespace(client=inner)
 
 
 class TestTriageResult:
@@ -130,10 +133,11 @@ class TestTriageUnattributed:
             calls["n"] += 1
             raise AssertionError("LLM should not be called for attributed cases")
 
-        client = SimpleNamespace(
+        inner = SimpleNamespace(
             beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
         )
-        result = triage_unattributed(ts, client)
+        provider = SimpleNamespace(client=inner)
+        result = triage_unattributed(ts, provider)
         assert calls["n"] == 0
         assert [c.attribution for c in result.cases] == ["agent", "task_spec", "evaluator"]
 
