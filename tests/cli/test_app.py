@@ -27,10 +27,10 @@ def _fake_outcome(tmp_path: Path, kind: str = "success") -> RunOutcome:
 
 class TestRunCommand:
     def test_run_default_scenario_is_main(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(app_module, "create_client", lambda: object())
+        monkeypatch.setattr(app_module, "create_provider", lambda *a, **k: object())
         captured = {}
 
-        def stub(scenario, runs_root, client):
+        def stub(scenario, runs_root, provider):
             captured["scenario"] = scenario
             captured["runs_root"] = runs_root
             return _fake_outcome(tmp_path)
@@ -44,10 +44,10 @@ class TestRunCommand:
         assert "success" in result.output
 
     def test_run_scenario_roster_gap(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(app_module, "create_client", lambda: object())
+        monkeypatch.setattr(app_module, "create_provider", lambda *a, **k: object())
         captured = {}
 
-        def stub(scenario, runs_root, client):
+        def stub(scenario, runs_root, provider):
             captured["scenario"] = scenario
             return _fake_outcome(tmp_path, kind="unassigned")
 
@@ -82,10 +82,10 @@ class TestCampaignCommand:
         assert "--runs-root" in result.output
 
     def test_campaign_wires_run_campaign(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(app_module, "create_client", lambda: object())
+        monkeypatch.setattr(app_module, "create_provider", lambda *a, **k: object())
         captured = {}
 
-        def stub(n, scenario, runs_root, client, on_run=None):
+        def stub(n, scenario, runs_root, provider, on_run=None):
             captured.update(n=n, scenario=scenario, runs_root=runs_root)
             return CampaignIndex(scenario=scenario, n_requested=n)
 
@@ -98,9 +98,9 @@ class TestCampaignCommand:
         assert captured["runs_root"] == tmp_path
 
     def test_campaign_echoes_records_and_summary(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(app_module, "create_client", lambda: object())
+        monkeypatch.setattr(app_module, "create_provider", lambda *a, **k: object())
 
-        def stub(n, scenario, runs_root, client, on_run=None):
+        def stub(n, scenario, runs_root, provider, on_run=None):
             records = [
                 CampaignRunRecord(
                     i=1, session_id="sess-1", outcome="success",

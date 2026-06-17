@@ -12,7 +12,7 @@ from aaosa.runtime.tagger import Tagger
 def _ctx() -> RunContext:
     return RunContext(
         agents=[Agent(name="A", tags_with_elo={"python": 80}, system_prompt="x")],
-        client=object(),
+        provider=object(),
         divider=TaskDivider(system_prompt="d"),
         aggregator=TaskAggregator(system_prompt="a"),
         tagger=Tagger(system_prompt="t"),
@@ -29,4 +29,4 @@ def test_runcontext_holds_dependencies():
 def test_runcontext_is_frozen():
     ctx = _ctx()
     with pytest.raises(dataclasses.FrozenInstanceError):
-        ctx.client = object()
+        ctx.provider = object()

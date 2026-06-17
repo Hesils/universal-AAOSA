@@ -174,16 +174,15 @@ from types import SimpleNamespace
 
 
 class _LLMCheckClient:
-    """Mock le micro-appel de llm_check : parse() -> parsed{score, reason}."""
+    """Mock le micro-appel de llm_check : parse() -> parsed{score, reason}.
+
+    Expose .parse(**kwargs) -> parsed object directement (pattern provider.parse).
+    """
     def __init__(self, score: float, reason: str = "ok"):
         self._parsed = SimpleNamespace(score=score, reason=reason)
-        self.beta = self
-        self.chat = self
-        self.completions = self
 
     def parse(self, **kwargs):
-        message = SimpleNamespace(parsed=self._parsed)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return self._parsed
 
 
 class TestLLMCheckIntegration:

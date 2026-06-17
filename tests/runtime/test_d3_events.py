@@ -33,7 +33,7 @@ class _StubAgentRoster:
 
 def _ctx(tracer: Tracer) -> RunContext:
     return RunContext(
-        agents=[_StubAgentRoster()], client=SimpleNamespace(), divider=SimpleNamespace(),
+        agents=[_StubAgentRoster()], provider=SimpleNamespace(), divider=SimpleNamespace(),
         aggregator=SimpleNamespace(), tagger=SimpleNamespace(), tracer=tracer, evaluator=None,
     )
 
@@ -77,12 +77,12 @@ def test_diagnosed_emitted_on_task_spec_route(monkeypatch):
                         lambda *a, **k: DiagnosticResult(attribution="task_spec", reason="ambiguous"))
 
     class _AtomicDivider:
-        def divide(self, task, client, chained_context=None, failure_context=None):
+        def divide(self, task, provider, chained_context=None, failure_context=None, cycle_context=None):
             from aaosa.runtime.divider import DivisionResult
             return DivisionResult(is_atomic=True)
 
     tracer = Tracer("s")
-    ctx = RunContext(agents=[_StubAgentRoster()], client=SimpleNamespace(), divider=_AtomicDivider(),
+    ctx = RunContext(agents=[_StubAgentRoster()], provider=SimpleNamespace(), divider=_AtomicDivider(),
                      aggregator=SimpleNamespace(), tagger=SimpleNamespace(), tracer=tracer, evaluator=None)
     runner.run_with_recovery(_task(), ctx)
     diag = _diag_events(tracer)
@@ -95,7 +95,7 @@ def test_no_tracer_no_crash(monkeypatch):
     monkeypatch.setattr(runner, "run_task", lambda *a, **k: calls.pop(0))
     monkeypatch.setattr(runner, "diagnose_failure",
                         lambda *a, **k: DiagnosticResult(attribution="agent", consignes="x", reason="r"))
-    ctx = RunContext(agents=[_StubAgentRoster()], client=SimpleNamespace(), divider=SimpleNamespace(),
+    ctx = RunContext(agents=[_StubAgentRoster()], provider=SimpleNamespace(), divider=SimpleNamespace(),
                      aggregator=SimpleNamespace(), tagger=SimpleNamespace(), tracer=None, evaluator=None)
     out = runner.run_with_recovery(_task(), ctx)
     assert isinstance(out, Output)

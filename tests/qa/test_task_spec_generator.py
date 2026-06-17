@@ -1,5 +1,4 @@
-import json
-from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
 from aaosa.qa.task_spec_generator import (
@@ -8,6 +7,7 @@ from aaosa.qa.task_spec_generator import (
     fix_task_spec_cases,
 )
 from aaosa.qa.test_set import TestCase, TestSet
+from aaosa.runtime.providers import LLMProvider
 from aaosa.schemas.output import LLMMetadata, Output
 from aaosa.schemas.task import Task
 
@@ -38,41 +38,6 @@ def make_case(attribution="task_spec", description="vague task") -> TestCase:
     )
 
 
-def _parse_client(corrected="A clear, specific task description.", justification="was ambiguous"):
-    result = TaskSpecFix(corrected_description=corrected, justification=justification)
-    parsed = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=result))])
-    return SimpleNamespace(
-        beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=lambda **kw: parsed)))
-    )
-
-
-def _json_fallback_client(corrected="Corrected via JSON.", justification="fixed"):
-    def parse(**kw):
-        raise RuntimeError("structured output unavailable")
-
-    def create(**kw):
-        payload = json.dumps({"corrected_description": corrected, "justification": justification})
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=payload))])
-
-    return SimpleNamespace(
-        beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse))),
-        chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
-    )
-
-
-def _exploding_client():
-    def parse(**kw):
-        raise RuntimeError("parse boom")
-
-    def create(**kw):
-        raise RuntimeError("create boom")
-
-    return SimpleNamespace(
-        beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse))),
-        chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
-    )
-
-
 class TestTaskSpecFix:
     def test_task_spec_fix_valid(self):
         fix = TaskSpecFix(corrected_description="clear desc", justification="was vague")
@@ -83,33 +48,56 @@ class TestTaskSpecFix:
 
 class TestFixTaskSpec:
     def test_fix_task_spec_corrects_description(self):
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = TaskSpecFix(
+            corrected_description="Sharp, specific task.", justification="was ambiguous"
+        )
         case = make_case(description="vague task")
-        fixed = fix_task_spec(case, _parse_client("Sharp, specific task."))
+        fixed = fix_task_spec(case, provider)
         assert fixed is not None
         assert fixed.task.description == "Sharp, specific task."
 
     def test_fix_task_spec_resets_attribution(self):
-        fixed = fix_task_spec(make_case(), _parse_client())
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = TaskSpecFix(
+            corrected_description="A clear, specific task description.", justification="was ambiguous"
+        )
+        fixed = fix_task_spec(make_case(), provider)
         assert fixed.attribution == "unattributed"
 
     def test_fix_task_spec_preserves_task_id(self):
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = TaskSpecFix(
+            corrected_description="A clear, specific task description.", justification="was ambiguous"
+        )
         case = make_case()
-        fixed = fix_task_spec(case, _parse_client())
+        fixed = fix_task_spec(case, provider)
         assert fixed.task.id == case.task.id
 
     def test_fix_task_spec_preserves_role_and_output(self):
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = TaskSpecFix(
+            corrected_description="A clear, specific task description.", justification="was ambiguous"
+        )
         case = make_case()
-        fixed = fix_task_spec(case, _parse_client())
+        fixed = fix_task_spec(case, provider)
         assert fixed.role == "fix_target"
         assert fixed.wrong_output == case.wrong_output
 
     def test_fix_task_spec_json_fallback(self):
-        fixed = fix_task_spec(make_case(), _json_fallback_client("From JSON."))
+        # After migration: no more dual-block; provider.parse returning result is sufficient.
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = TaskSpecFix(
+            corrected_description="From JSON.", justification="fixed"
+        )
+        fixed = fix_task_spec(make_case(), provider)
         assert fixed is not None
         assert fixed.task.description == "From JSON."
 
     def test_fix_task_spec_llm_failure_returns_none(self):
-        assert fix_task_spec(make_case(), _exploding_client()) is None
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = None
+        assert fix_task_spec(make_case(), provider) is None
 
 
 class TestFixTaskSpecCases:
@@ -119,7 +107,11 @@ class TestFixTaskSpecCases:
             make_case("agent", "fine"),
             make_case("evaluator", "strict"),
         ])
-        result = fix_task_spec_cases(ts, _parse_client("Fixed."))
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = TaskSpecFix(
+            corrected_description="Fixed.", justification="was ambiguous"
+        )
+        result = fix_task_spec_cases(ts, provider)
         assert result.cases[0].task.description == "Fixed."
         assert result.cases[0].attribution == "unattributed"
         assert result.cases[1].task.description == "fine"
@@ -128,11 +120,17 @@ class TestFixTaskSpecCases:
 
     def test_fix_task_spec_cases_keeps_task_spec_on_failure(self):
         ts = TestSet(cases=[make_case("task_spec")])
-        result = fix_task_spec_cases(ts, _exploding_client())
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = None
+        result = fix_task_spec_cases(ts, provider)
         assert result.cases[0].attribution == "task_spec"
 
     def test_fix_task_spec_cases_does_not_mutate_input(self):
         ts = TestSet(cases=[make_case("task_spec", "original")])
-        fix_task_spec_cases(ts, _parse_client("Fixed."))
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = TaskSpecFix(
+            corrected_description="Fixed.", justification="was ambiguous"
+        )
+        fix_task_spec_cases(ts, provider)
         assert ts.cases[0].task.description == "original"
         assert ts.cases[0].attribution == "task_spec"

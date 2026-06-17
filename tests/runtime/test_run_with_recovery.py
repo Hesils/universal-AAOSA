@@ -32,7 +32,7 @@ class _FakeTagger:
         self.mapping = mapping or {}
         self.default = set(default)
 
-    def tag(self, description, agents, client):
+    def tag(self, description, agents, provider):
         return set(self.mapping.get(description, self.default))
 
 
@@ -40,24 +40,24 @@ class _StaticDivider:
     def __init__(self, division):
         self.division = division
 
-    def divide(self, task, client, chained_context=None, failure_context=None):
+    def divide(self, task, provider, chained_context=None, failure_context=None):
         return self.division
 
 
 class _RecordingAggregator:
-    def aggregate(self, parent_task, sub_outputs, client, tracer=None):
+    def aggregate(self, parent_task, sub_outputs, provider, tracer=None):
         return make_output(parent_task.id, "agg")
 
 
 class _ExplodingAggregator:
-    def aggregate(self, parent_task, sub_outputs, client, tracer=None):
+    def aggregate(self, parent_task, sub_outputs, provider, tracer=None):
         raise RuntimeError("boom")
 
 
 def _ctx(divider, tagger=None, aggregator=None, tracer=None, agents=None):
     return RunContext(
         agents=agents or [make_agent()],
-        client=object(),
+        provider=object(),
         divider=divider,
         aggregator=aggregator or _RecordingAggregator(),
         tagger=tagger or _FakeTagger(),
@@ -79,7 +79,7 @@ def _two_independent_division():
     ])
 
 
-def _router(task, agents, client, tracer=None, evaluator=None):
+def _router(task, agents, provider, tracer=None, evaluator=None, provider_registry=None):
     """run_task simulé : la racine (description "t") reste unassigned pour déclencher la
     division ; chaque sous-tâche réussit avec un Output portant SON id (pour que _sinks
     fonctionne sur les vrais ids générés par build_sub_tasks)."""
@@ -92,7 +92,7 @@ class _SpyAggregator:
     def __init__(self):
         self.called_with = None
 
-    def aggregate(self, parent_task, sub_outputs, client, tracer=None):
+    def aggregate(self, parent_task, sub_outputs, provider, tracer=None):
         self.called_with = list(sub_outputs)
         return make_output(parent_task.id, "agg")
 
@@ -187,7 +187,7 @@ class TestRunWithRecovery:
 
     def test_divider_exception_returns_execution_failed(self):
         class _ExplodingDivider:
-            def divide(self, task, client):
+            def divide(self, task, provider):
                 raise RuntimeError("LLM timeout")
 
         ctx = _ctx(_ExplodingDivider())
@@ -233,7 +233,7 @@ class TestRunRecovery:
         called = {"tag": False}
 
         class _SpyTagger(_FakeTagger):
-            def tag(self, description, agents, client):
+            def tag(self, description, agents, provider):
                 called["tag"] = True
                 return {"python"}
 

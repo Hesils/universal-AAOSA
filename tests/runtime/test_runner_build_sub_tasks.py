@@ -9,14 +9,14 @@ from aaosa.schemas.task import Task
 
 
 class _StubTagger:
-    def tag(self, description, agents, client):
+    def tag(self, description, agents, provider):
         return ["python"]
 
 
 def _ctx() -> RunContext:
     return RunContext(
         agents=[],
-        client=SimpleNamespace(),
+        provider=SimpleNamespace(),
         divider=SimpleNamespace(),
         aggregator=SimpleNamespace(),
         tagger=_StubTagger(),

@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
 from aaosa.claiming.dispatch import DispatchResult
@@ -27,6 +26,7 @@ from aaosa.qa.spec_evaluator import AdaptiveSpecEvaluator
 from aaosa.runtime.aggregator import TaskAggregator
 from aaosa.runtime.context import RunContext
 from aaosa.runtime.divider import TaskDivider
+from aaosa.runtime.providers import LLMProvider
 from aaosa.runtime.runner import run_with_recovery
 from aaosa.runtime.tagger import Tagger
 from aaosa.schemas.output import Output
@@ -113,7 +113,7 @@ def _result_kind(result: Output | DispatchResult | QAFailure) -> RunKind:
     return "unassigned"
 
 
-def run_once(scenario: str, runs_root: Path, client: OpenAI) -> RunOutcome:
+def run_once(scenario: str, runs_root: Path, provider: LLMProvider) -> RunOutcome:
     """Un run incident complet, observable en live : crée la session + meta
     provisoire (status="running") AVANT exécution, streame la trace au fil de
     l'eau (StreamingTracer), finalise (status="complete", ended_at, outcome) APRÈS."""
@@ -159,12 +159,12 @@ def run_once(scenario: str, runs_root: Path, client: OpenAI) -> RunOutcome:
 
     ctx = RunContext(
         agents=agents,
-        client=client,
+        provider=provider,
         divider=TaskDivider(system_prompt=DIVIDER_PROMPT),
         aggregator=TaskAggregator(system_prompt=AGGREGATOR_PROMPT),
         tagger=Tagger(system_prompt=TAGGER_PROMPT),
         tracer=tracer,
-        evaluator=AdaptiveSpecEvaluator(client),
+        evaluator=AdaptiveSpecEvaluator(provider),
     )
 
     # 2) exécution -> events streamés incrémentalement
@@ -225,7 +225,7 @@ def run_campaign(
     n: int,
     scenario: str,
     runs_root: Path,
-    client: OpenAI | None,
+    provider: LLMProvider | None,
     on_run: Callable[[CampaignRunRecord], None] | None = None,
 ) -> CampaignIndex:
     """N runs séquentiels, ELO chaîné par les snapshots (run_once recharge
@@ -239,7 +239,7 @@ def run_campaign(
     for i in range(1, n + 1):
         started_at = datetime.now(timezone.utc)
         try:
-            outcome = run_once(scenario, runs_root, client)
+            outcome = run_once(scenario, runs_root, provider)
             record = CampaignRunRecord(
                 i=i,
                 session_id=outcome.session_id,

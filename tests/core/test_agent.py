@@ -3,12 +3,28 @@
 import pytest
 from pydantic import ValidationError
 from unittest.mock import MagicMock
-from openai import OpenAI
 
 from aaosa.core.agent import Agent
+from aaosa.runtime.providers import LLMProvider
 from aaosa.schemas.claim import Claim
 from aaosa.schemas.task import Task
 from aaosa.schemas.output import Output, LLMMetadata
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _provider_for_execute(content="answer", model="gpt-4o-mini"):
+    provider = MagicMock(spec=LLMProvider)
+    resp = MagicMock()
+    resp.choices[0].message.content = content
+    resp.choices[0].finish_reason = "stop"
+    resp.model = model
+    resp.usage.prompt_tokens = 10
+    resp.usage.completion_tokens = 5
+    provider.complete.return_value = resp
+    return provider
 
 
 class TestAgentCreation:
@@ -96,91 +112,51 @@ class TestAgentCreation:
 
 
 class TestAgentMethods:
-    """Tests for Agent methods."""
+    """Tests for Agent claim method — provider-based."""
 
-    def test_agent_claim_returns_claim(self):
-        """Test that claim returns a Claim with agent_id and task_id overridden from self."""
-        agent = Agent(
-            name="TestAgent",
-            tags_with_elo={"python": 75},
-            system_prompt="You are a test agent."
-        )
-        task = Task(description="Write a Python function", required_tags={"python": 50})
+    def test_claim_uses_provider_parse(self):
+        """provider.parse is called; returned Claim has agent_id from self.id."""
+        from aaosa.schemas.claim import Claim
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = Claim(
+            agent_id="x", task_id="t", decision="claim", justification="j")
+        agent = Agent(name="A", tags_with_elo={"python": 80}, system_prompt="p")
+        task = Task(id="t", description="d", required_tags={"python": 50})
+        claim = agent.claim(task, provider)
+        assert isinstance(claim, Claim)
+        assert claim.decision == "claim"
+        assert claim.agent_id == agent.id  # depuis self.id, jamais la réponse LLM
 
-        # Build a fake parsed Claim (LLM would return wrong ids — override must happen)
-        fake_claim = Claim(
-            agent_id="irrelevant",
-            task_id="irrelevant",
-            decision="claim",
-            justification="test justification",
-        )
+    def test_claim_raises_when_provider_returns_none(self):
+        """ValueError si provider.parse retourne None."""
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = None
+        agent = Agent(name="A", tags_with_elo={"python": 80}, system_prompt="p")
+        task = Task(id="t", description="d", required_tags={"python": 50})
+        with pytest.raises(ValueError):
+            agent.claim(task, provider)
 
-        # Mock the structured output path
-        mock_parsed_response = MagicMock()
-        mock_parsed_response.choices[0].message.parsed = fake_claim
-
-        client = MagicMock(spec=OpenAI)
-        client.beta.chat.completions.parse.return_value = mock_parsed_response
-
-        result = agent.claim(task, client)
-
-        assert isinstance(result, Claim)
-        assert result.agent_id == agent.id  # override must have happened
-        assert result.task_id == task.id    # override must have happened
-        assert result.decision in ("claim", "no_claim")
-
-    def test_agent_claim_uses_fallback_when_parsed_is_none(self):
-        """Test that claim falls back to JSON parse when structured output returns parsed=None."""
-        agent = Agent(
-            name="TestAgent",
-            tags_with_elo={"python": 75},
-            system_prompt="You are a test agent."
-        )
-        task = Task(description="Write a Python function", required_tags={"python": 50})
-
-        client = MagicMock(spec=OpenAI)
-
-        # Structured output path returns parsed=None
-        mock_parse_response = MagicMock()
-        mock_parse_response.choices[0].message.parsed = None
-        client.beta.chat.completions.parse.return_value = mock_parse_response
-
-        # Fallback path returns valid JSON
-        mock_create_response = MagicMock()
-        mock_create_response.choices[0].message.content = '{"decision": "no_claim", "justification": "Out of scope"}'
-        client.chat.completions.create.return_value = mock_create_response
-
-        result = agent.claim(task, client)
-
-        assert isinstance(result, Claim)
-        assert result.decision == "no_claim"
-        assert result.agent_id == agent.id
+    def test_claim_task_id_from_task(self):
+        """task_id dans le Claim vient de task.id, pas de la réponse LLM."""
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = Claim(
+            agent_id="irrelevant", task_id="irrelevant",
+            decision="no_claim", justification="j")
+        agent = Agent(name="A", tags_with_elo={"python": 80}, system_prompt="p")
+        task = Task(description="do x", required_tags={"python": 50})
+        result = agent.claim(task, provider)
         assert result.task_id == task.id
-
-    def test_agent_claim_uses_fallback_when_parse_raises(self):
-        """Test that claim falls back to JSON parse when structured output raises an exception."""
-        agent = Agent(
-            name="TestAgent",
-            tags_with_elo={"python": 75},
-            system_prompt="You are a test agent."
-        )
-        task = Task(description="Write a Python function", required_tags={"python": 50})
-
-        client = MagicMock(spec=OpenAI)
-
-        # Structured output path raises
-        client.beta.chat.completions.parse.side_effect = RuntimeError("unsupported")
-
-        # Fallback path returns valid JSON
-        mock_create_response = MagicMock()
-        mock_create_response.choices[0].message.content = '{"decision": "claim", "justification": "I can do it"}'
-        client.chat.completions.create.return_value = mock_create_response
-
-        result = agent.claim(task, client)
-
-        assert isinstance(result, Claim)
-        assert result.decision == "claim"
         assert result.agent_id == agent.id
+
+    def test_claim_no_claim_decision(self):
+        """decision='no_claim' est retourné fidèlement."""
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = Claim(
+            agent_id="x", task_id="t", decision="no_claim", justification="out of scope")
+        agent = Agent(name="A", tags_with_elo={"python": 80}, system_prompt="p")
+        task = Task(description="do x", required_tags={"python": 50})
+        result = agent.claim(task, provider)
+        assert result.decision == "no_claim"
 
 
 class TestAgentEdgeCases:
@@ -219,16 +195,10 @@ class TestAgentEdgeCases:
 class TestAgentExecute:
     """Tests for Agent.execute method."""
 
-    def make_mock_client(self):
-        """Create a mock LLM client with standard response."""
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.choices[0].message.content = "Done!"
-        mock_response.model = "gpt-4o-mini"
-        mock_response.usage.prompt_tokens = 10
-        mock_response.usage.completion_tokens = 5
-        mock_client.chat.completions.create.return_value = mock_response
-        return mock_client
+    @pytest.fixture
+    def provider(self):
+        """Create a mock LLMProvider with standard response."""
+        return _provider_for_execute(content="Done!")
 
     @pytest.fixture
     def agent(self):
@@ -244,77 +214,93 @@ class TestAgentExecute:
         """Create a test task."""
         return Task(description="Write a sorting function", required_tags={"python": 50})
 
-    def test_execute_returns_output_instance(self, agent, task):
+    def test_execute_returns_output_instance(self, agent, task, provider):
         """Test that execute returns an Output instance."""
-        mock_client = self.make_mock_client()
-        result = agent.execute(task, mock_client)
+        result = agent.execute(task, provider)
         assert isinstance(result, Output)
 
-    def test_execute_output_task_id_matches(self, agent, task):
+    def test_execute_output_task_id_matches(self, agent, task, provider):
         """Test that output task_id matches input task.id."""
-        mock_client = self.make_mock_client()
-        result = agent.execute(task, mock_client)
+        result = agent.execute(task, provider)
         assert result.task_id == task.id
 
-    def test_execute_output_agent_id_matches(self, agent, task):
+    def test_execute_output_agent_id_matches(self, agent, task, provider):
         """Test that output agent_id matches agent.id."""
-        mock_client = self.make_mock_client()
-        result = agent.execute(task, mock_client)
+        result = agent.execute(task, provider)
         assert result.agent_id == agent.id
 
-    def test_execute_output_content_from_llm(self, agent, task):
+    def test_execute_output_content_from_llm(self, agent, task, provider):
         """Test that output content comes from LLM response."""
-        mock_client = self.make_mock_client()
-        result = agent.execute(task, mock_client)
+        result = agent.execute(task, provider)
         assert result.content == "Done!"
 
-    def test_execute_llm_metadata_model_name(self, agent, task):
+    def test_execute_llm_metadata_model_name(self, agent, task, provider):
         """Test that llm_metadata.model_name is set from response.model."""
-        mock_client = self.make_mock_client()
-        result = agent.execute(task, mock_client)
+        result = agent.execute(task, provider)
         assert result.llm_metadata.model_name == "gpt-4o-mini"
 
-    def test_execute_llm_metadata_tokens_in(self, agent, task):
+    def test_execute_llm_metadata_tokens_in(self, agent, task, provider):
         """Test that llm_metadata.tokens_in is set from response.usage.prompt_tokens."""
-        mock_client = self.make_mock_client()
-        result = agent.execute(task, mock_client)
+        result = agent.execute(task, provider)
         assert result.llm_metadata.tokens_in == 10
 
-    def test_execute_llm_metadata_tokens_out(self, agent, task):
+    def test_execute_llm_metadata_tokens_out(self, agent, task, provider):
         """Test that llm_metadata.tokens_out is set from response.usage.completion_tokens."""
-        mock_client = self.make_mock_client()
-        result = agent.execute(task, mock_client)
+        result = agent.execute(task, provider)
         assert result.llm_metadata.tokens_out == 5
 
-    def test_execute_llm_metadata_latency_positive(self, agent, task):
+    def test_execute_llm_metadata_latency_positive(self, agent, task, provider):
         """Test that llm_metadata.latency_ms is positive."""
-        mock_client = self.make_mock_client()
-        result = agent.execute(task, mock_client)
+        result = agent.execute(task, provider)
         assert result.llm_metadata.latency_ms > 0
 
-    def test_execute_calls_client_once(self, agent, task):
-        """Test that client.chat.completions.create is called exactly once."""
-        mock_client = self.make_mock_client()
-        agent.execute(task, mock_client)
-        assert mock_client.chat.completions.create.call_count == 1
+    def test_execute_calls_provider_complete_once(self, agent, task, provider):
+        """Test that provider.complete is called exactly once (no-tools path)."""
+        agent.execute(task, provider)
+        assert provider.complete.call_count == 1
 
-    def test_execute_system_prompt_in_messages(self, agent, task):
+    def test_execute_system_prompt_in_messages(self, agent, task, provider):
         """Test that agent.system_prompt is included in messages with role 'system'."""
-        mock_client = self.make_mock_client()
-        agent.execute(task, mock_client)
-        call_args = mock_client.chat.completions.create.call_args
-        messages = call_args.kwargs.get("messages") or (call_args.args[0] if call_args.args else call_args.kwargs["messages"])
+        agent.execute(task, provider)
+        call_args = provider.complete.call_args
+        messages = call_args.kwargs.get("messages") or call_args.args[0]
         system_msgs = [m for m in messages if m.get("role") == "system"]
         assert any(agent.system_prompt in m["content"] for m in system_msgs)
 
-    def test_execute_task_description_as_user_message(self, agent, task):
+    def test_execute_task_description_as_user_message(self, agent, task, provider):
         """Test that task.description is included in messages with role 'user'."""
-        mock_client = self.make_mock_client()
-        agent.execute(task, mock_client)
-        call_args = mock_client.chat.completions.create.call_args
-        messages = call_args.kwargs.get("messages") or (call_args.args[0] if call_args.args else call_args.kwargs["messages"])
+        agent.execute(task, provider)
+        call_args = provider.complete.call_args
+        messages = call_args.kwargs.get("messages") or call_args.args[0]
         user_msgs = [m for m in messages if m.get("role") == "user"]
         assert any(task.description in m["content"] for m in user_msgs)
+
+    def test_execute_passes_agent_model_to_provider(self):
+        """provider.complete reçoit model=agent.model quand agent.model est défini."""
+        provider = _provider_for_execute()
+        agent = Agent(name="A", tags_with_elo={"python": 80}, system_prompt="p",
+                      model="gpt-4o")
+        task = Task(id="t", description="d", required_tags={"python": 50})
+        agent.execute(task, provider)
+        assert provider.complete.call_args.kwargs["model"] == "gpt-4o"
+
+    def test_execute_model_none_when_no_agent_model(self, agent, task, provider):
+        """provider.complete est appelé avec model=None quand agent.model est None."""
+        agent.execute(task, provider)
+        assert provider.complete.call_args.kwargs["model"] is None
+
+
+class TestAgentProviderModel:
+    def test_provider_and_model_default_to_none(self):
+        a = Agent(name="A", tags_with_elo={"x": 50}, system_prompt="p")
+        assert a.provider is None
+        assert a.model is None
+
+    def test_provider_and_model_can_be_set(self):
+        a = Agent(name="A", tags_with_elo={"x": 50}, system_prompt="p",
+                  provider="ollama", model="llama3.1")
+        assert a.provider == "ollama"
+        assert a.model == "llama3.1"
 
 
 class TestBuildUserContent:

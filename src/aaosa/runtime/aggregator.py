@@ -7,8 +7,7 @@ agent AAOSA — l'Output porte le sentinel agent_id="aggregator".
 
 import time
 
-from openai import OpenAI
-
+from aaosa.runtime.providers import LLMProvider
 from aaosa.schemas.output import LLMMetadata, Output
 from aaosa.schemas.task import Task
 from aaosa.tracing.events import TaskAggregatedEvent
@@ -42,7 +41,7 @@ class TaskAggregator:
         self,
         parent_task: Task,
         sub_outputs: list[Output],
-        client: OpenAI,
+        provider: LLMProvider,
         tracer: Tracer | None = None,
     ) -> Output:
         """LLM call → Output synthétisant les sub_outputs.
@@ -51,8 +50,7 @@ class TaskAggregator:
         """
         prompt = self._build_aggregate_prompt(parent_task, sub_outputs)
         start = time.monotonic()
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = provider.complete(
             messages=[
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": prompt},

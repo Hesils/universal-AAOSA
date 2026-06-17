@@ -6,13 +6,12 @@ jamais l'input. Le reste de la boucle (routing via attribution dans test_set.py,
 lifecycle.py, health_check.py) est inchangé.
 """
 
-import json
 from typing import Literal
 
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict
 
 from aaosa.qa.test_set import TestCase, TestSet
+from aaosa.runtime.providers import LLMProvider
 
 
 class TriageResult(BaseModel):
@@ -50,39 +49,17 @@ def _build_triage_prompt(case: TestCase) -> str:
     )
 
 
-def triage_case(case: TestCase, client: OpenAI) -> TriageResult | None:
+def triage_case(case: TestCase, provider: LLMProvider) -> TriageResult | None:
     """Classifie un seul TestCase. Retourne None si le LLM échoue (cas reste unattributed)."""
     prompt = _build_triage_prompt(case)
-
-    # Structured output (SDK 2.x)
-    try:
-        response = client.beta.chat.completions.parse(
-            model="gpt-4o-mini",
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}],
-            response_format=TriageResult,
-        )
-        parsed = response.choices[0].message.parsed
-        if parsed is not None:
-            return parsed
-    except Exception:
-        pass  # structured output indisponible — fallback JSON
-
-    # Fallback : completion brute + parse JSON (même pattern que Agent.claim)
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = response.choices[0].message.content or ""
-        data = json.loads(raw)
-        return TriageResult(attribution=data["attribution"], justification=data["justification"])
-    except Exception:
-        return None  # triage échoue → cas reste unattributed
+    return provider.parse(
+        messages=[{"role": "user", "content": prompt}],
+        schema=TriageResult,
+        temperature=0,
+    )
 
 
-def triage_unattributed(test_set: TestSet, client: OpenAI) -> TestSet:
+def triage_unattributed(test_set: TestSet, provider: LLMProvider) -> TestSet:
     """Retourne un nouveau TestSet avec les cas unattributed maintenant classifiés.
 
     Les cas déjà classifiés sont copiés tels quels (aucun appel LLM).
@@ -93,7 +70,7 @@ def triage_unattributed(test_set: TestSet, client: OpenAI) -> TestSet:
         if case.attribution != "unattributed":
             new_cases.append(case)
             continue
-        result = triage_case(case, client)
+        result = triage_case(case, provider)
         if result is None:
             new_cases.append(case)  # reste unattributed
         else:

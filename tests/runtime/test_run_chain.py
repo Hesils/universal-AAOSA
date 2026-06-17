@@ -33,13 +33,13 @@ def make_task(description="t", required_tags=None, depends_on=None) -> Task:
 
 
 def _claim_for(agent):
-    def _claim(task, client, decision="claim"):
+    def _claim(task, provider, decision="claim"):
         return Claim(agent_id=agent.id, task_id=task.id, decision="claim", justification="ok")
     return _claim
 
 
 def _recording_execute(recorded):
-    def fake_execute(self, task, client, tracer=None):
+    def fake_execute(self, task, provider, tracer=None):
         recorded[task.id] = list(task.required_outputs)
         return Output(
             task_id=task.id,
@@ -51,8 +51,9 @@ def _recording_execute(recorded):
 
 
 def _ctx_for_chain(agents):
+    from aaosa.runtime.providers import LLMProvider
     return RunContext(
-        agents=agents, client=MagicMock(),
+        agents=agents, provider=MagicMock(spec=LLMProvider),
         divider=TaskDivider(system_prompt="d"),
         aggregator=TaskAggregator(system_prompt="a"),
         tagger=Tagger(system_prompt="t"),
@@ -111,7 +112,7 @@ class TestRunChain:
         t2 = make_task("B")                       # indépendante -> réussit
         t3 = make_task("C", depends_on=[t1.id])   # dépend de la tâche en échec
 
-        def exploding_execute(self, task, client, tracer=None):
+        def exploding_execute(self, task, provider, tracer=None):
             if task.description == "A":
                 raise RuntimeError("max tool rounds exceeded")
             return Output(
@@ -173,15 +174,18 @@ class TestRunChain:
 
 
 class TestExecuteRequiredOutputs:
-    def _fake_client(self, capture):
-        def create(**kwargs):
-            capture["messages"] = kwargs["messages"]
+    def _fake_provider(self, capture):
+        def complete(*, messages, model=None, tools=None, **kwargs):
+            capture["messages"] = messages
             return SimpleNamespace(
                 model="gpt-4o-mini",
-                choices=[SimpleNamespace(message=SimpleNamespace(content="answer"))],
+                choices=[SimpleNamespace(
+                    message=SimpleNamespace(content="answer"),
+                    finish_reason="stop",
+                )],
                 usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
             )
-        return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        return SimpleNamespace(complete=complete)
 
     def test_execute_includes_required_outputs(self):
         a = make_agent()
@@ -191,7 +195,7 @@ class TestExecuteRequiredOutputs:
         )
         task = Task(description="use the dep", required_tags={"python": 60}, required_outputs=[dep])
         capture = {}
-        a.execute(task, self._fake_client(capture))
+        a.execute(task, self._fake_provider(capture))
         user_msg = capture["messages"][-1]["content"]
         assert "DEP_CONTENT_MARKER" in user_msg
 
@@ -199,7 +203,7 @@ class TestExecuteRequiredOutputs:
         a = make_agent()
         task = Task(description="standalone", required_tags={"python": 60})
         capture = {}
-        a.execute(task, self._fake_client(capture))
+        a.execute(task, self._fake_provider(capture))
         user_msg = capture["messages"][-1]["content"]
         assert "Required context from previous steps" not in user_msg
 
@@ -216,7 +220,7 @@ def test_run_chain_forwards_chained_context(monkeypatch):
     ancestor = Task(description="root", required_tags={"python": 50})
     sub = Task(description="child", required_tags={"python": 50})
     ctx = RunContext(
-        agents=[], client=SimpleNamespace(), divider=SimpleNamespace(),
+        agents=[], provider=SimpleNamespace(), divider=SimpleNamespace(),
         aggregator=SimpleNamespace(), tagger=SimpleNamespace(), tracer=None,
     )
     runner.run_chain([sub], ctx, depth=1, chained_context=[ancestor])

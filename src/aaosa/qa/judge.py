@@ -1,9 +1,9 @@
 from typing import Literal
 
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict
 
 from aaosa.qa.spec import JudgeSpec
+from aaosa.runtime.providers import LLMProvider
 from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
 
@@ -56,20 +56,19 @@ def run_judge(
     task: Task,
     output: Output,
     spec: JudgeSpec,
-    client: OpenAI,
+    provider: LLMProvider,
     reference: str | None = None,
 ) -> JudgeResult:
     user_message = _build_user_message(task, output, spec, reference)
-    response = client.beta.chat.completions.parse(
-        model=spec.model,
-        temperature=spec.temperature,
+    parsed = provider.parse(
         messages=[
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": user_message},
         ],
-        response_format=JudgeResult,
+        schema=JudgeResult,
+        model=spec.model,
+        temperature=spec.temperature,
     )
-    parsed = response.choices[0].message.parsed
     if parsed is None:
         raise ValueError("judge returned no parsed result")
     return parsed

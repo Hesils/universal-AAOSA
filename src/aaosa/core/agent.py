@@ -2,10 +2,10 @@ import json
 import time
 import uuid
 
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from aaosa.core.tool import MAX_TOOL_ROUNDS, ToolDef
+from aaosa.runtime.providers import LLMProvider
 from aaosa.schemas.claim import Claim
 from aaosa.schemas.output import Output, LLMMetadata
 from aaosa.schemas.task import Task
@@ -21,6 +21,8 @@ class Agent(BaseModel):
     tags_with_elo: dict[str, int]
     system_prompt: str
     tools: list[ToolDef] = Field(default_factory=list)    # A5
+    provider: str | None = None   # d6i — None = provider par défaut du run
+    model: str | None = None      # d6i — None = modèle par défaut du provider
 
     @field_validator("tags_with_elo")
     @classmethod
@@ -29,51 +31,26 @@ class Agent(BaseModel):
             raise ValueError("tags_with_elo cannot be empty")
         return v
 
-    def claim(self, task: Task, client: OpenAI) -> Claim:
-        from aaosa.claiming.prompts import prompt_template  # local import to avoid circular dependency
+    def claim(self, task: Task, provider: LLMProvider) -> Claim:
+        from aaosa.claiming.prompts import prompt_template  # éviter l'import circulaire
 
         user_message = prompt_template(self, task)
-
-        # Try OpenAI structured output (SDK 2.x)
-        try:
-            response = client.beta.chat.completions.parse(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": user_message},
-                ],
-                response_format=Claim,
-            )
-            parsed = response.choices[0].message.parsed
-            if parsed is not None:
-                return Claim(
-                    agent_id=self.id,
-                    task_id=task.id,
-                    decision=parsed.decision,
-                    justification=parsed.justification,
-                )
-        except Exception:
-            pass  # structured output unavailable or failed — fall through to JSON fallback
-
-        # Fallback: raw completion + JSON parse
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        parsed = provider.parse(
             messages=[
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": user_message},
             ],
+            schema=Claim,
+            model=self.model,
         )
-        raw = response.choices[0].message.content or ""
-        try:
-            data = json.loads(raw)
-            return Claim(
-                agent_id=self.id,
-                task_id=task.id,
-                decision=data["decision"],
-                justification=data["justification"],
-            )
-        except (json.JSONDecodeError, KeyError) as e:
-            raise ValueError(f"Failed to parse claim from LLM response: {e!r}. Raw: {raw!r}") from e
+        if parsed is None:
+            raise ValueError("Failed to parse claim from LLM response")
+        return Claim(
+            agent_id=self.id,
+            task_id=task.id,
+            decision=parsed.decision,
+            justification=parsed.justification,
+        )
 
     def _build_user_content(self, task: Task) -> str:
         context = task.context if task.context is not None else task.metadata.get("context", "")
@@ -87,18 +64,18 @@ class Agent(BaseModel):
             user_content = f"{user_content}\n\n{context}"
         return user_content.strip()
 
-    def execute(self, task: Task, client: OpenAI, tracer: Tracer | None = None) -> Output:
+    def execute(self, task: Task, provider: LLMProvider, tracer: Tracer | None = None) -> Output:
         user_content = self._build_user_content(task)
         start = time.monotonic()
 
         if not self.tools:
-            # Chemin V1/V2 — single call (inchangé)
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
+            # Chemin V1/V2 — single call
+            response = provider.complete(
                 messages=[
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": user_content},
                 ],
+                model=self.model,
             )
             latency_ms = (time.monotonic() - start) * 1000
             return Output(
@@ -126,9 +103,9 @@ class Agent(BaseModel):
         content = ""
 
         for _ in range(MAX_TOOL_ROUNDS):
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
+            response = provider.complete(
                 messages=messages,
+                model=self.model,
                 tools=openai_tools,
             )
             choice = response.choices[0]

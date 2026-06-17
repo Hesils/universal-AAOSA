@@ -20,28 +20,29 @@ def make_output(task_id="sub-1", content="piece") -> Output:
     )
 
 
-def _client(content="synthesized result"):
-    def create(**kwargs):
+def _provider(content="synthesized result"):
+    """Build a provider fake whose .complete() returns a ChatCompletion-shaped response."""
+    def complete(**kwargs):
         return SimpleNamespace(
             model="gpt-4o-mini",
             choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
             usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
         )
-    return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    return SimpleNamespace(complete=complete)
 
 
 class TestTaskAggregator:
     def test_aggregate_returns_output_with_parent_task_id(self):
         parent = make_parent()
         agg = TaskAggregator(system_prompt="You synthesize.")
-        out = agg.aggregate(parent, [make_output()], _client())
+        out = agg.aggregate(parent, [make_output()], _provider())
         assert isinstance(out, Output)
         assert out.task_id == parent.id
 
     def test_aggregate_agent_id_is_sentinel(self):
         parent = make_parent()
         agg = TaskAggregator(system_prompt="You synthesize.")
-        out = agg.aggregate(parent, [make_output()], _client())
+        out = agg.aggregate(parent, [make_output()], _provider())
         assert out.agent_id == "aggregator"
 
     def test_aggregate_emits_task_aggregated_event(self):
@@ -51,7 +52,7 @@ class TestTaskAggregator:
         out = agg.aggregate(
             parent,
             [make_output("sub-1"), make_output("sub-2")],
-            _client("final answer"),
+            _provider("final answer"),
             tracer,
         )
         events = [e for e in tracer.events if isinstance(e, TaskAggregatedEvent)]
@@ -63,7 +64,7 @@ class TestTaskAggregator:
     def test_aggregate_llm_metadata_populated(self):
         parent = make_parent()
         agg = TaskAggregator(system_prompt="You synthesize.")
-        out = agg.aggregate(parent, [make_output()], _client())
+        out = agg.aggregate(parent, [make_output()], _provider())
         assert out.llm_metadata is not None
         assert out.llm_metadata.tokens_in == 10
         assert out.llm_metadata.tokens_out == 5
@@ -71,7 +72,7 @@ class TestTaskAggregator:
     def test_prompt_frames_results_as_complementary(self):
         captured = {}
 
-        def create(**kwargs):
+        def complete(**kwargs):
             captured["user"] = kwargs["messages"][-1]["content"]
             return SimpleNamespace(
                 model="gpt-4o-mini",
@@ -79,7 +80,7 @@ class TestTaskAggregator:
                 usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
             )
 
-        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        provider = SimpleNamespace(complete=complete)
         agg = TaskAggregator(system_prompt="You synthesize.")
-        agg.aggregate(make_parent(), [make_output("a", "A"), make_output("b", "B")], client)
+        agg.aggregate(make_parent(), [make_output("a", "A"), make_output("b", "B")], provider)
         assert "complementary" in captured["user"].lower()

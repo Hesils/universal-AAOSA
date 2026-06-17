@@ -129,12 +129,13 @@ def async_task():
 
 
 @pytest.fixture
-def async_client():
-    return MagicMock()
+def async_provider():
+    from aaosa.runtime.providers import LLMProvider
+    return MagicMock(spec=LLMProvider)
 
 
 @pytest.mark.asyncio
-async def test_async_all_succeed(async_task, async_client):
+async def test_async_all_succeed(async_task, async_provider):
     """Test that all agents succeed and claims are returned in order."""
     agent_a = make_agent("AgentA")
     agent_b = make_agent("AgentB")
@@ -144,7 +145,7 @@ async def test_async_all_succeed(async_task, async_client):
     candidates = [(agent_a, 0.9), (agent_b, 0.8)]
 
     with patch.object(Agent, "claim", side_effect=[claim_a, claim_b]):
-        result = await run_phase2_async(async_task, candidates, async_client)
+        result = await run_phase2_async(async_task, candidates, async_provider)
 
     assert len(result) == 2
     assert result[0].agent_id == agent_a.id
@@ -152,26 +153,26 @@ async def test_async_all_succeed(async_task, async_client):
 
 
 @pytest.mark.asyncio
-async def test_async_one_fails_twice_skipped(async_task, async_client):
+async def test_async_one_fails_twice_skipped(async_task, async_provider):
     """Test that an agent failing twice is skipped silently."""
     agent = make_agent("AgentA")
     candidates = [(agent, 0.9)]
 
     with patch.object(Agent, "claim", side_effect=[Exception("fail1"), Exception("fail2")]):
-        result = await run_phase2_async(async_task, candidates, async_client)
+        result = await run_phase2_async(async_task, candidates, async_provider)
 
     assert len(result) == 0
 
 
 @pytest.mark.asyncio
-async def test_async_empty_candidates(async_task, async_client):
+async def test_async_empty_candidates(async_task, async_provider):
     """Test that empty candidates list returns empty result."""
-    result = await run_phase2_async(async_task, [], async_client)
+    result = await run_phase2_async(async_task, [], async_provider)
     assert result == []
 
 
 @pytest.mark.asyncio
-async def test_async_tracer_receives_events(async_task, async_client):
+async def test_async_tracer_receives_events(async_task, async_provider):
     """Test that tracer receives Phase2ClaimedEvent for each successful claim."""
     agent_a = make_agent("AgentA")
     agent_b = make_agent("AgentB")
@@ -182,7 +183,7 @@ async def test_async_tracer_receives_events(async_task, async_client):
     tracer = Tracer(session_id="s1")
 
     with patch.object(Agent, "claim", side_effect=[claim_a, claim_b]):
-        result = await run_phase2_async(async_task, candidates, async_client, tracer=tracer)
+        result = await run_phase2_async(async_task, candidates, async_provider, tracer=tracer)
 
     assert len(tracer.events) == 2
     assert all(isinstance(event, Phase2ClaimedEvent) for event in tracer.events)
@@ -193,7 +194,7 @@ async def test_async_tracer_receives_events(async_task, async_client):
 
 
 @pytest.mark.asyncio
-async def test_async_one_fails_then_retries_success(async_task, async_client):
+async def test_async_one_fails_then_retries_success(async_task, async_provider):
     """Test that retry succeeds after initial failure."""
     agent = make_agent("AgentA")
     claim = make_claim(agent, async_task)
@@ -201,7 +202,7 @@ async def test_async_one_fails_then_retries_success(async_task, async_client):
     candidates = [(agent, 0.9)]
 
     with patch.object(Agent, "claim", side_effect=[Exception("timeout"), claim]):
-        result = await run_phase2_async(async_task, candidates, async_client)
+        result = await run_phase2_async(async_task, candidates, async_provider)
 
     assert len(result) == 1
     assert result[0].agent_id == agent.id

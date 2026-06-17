@@ -1,5 +1,3 @@
-from openai import OpenAI
-
 from aaosa.claiming.dispatch import DispatchResult, dispatch
 from aaosa.claiming.phase1 import filter_candidates
 from aaosa.claiming.phase2 import run_phase2
@@ -10,6 +8,7 @@ from aaosa.qa.protocol import QAEvaluator, QAFailure
 from aaosa.qa.spec_evaluator import AdaptiveSpecEvaluator
 from aaosa.runtime.context import RunContext
 from aaosa.runtime.divider import DivisionResult, find_cycle_indices
+from aaosa.runtime.providers import LLMProvider
 from aaosa.runtime.tagger import EmptyTaggingError
 from aaosa.schemas.elo import DEFAULT_REQUIRED_ELO
 from aaosa.schemas.output import Output
@@ -41,13 +40,14 @@ def _roster_gap(task: Task, agents: list[Agent]) -> set[str]:
 def run_task(
     task: Task,
     agents: list[Agent],
-    client: OpenAI,
+    provider: LLMProvider,
     tracer: Tracer | None = None,
     evaluator: QAEvaluator | None = None,
+    provider_registry: dict[str, LLMProvider] | None = None,
 ) -> Output | DispatchResult | QAFailure:
     candidates = filter_candidates(task, agents, tracer)
     fit_scores = {agent.id: score for agent, score in candidates}
-    claims = run_phase2(task, candidates, client, tracer)
+    claims = run_phase2(task, candidates, provider, tracer)
 
     candidate_agents = [agent for agent, _ in candidates]
     result = dispatch(claims, task, candidate_agents, fit_scores, tracer)
@@ -58,12 +58,19 @@ def run_task(
     agent_map = {agent.id: agent for agent in candidate_agents}
     winner = agent_map[result.agent_id]
 
+    # Résolution du provider par agent (d6i fork #2) : si l'agent porte un nom de
+    # provider ET qu'un registre est fourni, on utilise le provider correspondant ;
+    # sinon on retombe sur le provider par défaut du run.
+    exec_provider = provider
+    if winner.provider and provider_registry:
+        exec_provider = provider_registry.get(winner.provider, provider)
+
     # Frontière de containment : execute() et evaluate() font des appels LLM (boucle
     # d'outils, juge) qui peuvent lever. run_task ne propage jamais ces erreurs ; il
     # renvoie DispatchResult(execution_failed). Simple et divisé se dégradent pareil
     # (run_chain s'appuie sur ce contrat, il n'a plus son propre try).
     try:
-        output = winner.execute(task, client, tracer)
+        output = winner.execute(task, exec_provider, tracer)
 
         if tracer is not None:
             tracer.emit(ExecutedEvent(
@@ -223,7 +230,7 @@ def build_sub_tasks(parent_task: Task, division: DivisionResult, ctx: RunContext
     produit aucun tag (clean-crash géré par run_with_recovery)."""
     sub_tasks: list[Task] = []
     for i, spec in enumerate(division.sub_tasks):
-        tags = ctx.tagger.tag(spec.description, ctx.agents, ctx.client)
+        tags = ctx.tagger.tag(spec.description, ctx.agents, ctx.provider)
         if not tags:
             raise EmptyTaggingError(spec.description)
         sub_tasks.append(Task(
@@ -267,7 +274,7 @@ def _divide_with_cycle_retry(
     le retry reste cyclique — l'appelant retombe sur l'erreur contenue actuelle. Un
     seul retry, jamais de boucle."""
     division = ctx.divider.divide(
-        task, ctx.client,
+        task, ctx.provider,
         chained_context=chained_context,
         failure_context=failure_context,
     )
@@ -280,7 +287,7 @@ def _divide_with_cycle_retry(
 
     _emit_cycle_event(task, division, cycle, retried=True, ctx=ctx)
     division = ctx.divider.divide(
-        task, ctx.client,
+        task, ctx.provider,
         chained_context=chained_context,
         failure_context=failure_context,
         cycle_context=cycle,
@@ -364,7 +371,7 @@ def _divide_and_recover(
         return sinks[0]   # court-circuit : un seul résultat terminal, rien à synthétiser
 
     try:
-        return ctx.aggregator.aggregate(task, sinks, ctx.client, ctx.tracer)
+        return ctx.aggregator.aggregate(task, sinks, ctx.provider, ctx.tracer)
     except Exception:
         return sinks[-1]
 
@@ -391,7 +398,10 @@ def _retry_with_consignes(
         retry_task = task.model_copy(update={"context": new_context})
     else:
         retry_task = task
-    result = run_task(retry_task, ctx.agents, ctx.client, ctx.tracer, ctx.evaluator)
+    result = run_task(
+        retry_task, ctx.agents, ctx.provider, ctx.tracer, ctx.evaluator,
+        provider_registry=ctx.provider_registry,
+    )
     if isinstance(result, Output):
         return result
     return _qa_failed(task, attribution=attribution, consignes_tried=True)
@@ -404,7 +414,7 @@ def _route_diagnostic(
     depth: int,
     chained_context: list[Task] | None,
 ) -> "Output | DispatchResult | QAFailure":
-    diagnostic = diagnose_failure(task, failure.output, failure.qa_result, ctx.client)
+    diagnostic = diagnose_failure(task, failure.output, failure.qa_result, ctx.provider)
 
     # Pattern observer : le RUNNER émet (diagnostic.py reste pur). Émis y compris
     # sur échec LLM (diagnostic=None → unattributed, reason vide).
@@ -430,7 +440,7 @@ def _route_diagnostic(
             qa_result=failure.qa_result,
             diagnostic_reason=diagnostic.reason,
         )
-        new_evaluator = AdaptiveSpecEvaluator(ctx.client, failure_context=fc)
+        new_evaluator = AdaptiveSpecEvaluator(ctx.provider, failure_context=fc)
         qa2 = new_evaluator.evaluate(task, failure.output)
         # Ré-évaluation VISIBLE : le runner trace la QA v2 (spec régénérée portée par spec_used).
         if ctx.tracer is not None:
@@ -487,7 +497,10 @@ def run_with_recovery(
             reason=f"no agent covers required tags: {sorted(missing)}",
         )
 
-    result = run_task(task, ctx.agents, ctx.client, ctx.tracer, ctx.evaluator)
+    result = run_task(
+        task, ctx.agents, ctx.provider, ctx.tracer, ctx.evaluator,
+        provider_registry=ctx.provider_registry,
+    )
 
     if isinstance(result, DispatchResult) and result.status == "unassigned":
         return _divide_and_recover(
@@ -511,7 +524,7 @@ def run_recovery(
     if pinned_tags:
         task = Task(description=description, required_tags=pinned_tags)
     else:
-        tags = ctx.tagger.tag(description, ctx.agents, ctx.client)
+        tags = ctx.tagger.tag(description, ctx.agents, ctx.provider)
         if not tags:
             return DispatchResult(
                 status="execution_failed",

@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from aaosa.demo.agents import DEMO_AGENTS
+from aaosa.runtime.providers import LLMProvider
 from aaosa.demo.tasks import TASK_SECURITY_AUDIT
 from aaosa.qa.adaptive import build_adaptive_spec, build_llm_spec
 from aaosa.qa.health_check import run_health_check, save_health_check
@@ -16,7 +17,7 @@ from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
 from aaosa.qa.task_spec_generator import fix_task_spec_cases
 from aaosa.qa.test_set import TestCase, TestSet, active_cases
 from aaosa.qa.triage import triage_unattributed
-from aaosa.runtime.llm_client import create_client
+from aaosa.runtime.llm_client import create_provider
 from aaosa.schemas.output import LLMMetadata, Output
 from aaosa.schemas.task import Task
 from aaosa.tracing.store import new_session_id
@@ -55,14 +56,14 @@ def _wrong_output(task: Task, content: str) -> Output:
     )
 
 
-def _spec_for(task: Task, client: OpenAI | None):
-    """Spec LLM (B1) si un client est fourni — exerce llm_check via le SpecEvaluator
-    corrigé que run_health_check construit avec le client. Sinon spec déterministe
+def _spec_for(task: Task, provider: LLMProvider | None):
+    """Spec LLM (B1) si un provider est fourni — exerce llm_check via le SpecEvaluator
+    corrigé que run_health_check construit avec le provider. Sinon spec déterministe
     (build offline reproductible pour le test unitaire)."""
-    return build_llm_spec(task, client) if client is not None else build_adaptive_spec(task)
+    return build_llm_spec(task, provider) if provider is not None else build_adaptive_spec(task)
 
 
-def build_seed_test_set(client: OpenAI | None = None) -> TestSet:
+def build_seed_test_set(provider: LLMProvider | None = None) -> TestSet:
     """Trois cas runtime_failure non attribués, conçus pour orienter le triage (B2)
     vers trois attributions distinctes. Voir le design 2026-06-03.
 
@@ -75,14 +76,14 @@ def build_seed_test_set(client: OpenAI | None = None) -> TestSet:
         # tâche bien formée + output nul -> triage attendu "agent"
         TestCase(
             task=TASK_SECURITY_AUDIT,
-            evaluator_spec=_spec_for(TASK_SECURITY_AUDIT, client),
+            evaluator_spec=_spec_for(TASK_SECURITY_AUDIT, provider),
             origin="runtime_failure", role="fix_target", attribution="unattributed",
             wrong_output=_wrong_output(TASK_SECURITY_AUDIT, "Looks fine to me."),
         ),
         # contraintes contradictoires + effort de bonne foi -> triage attendu "task_spec" -> B3
         TestCase(
             task=TASK_CONTRADICTORY,
-            evaluator_spec=_spec_for(TASK_CONTRADICTORY, client),
+            evaluator_spec=_spec_for(TASK_CONTRADICTORY, provider),
             origin="runtime_failure", role="fix_target", attribution="unattributed",
             wrong_output=_wrong_output(
                 TASK_CONTRADICTORY,
@@ -112,26 +113,26 @@ def _print_attributions(label: str, ts: TestSet) -> None:
 
 def run_demo_health_check_v3() -> None:
     load_dotenv()
-    client = create_client()
+    provider = create_provider()
     print("=== AAOSA Demo V3 — Health check + boucle B2/B3 ===\n")
 
-    seed = build_seed_test_set(client)
+    seed = build_seed_test_set(provider)
     _print_attributions("Seed (toutes unattributed)", seed)
 
-    triaged = triage_unattributed(seed, client)       # B2
+    triaged = triage_unattributed(seed, provider)       # B2
     _print_attributions("Apres triage (B2)", triaged)
 
-    fixed = fix_task_spec_cases(triaged, client)       # B3 (reset task_spec -> unattributed)
+    fixed = fix_task_spec_cases(triaged, provider)       # B3 (reset task_spec -> unattributed)
     _print_attributions("Apres correction task_spec (B3)", fixed)
 
-    retriaged = triage_unattributed(fixed, client)     # re-triage
+    retriaged = triage_unattributed(fixed, provider)     # re-triage
     _print_attributions("Apres re-triage (B2)", retriaged)
 
     active = active_cases(retriaged)
     print(f"Cas actifs : {len(active)}\n")
 
     tracer = Tracer(session_id=new_session_id())
-    report = run_health_check(DEMO_AGENTS, retriaged, client, n_runs=3, tracer=tracer)
+    report = run_health_check(DEMO_AGENTS, retriaged, provider, n_runs=3, tracer=tracer)
 
     print("=== Rapport ===")
     print(f"  fix_target pass rate       : {report.fix_target_pass_rate:.0%}")
