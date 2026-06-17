@@ -514,22 +514,42 @@ def run_with_recovery(
     return result
 
 
+def build_root_task(
+    description: str,
+    ctx: RunContext,
+    *,
+    pinned_tags: dict[str, int] | None = None,
+    context: str | None = None,
+) -> Task:
+    """Construit la Task racine : applique pinned_tags, sinon tague via ctx.tagger.
+    Porte `context`. Lève EmptyTaggingError si le tagging ne produit aucun tag
+    (le caller décide de la dégradation). Partagé par run_recovery et solve_once."""
+    if pinned_tags:
+        return Task(description=description, required_tags=pinned_tags, context=context)
+    tags = ctx.tagger.tag(description, ctx.agents, ctx.provider)
+    if not tags:
+        raise EmptyTaggingError(description)
+    return Task(
+        description=description,
+        required_tags={t: DEFAULT_REQUIRED_ELO for t in tags},
+        context=context,
+    )
+
+
 def run_recovery(
     description: str,
     ctx: RunContext,
     pinned_tags: dict[str, int] | None = None,
+    context: str | None = None,
 ) -> Output | DispatchResult | QAFailure:
-    """Entrée publique D1 (remplace run_divided_task). Tague la racine SEULEMENT si le
-    caller n'a pas épinglé de tags ; une racine déjà taguée n'est pas re-taguée (§2)."""
-    if pinned_tags:
-        task = Task(description=description, required_tags=pinned_tags)
-    else:
-        tags = ctx.tagger.tag(description, ctx.agents, ctx.provider)
-        if not tags:
-            return DispatchResult(
-                status="execution_failed",
-                agent_id=None,
-                reason="tagging produced no tags",
-            )
-        task = Task(description=description, required_tags={t: DEFAULT_REQUIRED_ELO for t in tags})
+    """Entrée publique D1. Tague la racine (sauf pinned_tags), porte `context`, puis
+    délègue au cœur récursif. Tagging vide -> execution_failed (comportement V3)."""
+    try:
+        task = build_root_task(description, ctx, pinned_tags=pinned_tags, context=context)
+    except EmptyTaggingError:
+        return DispatchResult(
+            status="execution_failed",
+            agent_id=None,
+            reason="tagging produced no tags",
+        )
     return run_with_recovery(task, ctx, depth=0)
