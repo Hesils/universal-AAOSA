@@ -109,16 +109,14 @@ def llm_check(task: Task, output: Output, params: dict) -> CriterionOutcome:
         f"# Criterion to check\n{description}\n\n"
         f"# Agent output\n{output.content}"
     )
-    response = provider.client.beta.chat.completions.parse(
-        model="gpt-4o-mini",
-        temperature=0.0,
+    parsed = provider.parse(
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        response_format=_LLMCheckResult,
+        schema=_LLMCheckResult,
+        temperature=0.0,
     )
-    parsed = response.choices[0].message.parsed
     if parsed is None:
         raise ValueError("llm_check returned no parsed result")
     score = float(parsed.score)

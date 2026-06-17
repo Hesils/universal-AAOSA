@@ -6,8 +6,6 @@ B2), task.id / role / wrong_output conservés. Batch, ne mute jamais l'input.
 Le reste de la boucle (active_cases, graduate, run_health_check) est inchangé.
 """
 
-import json
-
 from pydantic import BaseModel, ConfigDict
 
 from aaosa.qa.test_set import TestCase, TestSet
@@ -57,35 +55,13 @@ def fix_task_spec(case: TestCase, provider: LLMProvider) -> TestCase | None:
     Ne mute pas l'input.
     """
     prompt = _build_fix_prompt(case)
-
-    result: TaskSpecFix | None = None
-    try:
-        response = provider.client.beta.chat.completions.parse(
-            model="gpt-4o-mini",
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}],
-            response_format=TaskSpecFix,
-        )
-        result = response.choices[0].message.parsed
-    except Exception:
-        result = None  # structured output indisponible — fallback JSON
-
+    result = provider.parse(
+        messages=[{"role": "user", "content": prompt}],
+        schema=TaskSpecFix,
+        temperature=0,
+    )
     if result is None:
-        try:
-            response = provider.client.chat.completions.create(
-                model="gpt-4o-mini",
-                temperature=0,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = response.choices[0].message.content or ""
-            data = json.loads(raw)
-            result = TaskSpecFix(
-                corrected_description=data["corrected_description"],
-                justification=data["justification"],
-            )
-        except Exception:
-            return None  # LLM failure — cas reste task_spec
-
+        return None  # LLM failure — cas reste task_spec
     new_task = case.task.model_copy(update={"description": result.corrected_description})
     return case.model_copy(update={"task": new_task, "attribution": "unattributed"})
 

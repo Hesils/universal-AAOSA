@@ -1,11 +1,11 @@
-import json
-from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
 
 from aaosa.qa.diagnostic import DiagnosticResult, FailureContext, diagnose_failure
 from aaosa.qa.protocol import QAResult
+from aaosa.runtime.providers import LLMProvider
 from aaosa.schemas.output import LLMMetadata, Output
 from aaosa.schemas.task import Task
 
@@ -22,40 +22,6 @@ def _qa_result() -> QAResult:
 
 def _task() -> Task:
     return Task(description="do the thing", required_tags={"python": 60})
-
-
-def _parse_client(attribution="agent", consignes="be concise", reason="r"):
-    result = DiagnosticResult(attribution=attribution, consignes=consignes, reason=reason)
-    parsed = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=result))])
-    inner = SimpleNamespace(
-        beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=lambda **kw: parsed)))
-    )
-    return SimpleNamespace(client=inner)
-
-
-def _json_fallback_client(attribution="task_spec", reason="ambiguous"):
-    def parse(**kw):
-        raise RuntimeError("structured output unavailable")
-
-    def create(**kw):
-        payload = json.dumps({"attribution": attribution, "consignes": None, "reason": reason})
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=payload))])
-
-    inner = SimpleNamespace(
-        beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse))),
-        chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
-    )
-    return SimpleNamespace(client=inner)
-
-
-def _exploding_client():
-    def boom(**kw):
-        raise RuntimeError("boom")
-    inner = SimpleNamespace(
-        beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=boom))),
-        chat=SimpleNamespace(completions=SimpleNamespace(create=boom)),
-    )
-    return SimpleNamespace(client=inner)
 
 
 def test_failure_context_carries_output_and_qa():
@@ -82,17 +48,24 @@ def test_diagnostic_result_consignes_optional():
 
 
 def test_diagnose_structured_output_returns_result():
-    out = diagnose_failure(_task(), _output(), _qa_result(), _parse_client(attribution="agent"))
+    provider = MagicMock(spec=LLMProvider)
+    provider.parse.return_value = DiagnosticResult(attribution="agent", consignes="be concise", reason="r")
+    out = diagnose_failure(_task(), _output(), _qa_result(), provider)
     assert out.attribution == "agent"
     assert out.consignes == "be concise"
 
 
 def test_diagnose_json_fallback_when_structured_fails():
-    out = diagnose_failure(_task(), _output(), _qa_result(), _json_fallback_client("task_spec"))
+    # After migration: no more dual-block. Provider.parse returning a result is enough.
+    provider = MagicMock(spec=LLMProvider)
+    provider.parse.return_value = DiagnosticResult(attribution="task_spec", consignes=None, reason="ambiguous")
+    out = diagnose_failure(_task(), _output(), _qa_result(), provider)
     assert out.attribution == "task_spec"
     assert out.consignes is None
 
 
 def test_diagnose_returns_none_on_unrecoverable_llm_failure():
-    out = diagnose_failure(_task(), _output(), _qa_result(), _exploding_client())
+    provider = MagicMock(spec=LLMProvider)
+    provider.parse.return_value = None
+    out = diagnose_failure(_task(), _output(), _qa_result(), provider)
     assert out is None

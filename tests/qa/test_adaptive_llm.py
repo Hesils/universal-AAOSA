@@ -66,37 +66,19 @@ def make_task(required_tags=None, description="Build a login form") -> Task:
     return Task(description=description, required_tags=required_tags or {"frontend": 80})
 
 
-class _FakeParseClient:
-    """Mocks provider.client.beta.chat.completions.parse -> a pre-built EvaluatorSpec."""
+class _FakeParseProvider:
+    """Mocks provider.parse(**kwargs) -> a pre-built _LLMEvaluatorSpec or None."""
 
     def __init__(self, parsed):
         self._parsed = parsed
         self.captured_kwargs = None
-        self.beta = self
-        self.chat = self
-        self.completions = self
-
-    @property
-    def client(self):
-        return self
 
     def parse(self, **kwargs):
         self.captured_kwargs = kwargs
-        message = SimpleNamespace(parsed=self._parsed)
-        choice = SimpleNamespace(message=message)
-        return SimpleNamespace(choices=[choice])
+        return self._parsed
 
 
-class _RaisingClient:
-    def __init__(self):
-        self.beta = self
-        self.chat = self
-        self.completions = self
-
-    @property
-    def client(self):
-        return self
-
+class _RaisingProvider:
     def parse(self, **kwargs):
         raise RuntimeError("LLM unavailable")
 
@@ -157,18 +139,18 @@ class TestLLMCriterionSchema:
 class TestBuildLLMSpecColdStart:
     def test_returns_evaluator_spec(self):
         llm = _LLMEvaluatorSpec(criteria=[_LLMCriterion(type="min_length", min_chars=100)])
-        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        result = build_llm_spec(make_task(), _FakeParseProvider(llm))
         assert isinstance(result, EvaluatorSpec)
         assert "min_length" in {c.name for c in result.criteria}
 
     def test_response_format_is_closed_schema(self):
-        client = _FakeParseClient(_LLMEvaluatorSpec(criteria=[]))
-        build_llm_spec(make_task(), client)
-        assert client.captured_kwargs["response_format"] is _LLMEvaluatorSpec
+        provider = _FakeParseProvider(_LLMEvaluatorSpec(criteria=[]))
+        build_llm_spec(make_task(), provider)
+        assert provider.captured_kwargs["schema"] is _LLMEvaluatorSpec
 
     def test_always_has_non_empty_gate(self):
         llm = _LLMEvaluatorSpec(criteria=[_LLMCriterion(type="min_length", min_chars=50)])
-        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        result = build_llm_spec(make_task(), _FakeParseProvider(llm))
         gates = [c for c in result.criteria if c.name == "non_empty" and c.gate]
         assert len(gates) == 1
 
@@ -176,14 +158,14 @@ class TestBuildLLMSpecColdStart:
         # tag expert → 0.8, indépendamment de ce que "voudrait" le LLM
         llm = _LLMEvaluatorSpec(criteria=[_LLMCriterion(type="min_length", min_chars=50)])
         task = make_task(required_tags={"frontend": 90})
-        result = build_llm_spec(task, _FakeParseClient(llm))
+        result = build_llm_spec(task, _FakeParseProvider(llm))
         assert result.success_threshold == 0.8
 
     def test_importance_mapped_in_resulting_spec(self):
         llm = _LLMEvaluatorSpec(criteria=[
             _LLMCriterion(type="min_length", importance="critique", min_chars=50),
         ])
-        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        result = build_llm_spec(make_task(), _FakeParseProvider(llm))
         ml = next(c for c in result.criteria if c.name == "min_length")
         assert ml.weight == 3.0
 
@@ -191,7 +173,7 @@ class TestBuildLLMSpecColdStart:
         llm = _LLMEvaluatorSpec(criteria=[
             _LLMCriterion(type="llm_check", description="d", rationale="parce que"),
         ])
-        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        result = build_llm_spec(make_task(), _FakeParseProvider(llm))
         llm_c = next(c for c in result.criteria if c.name == "llm_check")
         assert llm_c.rationale == "parce que"
 
@@ -199,7 +181,7 @@ class TestBuildLLMSpecColdStart:
         llm = _LLMEvaluatorSpec(criteria=[
             _LLMCriterion(type="llm_check", description=str(i)) for i in range(6)
         ])
-        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        result = build_llm_spec(make_task(), _FakeParseProvider(llm))
         assert sum(c.name == "llm_check" for c in result.criteria) == 4
 
     def test_judge_converted_weight_locked(self):
@@ -207,23 +189,23 @@ class TestBuildLLMSpecColdStart:
             criteria=[_LLMCriterion(type="min_length", min_chars=50)],
             judge=_LLMJudge(mode="rubric", rubric=["correctness"]),
         )
-        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        result = build_llm_spec(make_task(), _FakeParseProvider(llm))
         assert result.judge is not None and result.judge.weight == 0.3
 
     def test_filters_unknown_criteria_kept_known(self):
         llm = _LLMEvaluatorSpec(criteria=[_LLMCriterion(type="references_tags")])
-        result = build_llm_spec(make_task(), _FakeParseClient(llm))
+        result = build_llm_spec(make_task(), _FakeParseProvider(llm))
         assert "references_tags" in {c.name for c in result.criteria}
 
     def test_fallback_on_exception(self):
         task = make_task()
-        result = build_llm_spec(task, _RaisingClient())
+        result = build_llm_spec(task, _RaisingProvider())
         assert result == build_adaptive_spec(task)
 
     def test_prompt_lists_types_and_caps(self):
-        client = _FakeParseClient(_LLMEvaluatorSpec(criteria=[]))
-        build_llm_spec(make_task(), client)
-        prompt = client.captured_kwargs["messages"][1]["content"]
+        provider = _FakeParseProvider(_LLMEvaluatorSpec(criteria=[]))
+        build_llm_spec(make_task(), provider)
+        prompt = provider.captured_kwargs["messages"][1]["content"]
         assert "llm_check" in prompt and "min_length" in prompt
         assert "importance" in prompt
         assert "non_empty" in prompt  # consigne de ne pas le déclarer
@@ -242,9 +224,9 @@ def _failure_context() -> FailureContext:
 
 class TestBuildLLMSpecInformed:
     def test_prompt_includes_failure_details(self):
-        client = _FakeParseClient(_LLMEvaluatorSpec(criteria=[]))
-        build_llm_spec(make_task(), client, failure_context=_failure_context())
-        prompt = client.captured_kwargs["messages"][1]["content"]
+        provider = _FakeParseProvider(_LLMEvaluatorSpec(criteria=[]))
+        build_llm_spec(make_task(), provider, failure_context=_failure_context())
+        prompt = provider.captured_kwargs["messages"][1]["content"]
         assert "Échec précédent" in prompt
         assert "réponse ratée bidon" in prompt          # output raté
         assert "trop court" in prompt                    # raison QA
@@ -252,8 +234,8 @@ class TestBuildLLMSpecInformed:
         assert "min_length" in prompt                    # critère raté
 
     def test_none_failure_context_matches_cold_start(self):
-        c1 = _FakeParseClient(_LLMEvaluatorSpec(criteria=[]))
-        c2 = _FakeParseClient(_LLMEvaluatorSpec(criteria=[]))
+        c1 = _FakeParseProvider(_LLMEvaluatorSpec(criteria=[]))
+        c2 = _FakeParseProvider(_LLMEvaluatorSpec(criteria=[]))
         build_llm_spec(make_task(), c1)
         build_llm_spec(make_task(), c2, failure_context=None)
         assert c1.captured_kwargs["messages"][1]["content"] == \

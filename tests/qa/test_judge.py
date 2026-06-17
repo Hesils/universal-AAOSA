@@ -17,37 +17,16 @@ def make_output(content="<form>login</form>") -> Output:
     )
 
 
-class _FakeMessage:
-    def __init__(self, parsed):
-        self.parsed = parsed
+class FakeParseProvider:
+    """Captures kwargs and returns a pre-built JudgeResult via provider.parse(...)."""
 
-class _FakeChoice:
-    def __init__(self, parsed):
-        self.message = _FakeMessage(parsed)
-
-class _FakeParseResponse:
-    def __init__(self, parsed):
-        self.choices = [_FakeChoice(parsed)]
-
-class FakeParseClient:
-    """Capture les kwargs et retourne un JudgeResult pré-calculé.
-
-    Expose `.client` pour s'adapter au pattern provider.client.beta.chat.completions.parse.
-    """
     def __init__(self, parsed: JudgeResult):
         self._parsed = parsed
         self.captured_kwargs = None
-        self.beta = self
-        self.chat = self
-        self.completions = self
-
-    @property
-    def client(self):
-        return self
 
     def parse(self, **kwargs):
         self.captured_kwargs = kwargs
-        return _FakeParseResponse(self._parsed)
+        return self._parsed
 
 
 class TestDimensionScore:
@@ -83,40 +62,40 @@ class TestJudgeResult:
 class TestRunJudge:
     def test_returns_judge_result(self):
         expected = JudgeResult(dimension_scores=[DimensionScore(name="correctness", score=0.8)], overall=0.8, reason="ok")
-        client = FakeParseClient(expected)
-        result = run_judge(make_task(), make_output(), JudgeSpec(rubric=["correctness"]), client)
+        provider = FakeParseProvider(expected)
+        result = run_judge(make_task(), make_output(), JudgeSpec(rubric=["correctness"]), provider)
         assert result.overall == 0.8
 
     def test_uses_spec_model_and_temperature(self):
-        client = FakeParseClient(JudgeResult(dimension_scores=[], overall=1.0, reason=""))
+        provider = FakeParseProvider(JudgeResult(dimension_scores=[], overall=1.0, reason=""))
         spec = JudgeSpec(rubric=["x"], model="gpt-4o-mini", temperature=0.0)
-        run_judge(make_task(), make_output(), spec, client)
-        assert client.captured_kwargs["model"] == "gpt-4o-mini"
-        assert client.captured_kwargs["temperature"] == 0.0
-        assert client.captured_kwargs["response_format"] is JudgeResult
+        run_judge(make_task(), make_output(), spec, provider)
+        assert provider.captured_kwargs["model"] == "gpt-4o-mini"
+        assert provider.captured_kwargs["temperature"] == 0.0
+        assert provider.captured_kwargs["schema"] is JudgeResult
 
     def test_rubric_mode_no_reference_in_prompt(self):
-        client = FakeParseClient(JudgeResult(dimension_scores=[], overall=1.0, reason=""))
-        run_judge(make_task(), make_output(), JudgeSpec(mode="rubric", rubric=["x"]), client)
-        user_msg = client.captured_kwargs["messages"][-1]["content"]
+        provider = FakeParseProvider(JudgeResult(dimension_scores=[], overall=1.0, reason=""))
+        run_judge(make_task(), make_output(), JudgeSpec(mode="rubric", rubric=["x"]), provider)
+        user_msg = provider.captured_kwargs["messages"][-1]["content"]
         assert "Reference" not in user_msg and "référence" not in user_msg.lower()
 
     def test_reference_based_injects_reference(self):
-        client = FakeParseClient(JudgeResult(dimension_scores=[], overall=1.0, reason=""))
+        provider = FakeParseProvider(JudgeResult(dimension_scores=[], overall=1.0, reason=""))
         spec = JudgeSpec(mode="reference_based", rubric=["x"])
-        run_judge(make_task(), make_output(), spec, client, reference="THE IDEAL ANSWER")
-        user_msg = client.captured_kwargs["messages"][-1]["content"]
+        run_judge(make_task(), make_output(), spec, provider, reference="THE IDEAL ANSWER")
+        user_msg = provider.captured_kwargs["messages"][-1]["content"]
         assert "THE IDEAL ANSWER" in user_msg
 
     def test_rubric_dimensions_in_prompt(self):
-        client = FakeParseClient(JudgeResult(dimension_scores=[], overall=0.5, reason=""))
-        run_judge(make_task(), make_output(), JudgeSpec(rubric=["correctness", "completeness"]), client)
-        user_msg = client.captured_kwargs["messages"][-1]["content"]
+        provider = FakeParseProvider(JudgeResult(dimension_scores=[], overall=0.5, reason=""))
+        run_judge(make_task(), make_output(), JudgeSpec(rubric=["correctness", "completeness"]), provider)
+        user_msg = provider.captured_kwargs["messages"][-1]["content"]
         assert "correctness" in user_msg and "completeness" in user_msg
 
     def test_instructions_injected(self):
-        client = FakeParseClient(JudgeResult(dimension_scores=[], overall=0.5, reason=""))
+        provider = FakeParseProvider(JudgeResult(dimension_scores=[], overall=0.5, reason=""))
         spec = JudgeSpec(rubric=["x"], instructions="Be strict about accessibility.")
-        run_judge(make_task(), make_output(), spec, client)
-        user_msg = client.captured_kwargs["messages"][-1]["content"]
+        run_judge(make_task(), make_output(), spec, provider)
+        user_msg = provider.captured_kwargs["messages"][-1]["content"]
         assert "accessibility" in user_msg

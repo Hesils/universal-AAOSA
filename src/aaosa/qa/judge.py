@@ -60,16 +60,15 @@ def run_judge(
     reference: str | None = None,
 ) -> JudgeResult:
     user_message = _build_user_message(task, output, spec, reference)
-    response = provider.client.beta.chat.completions.parse(
-        model=spec.model,
-        temperature=spec.temperature,
+    parsed = provider.parse(
         messages=[
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": user_message},
         ],
-        response_format=JudgeResult,
+        schema=JudgeResult,
+        model=spec.model,
+        temperature=spec.temperature,
     )
-    parsed = response.choices[0].message.parsed
     if parsed is None:
         raise ValueError("judge returned no parsed result")
     return parsed

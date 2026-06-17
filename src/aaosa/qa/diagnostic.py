@@ -6,7 +6,6 @@ données, retourne un DiagnosticResult (ou None sur échec LLM). Aucun accès au
 runtime, au store, ni à l'historique. Indépendant de qa/triage.py (B2).
 """
 
-import json
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -65,34 +64,8 @@ def diagnose_failure(
 ) -> DiagnosticResult | None:
     """Diagnostique un qa_fail. Retourne None si le LLM échoue (caller → unattributed)."""
     prompt = _build_diagnostic_prompt(task, output, qa_result)
-
-    # Structured output (SDK 2.x)
-    try:
-        response = provider.client.beta.chat.completions.parse(
-            model="gpt-4o-mini",
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}],
-            response_format=DiagnosticResult,
-        )
-        parsed = response.choices[0].message.parsed
-        if parsed is not None:
-            return parsed
-    except Exception:
-        pass  # structured output indisponible — fallback JSON
-
-    # Fallback : completion brute + parse JSON
-    try:
-        response = provider.client.chat.completions.create(
-            model="gpt-4o-mini",
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = response.choices[0].message.content or ""
-        data = json.loads(raw)
-        return DiagnosticResult(
-            attribution=data["attribution"],
-            consignes=data.get("consignes"),
-            reason=data["reason"],
-        )
-    except Exception:
-        return None  # diagnostic échoue → caller traite comme unattributed
+    return provider.parse(
+        messages=[{"role": "user", "content": prompt}],
+        schema=DiagnosticResult,
+        temperature=0,
+    )

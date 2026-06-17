@@ -222,16 +222,14 @@ def build_llm_spec(
     """
     threshold = _derive_threshold(task)
     try:
-        response = provider.client.beta.chat.completions.parse(
-            model="gpt-4o-mini",
-            temperature=0.0,
+        parsed = provider.parse(
             messages=[
                 {"role": "system", "content": "Tu produis une spec d'évaluation déclarative."},
                 {"role": "user", "content": _build_prompt(task, failure_context)},
             ],
-            response_format=_LLMEvaluatorSpec,
+            schema=_LLMEvaluatorSpec,
+            temperature=0.0,
         )
-        parsed = response.choices[0].message.parsed
         if parsed is None:
             raise ValueError("LLM returned no parsed _LLMEvaluatorSpec")
         spec = _filter_unknown_criteria(parsed.to_spec(), task)

@@ -18,25 +18,16 @@ from aaosa.schemas.output import Output, LLMMetadata
 from aaosa.schemas.task import Task
 
 
-class _FakeParseClient:
-    """Mocks provider.client.beta.chat.completions.parse -> parsed object with .score/.reason."""
+class _FakeParseProvider:
+    """Mocks a LLMProvider where .parse(**kwargs) -> parsed object directly."""
 
     def __init__(self, parsed):
         self._parsed = parsed
         self.captured_kwargs = None
-        self.beta = self
-        self.chat = self
-        self.completions = self
-
-    @property
-    def client(self):
-        return self
 
     def parse(self, **kwargs):
         self.captured_kwargs = kwargs
-        message = SimpleNamespace(parsed=self._parsed)
-        choice = SimpleNamespace(message=message)
-        return SimpleNamespace(choices=[choice])
+        return self._parsed
 
 
 def make_task(required_tags=None, description="Do the thing") -> Task:
@@ -170,26 +161,26 @@ class TestLLMCheck:
         assert "llm_check" in CRITERIA_REGISTRY
 
     def test_passes_when_llm_says_yes(self):
-        client = _FakeParseClient(SimpleNamespace(score=1.0, reason="meets the criterion"))
+        provider = _FakeParseProvider(SimpleNamespace(score=1.0, reason="meets the criterion"))
         o = llm_check(
             make_task(),
             make_output("a detailed answer with code examples"),
-            {"description": "must include code examples", "client": client},
+            {"description": "must include code examples", "client": provider},
         )
         assert o.passed is True
         assert o.score == 1.0
 
     def test_fails_when_llm_says_no(self):
-        client = _FakeParseClient(SimpleNamespace(score=0.0, reason="missing examples"))
+        provider = _FakeParseProvider(SimpleNamespace(score=0.0, reason="missing examples"))
         o = llm_check(
             make_task(),
             make_output("a vague answer"),
-            {"description": "must include code examples", "client": client},
+            {"description": "must include code examples", "client": provider},
         )
         assert o.passed is False
         assert o.score == 0.0
 
     def test_missing_description_raises(self):
-        client = _FakeParseClient(SimpleNamespace(score=1.0, reason="ok"))
+        provider = _FakeParseProvider(SimpleNamespace(score=1.0, reason="ok"))
         with pytest.raises(ValueError):
-            llm_check(make_task(), make_output("x"), {"client": client})
+            llm_check(make_task(), make_output("x"), {"client": provider})
