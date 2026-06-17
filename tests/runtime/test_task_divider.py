@@ -5,16 +5,14 @@ import pytest
 from aaosa.qa.diagnostic import FailureContext
 from aaosa.qa.protocol import QAResult
 from aaosa.runtime.divider import DivisionResult, SubTaskSpec, TaskDivider
+from aaosa.runtime.providers import LLMProvider
 from aaosa.schemas.output import LLMMetadata, Output
 from aaosa.schemas.task import Task
 
 
 def _provider_returning(division_result):
-    parsed = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=division_result))])
-    inner = SimpleNamespace(
-        beta=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=lambda **kw: parsed)))
-    )
-    return SimpleNamespace(client=inner)
+    """Build a provider fake whose .parse() returns division_result."""
+    return SimpleNamespace(parse=lambda **kw: division_result)
 
 
 class TestDivisionResult:
@@ -37,7 +35,6 @@ class TestDivisionResult:
 
 class TestTaskDivider:
     def test_divide_returns_division_result(self):
-        from aaosa.schemas.task import Task
         result = DivisionResult(sub_tasks=[
             SubTaskSpec(description="a"),
             SubTaskSpec(description="b", depends_on_indices=[0]),
@@ -49,7 +46,6 @@ class TestTaskDivider:
         assert out.sub_tasks[1].depends_on_indices == [0]
 
     def test_divide_passes_through_atomic_verdict(self):
-        from aaosa.schemas.task import Task
         result = DivisionResult(is_atomic=True, sub_tasks=[])
         divider = TaskDivider(system_prompt="split")
         out = divider.divide(Task(description="t", required_tags={"python": 30}), _provider_returning(result))

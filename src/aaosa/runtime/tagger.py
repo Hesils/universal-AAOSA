@@ -57,19 +57,14 @@ class Tagger:
         Retourne un ensemble vide si le LLM échoue ou ne peut pas parser.
         """
         prompt = self._build_prompt(description, agents)
-        try:
-            response = provider.client.beta.chat.completions.parse(
-                model="gpt-4o-mini",
-                temperature=0.0,
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                response_format=TagSet,
-            )
-            parsed = response.choices[0].message.parsed
-        except Exception:
-            parsed = None
+        parsed = provider.parse(
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            schema=TagSet,
+            temperature=0.0,
+        )
         if parsed is None:
             return set()
         return {t.strip() for t in parsed.tags if t.strip()}

@@ -50,8 +50,7 @@ class TaskAggregator:
         """
         prompt = self._build_aggregate_prompt(parent_task, sub_outputs)
         start = time.monotonic()
-        response = provider.client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = provider.complete(
             messages=[
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": prompt},

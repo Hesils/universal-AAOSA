@@ -150,17 +150,15 @@ class TaskDivider:
         nomme les indices d'un cycle détecté à la découpe précédente pour orienter un
         unique retry. Le divider reste pur : il ne sait pas d'où viennent ces données
         ni qui les consomme."""
-        response = provider.client.beta.chat.completions.parse(
-            model="gpt-4o-mini",
-            temperature=0.0,
+        parsed = provider.parse(
             messages=[
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": self._build_divide_prompt(
                     task, chained_context, failure_context, cycle_context)},
             ],
-            response_format=DivisionResult,
+            schema=DivisionResult,
+            temperature=0.0,
         )
-        parsed = response.choices[0].message.parsed
         if parsed is None:
             raise ValueError("divider returned no parsed DivisionResult")
         return parsed

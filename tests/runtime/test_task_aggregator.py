@@ -21,14 +21,14 @@ def make_output(task_id="sub-1", content="piece") -> Output:
 
 
 def _provider(content="synthesized result"):
-    def create(**kwargs):
+    """Build a provider fake whose .complete() returns a ChatCompletion-shaped response."""
+    def complete(**kwargs):
         return SimpleNamespace(
             model="gpt-4o-mini",
             choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
             usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
         )
-    inner = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    return SimpleNamespace(client=inner)
+    return SimpleNamespace(complete=complete)
 
 
 class TestTaskAggregator:
@@ -72,7 +72,7 @@ class TestTaskAggregator:
     def test_prompt_frames_results_as_complementary(self):
         captured = {}
 
-        def create(**kwargs):
+        def complete(**kwargs):
             captured["user"] = kwargs["messages"][-1]["content"]
             return SimpleNamespace(
                 model="gpt-4o-mini",
@@ -80,8 +80,7 @@ class TestTaskAggregator:
                 usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
             )
 
-        inner = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-        provider = SimpleNamespace(client=inner)
+        provider = SimpleNamespace(complete=complete)
         agg = TaskAggregator(system_prompt="You synthesize.")
         agg.aggregate(make_parent(), [make_output("a", "A"), make_output("b", "B")], provider)
         assert "complementary" in captured["user"].lower()
