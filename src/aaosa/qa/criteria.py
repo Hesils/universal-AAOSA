@@ -95,9 +95,9 @@ def llm_check(task: Task, output: Output, params: dict) -> CriterionOutcome:
     description = params.get("description")
     if not description:
         raise ValueError("llm_check requires a non-empty 'description' param")
-    provider = params.get("client")
+    provider = params.get("provider")
     if provider is None:
-        raise ValueError("llm_check requires a 'client' in params")
+        raise ValueError("llm_check requires a 'provider' in params")
 
     system = (
         "You are a strict QA criterion checker. Given a task, an agent output, and a "

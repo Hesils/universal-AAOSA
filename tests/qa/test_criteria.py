@@ -165,7 +165,7 @@ class TestLLMCheck:
         o = llm_check(
             make_task(),
             make_output("a detailed answer with code examples"),
-            {"description": "must include code examples", "client": provider},
+            {"description": "must include code examples", "provider": provider},
         )
         assert o.passed is True
         assert o.score == 1.0
@@ -175,7 +175,7 @@ class TestLLMCheck:
         o = llm_check(
             make_task(),
             make_output("a vague answer"),
-            {"description": "must include code examples", "client": provider},
+            {"description": "must include code examples", "provider": provider},
         )
         assert o.passed is False
         assert o.score == 0.0
@@ -183,4 +183,4 @@ class TestLLMCheck:
     def test_missing_description_raises(self):
         provider = _FakeParseProvider(SimpleNamespace(score=1.0, reason="ok"))
         with pytest.raises(ValueError):
-            llm_check(make_task(), make_output("x"), {"client": provider})
+            llm_check(make_task(), make_output("x"), {"provider": provider})

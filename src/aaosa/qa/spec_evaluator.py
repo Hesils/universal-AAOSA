@@ -1,8 +1,7 @@
-from openai import OpenAI
-
 from aaosa.qa.adaptive import build_llm_spec
 from aaosa.qa.diagnostic import FailureContext
 from aaosa.qa.criteria import get_criterion
+from aaosa.runtime.providers import LLMProvider
 from aaosa.qa.judge import JudgeBreakdown, run_judge
 from aaosa.qa.protocol import QAResult
 from aaosa.qa.spec import EvaluatorSpec
@@ -30,7 +29,7 @@ class SpecEvaluator:
     def __init__(
         self,
         spec: EvaluatorSpec,
-        client: OpenAI | None = None,
+        client: LLMProvider | None = None,
         reference: str | None = None,
     ):
         needs_client = spec.judge is not None or any(
@@ -39,7 +38,7 @@ class SpecEvaluator:
         if needs_client and client is None:
             raise ValueError("spec needs a client (judge or llm_check) but none was provided")
         self.spec = spec
-        self.client = client
+        self.provider = client
         self.reference = reference
 
     def evaluate(self, task: Task, output: Output) -> QAResult:
@@ -51,7 +50,7 @@ class SpecEvaluator:
         for c, key in keyed:
             if not c.gate:
                 continue
-            outcome = get_criterion(c.name)(task, output, {**c.params, "client": self.client})
+            outcome = get_criterion(c.name)(task, output, {**c.params, "provider": self.provider})
             criteria_results[key] = outcome.passed
             if not outcome.passed:
                 return QAResult(
@@ -67,7 +66,7 @@ class SpecEvaluator:
             total_weight = sum(c.weight for c, _ in scored)
             weighted = 0.0
             for c, key in scored:
-                outcome = get_criterion(c.name)(task, output, {**c.params, "client": self.client})
+                outcome = get_criterion(c.name)(task, output, {**c.params, "provider": self.provider})
                 criteria_results[key] = outcome.passed
                 weighted += outcome.score * c.weight
             det_score = weighted / total_weight if total_weight > 0 else 1.0
@@ -79,7 +78,7 @@ class SpecEvaluator:
         judge_breakdown: JudgeBreakdown | None = None
         if self.spec.judge is not None:
             judge_result = run_judge(
-                task, output, self.spec.judge, self.client, self.reference
+                task, output, self.spec.judge, self.provider, self.reference
             )
             w = self.spec.judge.weight
             final = (1.0 - w) * det_score + w * judge_result.overall
@@ -105,7 +104,7 @@ class SpecEvaluator:
 
 def from_spec(
     spec: EvaluatorSpec,
-    client: OpenAI | None = None,
+    client: LLMProvider | None = None,
     reference: str | None = None,
 ) -> SpecEvaluator:
     return SpecEvaluator(spec, client=client, reference=reference)
@@ -118,10 +117,10 @@ class AdaptiveSpecEvaluator:
     s'il est fourni, build_llm_spec régénère une spec informée par l'échec.
     """
 
-    def __init__(self, client: OpenAI, failure_context: FailureContext | None = None):
-        self.client = client
+    def __init__(self, client: LLMProvider, failure_context: FailureContext | None = None):
+        self.provider = client
         self.failure_context = failure_context
 
     def evaluate(self, task: Task, output: Output) -> QAResult:
-        spec = build_llm_spec(task, self.client, self.failure_context)
-        return SpecEvaluator(spec, client=self.client).evaluate(task, output)
+        spec = build_llm_spec(task, self.provider, self.failure_context)
+        return SpecEvaluator(spec, client=self.provider).evaluate(task, output)
