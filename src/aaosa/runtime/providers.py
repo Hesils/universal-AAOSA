@@ -46,7 +46,7 @@ class LLMProvider(ABC):
         """Sortie structurée → instance de `schema`, ou None si parse impossible."""
 
     def _complete(self, *, messages, model, tools, **kwargs) -> ChatCompletion:
-        call_kwargs = {"model": model or self._default_model, "messages": messages, **kwargs}
+        call_kwargs = {"model": model if model is not None else self._default_model, "messages": messages, **kwargs}
         if tools is not None:
             call_kwargs["tools"] = tools
         return self._client.chat.completions.create(**call_kwargs)
@@ -72,7 +72,7 @@ class OpenAIProvider(LLMProvider):
     def parse(self, *, messages, schema, model=None, **kwargs) -> BaseModel | None:
         try:
             resp = self._client.beta.chat.completions.parse(
-                model=model or self._default_model,
+                model=model if model is not None else self._default_model,
                 messages=messages,
                 response_format=schema,
                 **kwargs,

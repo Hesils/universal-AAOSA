@@ -75,6 +75,28 @@ class TestOpenAIProvider:
         client = _fake_openai()
         assert OpenAIProvider(client=client).client is client
 
+    def test_complete_forwards_empty_string_model_verbatim(self):
+        """Verify that model="" is NOT coerced to default — only None triggers default."""
+        client = _fake_openai()
+        p = OpenAIProvider(client=client)
+        p.complete(messages=[], model="")
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["model"] == "", "empty string model should be forwarded verbatim"
+
+    def test_parse_forwards_empty_string_model_verbatim(self):
+        """Verify that model="" is NOT coerced to default in parse — only None triggers default."""
+        client = _fake_openai()
+        p = OpenAIProvider(client=client)
+        # beta.parse will fail, but we verify the model argument reached it
+        client.beta.chat.completions.parse.side_effect = RuntimeError("x")
+        comp = MagicMock()
+        comp.choices[0].message.content = '{"value": "v"}'
+        client.chat.completions.create.return_value = comp
+        p.parse(messages=[], schema=_Schema, model="")
+        # Check that beta.parse was called with the empty string
+        kwargs = client.beta.chat.completions.parse.call_args.kwargs
+        assert kwargs["model"] == "", "empty string model should be forwarded verbatim to parse"
+
 
 class TestOllamaProvider:
     def test_is_llmprovider(self):
