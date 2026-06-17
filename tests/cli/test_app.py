@@ -30,7 +30,7 @@ class TestRunCommand:
         monkeypatch.setattr(app_module, "create_provider", lambda *a, **k: object())
         captured = {}
 
-        def stub(scenario, runs_root, client):
+        def stub(scenario, runs_root, provider):
             captured["scenario"] = scenario
             captured["runs_root"] = runs_root
             return _fake_outcome(tmp_path)
@@ -47,7 +47,7 @@ class TestRunCommand:
         monkeypatch.setattr(app_module, "create_provider", lambda *a, **k: object())
         captured = {}
 
-        def stub(scenario, runs_root, client):
+        def stub(scenario, runs_root, provider):
             captured["scenario"] = scenario
             return _fake_outcome(tmp_path, kind="unassigned")
 
@@ -85,7 +85,7 @@ class TestCampaignCommand:
         monkeypatch.setattr(app_module, "create_provider", lambda *a, **k: object())
         captured = {}
 
-        def stub(n, scenario, runs_root, client, on_run=None):
+        def stub(n, scenario, runs_root, provider, on_run=None):
             captured.update(n=n, scenario=scenario, runs_root=runs_root)
             return CampaignIndex(scenario=scenario, n_requested=n)
 
@@ -100,7 +100,7 @@ class TestCampaignCommand:
     def test_campaign_echoes_records_and_summary(self, tmp_path, monkeypatch):
         monkeypatch.setattr(app_module, "create_provider", lambda *a, **k: object())
 
-        def stub(n, scenario, runs_root, client, on_run=None):
+        def stub(n, scenario, runs_root, provider, on_run=None):
             records = [
                 CampaignRunRecord(
                     i=1, session_id="sess-1", outcome="success",

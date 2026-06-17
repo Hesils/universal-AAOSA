@@ -43,6 +43,7 @@ def run_task(
     provider: LLMProvider,
     tracer: Tracer | None = None,
     evaluator: QAEvaluator | None = None,
+    provider_registry: dict[str, LLMProvider] | None = None,
 ) -> Output | DispatchResult | QAFailure:
     candidates = filter_candidates(task, agents, tracer)
     fit_scores = {agent.id: score for agent, score in candidates}
@@ -57,12 +58,19 @@ def run_task(
     agent_map = {agent.id: agent for agent in candidate_agents}
     winner = agent_map[result.agent_id]
 
+    # Résolution du provider par agent (d6i fork #2) : si l'agent porte un nom de
+    # provider ET qu'un registre est fourni, on utilise le provider correspondant ;
+    # sinon on retombe sur le provider par défaut du run.
+    exec_provider = provider
+    if winner.provider and provider_registry:
+        exec_provider = provider_registry.get(winner.provider, provider)
+
     # Frontière de containment : execute() et evaluate() font des appels LLM (boucle
     # d'outils, juge) qui peuvent lever. run_task ne propage jamais ces erreurs ; il
     # renvoie DispatchResult(execution_failed). Simple et divisé se dégradent pareil
     # (run_chain s'appuie sur ce contrat, il n'a plus son propre try).
     try:
-        output = winner.execute(task, provider, tracer)
+        output = winner.execute(task, exec_provider, tracer)
 
         if tracer is not None:
             tracer.emit(ExecutedEvent(

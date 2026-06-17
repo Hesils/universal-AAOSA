@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from aaosa.qa.spec import CriterionSpec, EvaluatorSpec
