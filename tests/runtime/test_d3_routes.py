@@ -150,7 +150,7 @@ def test_route_task_spec_divides_with_failure_context(monkeypatch):
     ])
     divider = _DividerStub(division)
 
-    def run_task_side_effect(task, agents, provider, tracer, evaluator):
+    def run_task_side_effect(task, agents, provider, tracer, evaluator, provider_registry=None):
         if task.description == "do x":
             return _qa_fail()                      # parent échoue
         return _output(f"ok:{task.description}")   # sous-tâches réussissent

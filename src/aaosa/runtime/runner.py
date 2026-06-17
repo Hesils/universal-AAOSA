@@ -398,7 +398,10 @@ def _retry_with_consignes(
         retry_task = task.model_copy(update={"context": new_context})
     else:
         retry_task = task
-    result = run_task(retry_task, ctx.agents, ctx.provider, ctx.tracer, ctx.evaluator)
+    result = run_task(
+        retry_task, ctx.agents, ctx.provider, ctx.tracer, ctx.evaluator,
+        provider_registry=ctx.provider_registry,
+    )
     if isinstance(result, Output):
         return result
     return _qa_failed(task, attribution=attribution, consignes_tried=True)
@@ -494,7 +497,10 @@ def run_with_recovery(
             reason=f"no agent covers required tags: {sorted(missing)}",
         )
 
-    result = run_task(task, ctx.agents, ctx.provider, ctx.tracer, ctx.evaluator)
+    result = run_task(
+        task, ctx.agents, ctx.provider, ctx.tracer, ctx.evaluator,
+        provider_registry=ctx.provider_registry,
+    )
 
     if isinstance(result, DispatchResult) and result.status == "unassigned":
         return _divide_and_recover(

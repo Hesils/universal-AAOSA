@@ -4,6 +4,9 @@ Fork #2 (d6i) : un agent portant `agent.provider="ollama"` doit être exécuté 
 le provider correspondant issu du registre, et non avec le provider par défaut du run.
 Rétrocompat : provider_registry=None (défaut) ou agent.provider absent → provider par
 défaut utilisé, comportement identique à avant Task 6.
+
+Task 6 review fix : provider_registry doit être porté par RunContext et propagé via
+run_chain et _retry_with_consignes.
 """
 
 from unittest.mock import MagicMock, patch
@@ -12,8 +15,11 @@ import pytest
 
 from aaosa.claiming.dispatch import DispatchResult
 from aaosa.core.agent import Agent
+from aaosa.qa.protocol import QAEvaluator, QAResult
+from aaosa.runtime.context import RunContext
+from aaosa.runtime.divider import DivisionResult, SubTaskSpec
 from aaosa.runtime.providers import LLMProvider
-from aaosa.runtime.runner import run_task
+from aaosa.runtime.runner import run_chain, run_task
 from aaosa.schemas.claim import Claim
 from aaosa.schemas.output import LLMMetadata, Output
 from aaosa.schemas.task import Task
@@ -172,3 +178,146 @@ def test_no_registry_uses_default_provider():
 
     assert isinstance(result, Output), f"expected Output, got {result!r}"
     assert default_mock.complete.called, "default_mock.complete should have been called"
+
+
+# ---------------------------------------------------------------------------
+# Helpers pour les tests de propagation (RunContext + run_chain + retry)
+# ---------------------------------------------------------------------------
+
+class _FakeTagger:
+    def __init__(self, default=("python",)):
+        self.default = set(default)
+
+    def tag(self, description, agents, provider):
+        return set(self.default)
+
+
+class _StaticDivider:
+    def __init__(self, division):
+        self.division = division
+
+    def divide(self, task, provider, chained_context=None, failure_context=None, cycle_context=None):
+        return self.division
+
+
+class _RecordingAggregator:
+    def aggregate(self, parent_task, sub_outputs, provider, tracer=None):
+        from aaosa.schemas.output import LLMMetadata, Output
+        return Output(
+            task_id=parent_task.id, agent_id="aggregator", content="agg",
+            llm_metadata=LLMMetadata(model_name="m", tokens_in=1, tokens_out=1, latency_ms=1.0),
+        )
+
+
+def _make_run_context(
+    agent: Agent,
+    default_provider: LLMProvider,
+    provider_registry: dict[str, LLMProvider] | None = None,
+    evaluator: QAEvaluator | None = None,
+) -> RunContext:
+    return RunContext(
+        agents=[agent],
+        provider=default_provider,
+        divider=_StaticDivider(DivisionResult(sub_tasks=[SubTaskSpec(description="sub")])),
+        aggregator=_RecordingAggregator(),
+        tagger=_FakeTagger(),
+        provider_registry=provider_registry,
+        evaluator=evaluator,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 5 : run_chain threads provider_registry to run_task via RunContext
+# ---------------------------------------------------------------------------
+
+def test_run_chain_threads_registry_to_agent():
+    """Un agent avec provider='ollama' dans une sous-tâche exécutée via run_chain
+    doit utiliser ollama_mock, pas default_mock.
+
+    Prouve que provider_registry est porté par RunContext et accessible à run_task
+    dans la boucle run_chain → run_with_recovery → run_task.
+    """
+    default_mock = _make_provider_mock("default")
+    ollama_mock = _make_provider_mock("ollama")
+
+    agent = _make_agent_with_provider("ollama", elo=80)
+    task = Task(description="sub", required_tags={"python": 60})
+    claim = _make_claim(agent, task)
+
+    ctx = _make_run_context(agent, default_mock, provider_registry={"ollama": ollama_mock})
+
+    with patch.object(Agent, "claim", return_value=claim):
+        outputs = run_chain([task], ctx, depth=0)
+
+    assert task.id in outputs, f"expected task to succeed, outputs={outputs}"
+    assert ollama_mock.complete.called, "ollama_mock.complete should have been called via run_chain"
+    assert not default_mock.complete.called, "default_mock.complete should NOT have been called"
+
+
+# ---------------------------------------------------------------------------
+# Test 6 : _retry_with_consignes forwards registry (QA failure → retry)
+# ---------------------------------------------------------------------------
+
+class _FailOnceThenPassEvaluator:
+    """QAEvaluator qui échoue une fois (le run initial), réussit la seconde (le retry).
+
+    La première évaluation renvoie un QAResult échec → déclenche diagnostic → _retry_with_consignes.
+    Le diagnostic DOIT attribuer à 'agent' pour que _retry_with_consignes soit appelé.
+    On bypasse diagnose_failure pour forcer ce chemin.
+    """
+    def __init__(self):
+        self._calls = 0
+
+    def evaluate(self, task, output):
+        self._calls += 1
+        if self._calls == 1:
+            return QAResult(
+                task_id=task.id,
+                agent_id=output.agent_id,
+                success=False, score=0.2,
+                reason="bad", criteria_results={},
+            )
+        return QAResult(
+            task_id=task.id,
+            agent_id=output.agent_id,
+            success=True, score=0.9,
+            reason="ok", criteria_results={},
+        )
+
+
+def test_retry_path_forwards_registry():
+    """Un agent avec provider='ollama' qui échoue QA et est retenté via
+    _retry_with_consignes doit utiliser ollama_mock sur le retry, pas default_mock.
+
+    Prouve que ctx.provider_registry est bien propagé dans _retry_with_consignes.
+    """
+    from aaosa.qa.diagnostic import DiagnosticResult
+    from aaosa.runtime.runner import run_with_recovery
+
+    default_mock = _make_provider_mock("default")
+    ollama_mock = _make_provider_mock("ollama")
+
+    agent = _make_agent_with_provider("ollama", elo=80)
+    task = Task(description="write a function", required_tags={"python": 60})
+    claim = _make_claim(agent, task)
+
+    evaluator = _FailOnceThenPassEvaluator()
+    ctx = _make_run_context(
+        agent, default_mock,
+        provider_registry={"ollama": ollama_mock},
+        evaluator=evaluator,
+    )
+
+    # Force diagnose_failure to return attribution="agent" so _retry_with_consignes is called.
+    diag = DiagnosticResult(attribution="agent", reason="bad output", consignes="fix it")
+    with patch.object(Agent, "claim", return_value=claim):
+        with patch("aaosa.runtime.runner.diagnose_failure", return_value=diag):
+            result = run_with_recovery(task, ctx, depth=0)
+
+    assert isinstance(result, Output), f"expected Output on retry success, got {result!r}"
+    # ollama_mock.complete must have been called at least twice (initial run + retry)
+    assert ollama_mock.complete.call_count >= 2, (
+        f"ollama_mock.complete should have been called ≥2 times (got {ollama_mock.complete.call_count}); "
+        "if it's 0 the registry was not forwarded"
+    )
+    assert not default_mock.complete.called, "default_mock.complete should NOT have been called"

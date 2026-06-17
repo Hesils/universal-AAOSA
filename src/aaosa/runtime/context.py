@@ -25,3 +25,4 @@ class RunContext:
     tagger: Tagger
     tracer: Tracer | None = None
     evaluator: QAEvaluator | None = None
+    provider_registry: "dict[str, LLMProvider] | None" = None

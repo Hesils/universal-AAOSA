@@ -79,7 +79,7 @@ def _two_independent_division():
     ])
 
 
-def _router(task, agents, provider, tracer=None, evaluator=None):
+def _router(task, agents, provider, tracer=None, evaluator=None, provider_registry=None):
     """run_task simulé : la racine (description "t") reste unassigned pour déclencher la
     division ; chaque sous-tâche réussit avec un Output portant SON id (pour que _sinks
     fonctionne sur les vrais ids générés par build_sub_tasks)."""
