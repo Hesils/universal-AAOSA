@@ -86,7 +86,7 @@ class OpenAIProvider(LLMProvider):
 
 
 class OllamaProvider(LLMProvider):
-    DEFAULT_OLLAMA_MODEL = "llama3.1"
+    DEFAULT_OLLAMA_MODEL = "qwen3:4b"  # confirmé via smoke réel d6i (2026-06-17)
 
     def __init__(
         self,

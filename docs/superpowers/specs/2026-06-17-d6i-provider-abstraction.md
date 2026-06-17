@@ -99,7 +99,7 @@ Même SDK OpenAI, `base_url` Ollama, clé factice. `beta.parse` n'est **pas fiab
 
 ```python
 class OllamaProvider(LLMProvider):
-    DEFAULT_MODEL = "llama3.1"  # à confirmer selon ce qui est pull localement
+    DEFAULT_MODEL = "qwen3:4b"  # confirmé via smoke réel (2026-06-17)
 
     def __init__(self, base_url="http://localhost:11434/v1",
                  default_model=DEFAULT_MODEL):
@@ -146,7 +146,7 @@ Renommer le paramètre `client: OpenAI` → `provider: LLMProvider` sur toute la
 
 - Smoke test Ollama réel (DoD §2).
 - HITL (`ipv`), CLI task-libre + manifest (`erd`), pont AIOS→AAOSA (`fqd`), worktree+non-destruction (`v1m`) — sœurs de l'épique.
-- Choix du modèle Ollama par défaut réel (dépend de ce qui est pull) — placeholder `llama3.1` à confirmer.
+- Choix du modèle Ollama par défaut réel — confirmé `qwen3:4b` (smoke réel 2026-06-17 : `complete()`/`parse()` OK, dégradation `None` propre).
 
 ## 8. Forks restant ouverts pour validation Quentin
 
