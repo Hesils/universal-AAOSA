@@ -1,0 +1,69 @@
+# tests/cli/test_app_solve.py
+from pathlib import Path
+
+from typer.testing import CliRunner
+
+import aaosa.cli.app as app_mod
+from aaosa.cli.app import app
+from aaosa.cli.solve_runs import SolveOutcome
+
+runner = CliRunner()
+
+
+def _fake_outcome(tmp):
+    sd = Path(tmp) / "sessions" / "s1"
+    return SolveOutcome(
+        kind="success", session_id="s1", session_dir=sd,
+        snapshot_path=sd / "snap.json", manifest_path=sd / "manifest.json",
+        events=[], task_description="do it", n_agents=1,
+    )
+
+
+def test_solve_assembles_context_with_provenance_headers(tmp_path, monkeypatch):
+    captured = {}
+    def fake_solve_once(roster_dirs, task_text, context, runs_root, provider_name="ollama"):
+        captured["context"] = context
+        captured["task"] = task_text
+        return _fake_outcome(tmp_path)
+    monkeypatch.setattr(app_mod, "solve_once", fake_solve_once)
+
+    cfile = tmp_path / "ctx.txt"
+    cfile.write_text("from-file", encoding="utf-8")
+    r = _roster(tmp_path)
+    result = runner.invoke(app, [
+        "solve", "--roster", str(r), "--task", "do it",
+        "--context-text", "inline-ctx", "--context-file", str(cfile),
+        "--runs-root", str(tmp_path / "runs"),
+    ])
+    assert result.exit_code == 0, result.output
+    assert "# context: inline\ninline-ctx" in captured["context"]
+    assert f"# context: {cfile}\nfrom-file" in captured["context"]
+
+
+def test_solve_refuses_context_overflow(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_mod, "solve_once", lambda *a, **k: _fake_outcome(tmp_path))
+    r = _roster(tmp_path)
+    result = runner.invoke(app, [
+        "solve", "--roster", str(r), "--task", "x",
+        "--context-text", "y" * 50, "--context-max", "10",
+    ])
+    assert result.exit_code == 1
+    assert "too large" in result.output.lower()
+
+
+def test_solve_empty_tagging_exits_1(tmp_path, monkeypatch):
+    from aaosa.runtime.tagger import EmptyTaggingError
+    def boom(*a, **k):
+        raise EmptyTaggingError("no tags")
+    monkeypatch.setattr(app_mod, "solve_once", boom)
+    r = _roster(tmp_path)
+    result = runner.invoke(app, ["solve", "--roster", str(r), "--task", "x"])
+    assert result.exit_code == 1
+    assert "tag" in result.output.lower()
+
+
+def _roster(tmp_path) -> Path:
+    d = tmp_path / "r"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "agents.yaml").write_text("- name: a\n  tags_with_elo: {x: 1500}\n  system_prompt: p\n", encoding="utf-8")
+    return d
