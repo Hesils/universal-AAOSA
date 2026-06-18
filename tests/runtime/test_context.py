@@ -1,4 +1,6 @@
 import dataclasses
+from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -30,3 +32,29 @@ def test_runcontext_is_frozen():
     ctx = _ctx()
     with pytest.raises(dataclasses.FrozenInstanceError):
         ctx.provider = object()
+
+
+def _minimal_ctx(**over):
+    """Réutilise les fakes du fichier si présents ; sinon SimpleNamespace suffit
+    car RunContext ne valide pas ses membres (dataclass, pas Pydantic)."""
+    base = dict(
+        agents=[],
+        provider=SimpleNamespace(),
+        divider=SimpleNamespace(),
+        aggregator=SimpleNamespace(),
+        tagger=SimpleNamespace(),
+    )
+    base.update(over)
+    return RunContext(**base)
+
+
+def test_runcontext_hitl_callback_defaults_none():
+    ctx = _minimal_ctx()
+    assert ctx.hitl_callback is None
+
+
+def test_runcontext_hitl_callback_preserved_by_replace():
+    cb = lambda q: "a"
+    ctx = _minimal_ctx(hitl_callback=cb)
+    ctx2 = replace(ctx, tracer=SimpleNamespace())
+    assert ctx2.hitl_callback is cb
