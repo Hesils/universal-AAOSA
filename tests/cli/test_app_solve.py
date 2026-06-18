@@ -21,7 +21,8 @@ def _fake_outcome(tmp):
 
 def test_solve_assembles_context_with_provenance_headers(tmp_path, monkeypatch):
     captured = {}
-    def fake_solve_once(roster_dirs, task_text, context, runs_root, provider_name="ollama"):
+    def fake_solve_once(roster_dirs, task_text, context, runs_root, provider_name="ollama",
+                        roles_path=None):
         captured["context"] = context
         captured["task"] = task_text
         return _fake_outcome(tmp_path)

@@ -8,6 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from aaosa.config.role_providers import RoleProviders
 from aaosa.demo.agents import DEMO_AGENTS
 from aaosa.runtime.providers import LLMProvider
 from aaosa.demo.tasks import TASK_SECURITY_AUDIT
@@ -111,21 +112,34 @@ def _print_attributions(label: str, ts: TestSet) -> None:
     print()
 
 
-def run_demo_health_check_v3() -> None:
+def run_demo_health_check_v3(roles: RoleProviders | None = None) -> None:
+    """Boucle auto-amélioration B2 → B3 → re-triage.
+
+    roles : RoleProviders optionnel. Quand fourni, le model configuré pour les rôles
+    triage et task_spec est transmis à triage_unattributed / fix_task_spec_cases.
+    roles=None (défaut) → comportement identique à avant (rétrocompat stricte).
+    """
     load_dotenv()
     provider = create_provider()
     print("=== AAOSA Demo V3 — Health check + boucle B2/B3 ===\n")
 
+    # Résoudre les modèles pour triage et task_spec si roles est fourni.
+    # On ne thread pas de registry ici (lourd) ; on extrait juste le model du rôle.
+    # Le provider reste celui du run (create_provider() ci-dessus).
+    _roles = roles if roles is not None else RoleProviders()
+    triage_model: str | None = _roles.triage.model
+    task_spec_model: str | None = _roles.task_spec.model
+
     seed = build_seed_test_set(provider)
     _print_attributions("Seed (toutes unattributed)", seed)
 
-    triaged = triage_unattributed(seed, provider)       # B2
+    triaged = triage_unattributed(seed, provider, model=triage_model)       # B2
     _print_attributions("Apres triage (B2)", triaged)
 
-    fixed = fix_task_spec_cases(triaged, provider)       # B3 (reset task_spec -> unattributed)
+    fixed = fix_task_spec_cases(triaged, provider, model=task_spec_model)   # B3 (reset task_spec -> unattributed)
     _print_attributions("Apres correction task_spec (B3)", fixed)
 
-    retriaged = triage_unattributed(fixed, provider)     # re-triage
+    retriaged = triage_unattributed(fixed, provider, model=triage_model)    # re-triage
     _print_attributions("Apres re-triage (B2)", retriaged)
 
     active = active_cases(retriaged)
