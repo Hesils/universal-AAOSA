@@ -32,6 +32,12 @@ from dashboard.config import DashboardConfig
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
 
+def _stdin_hitl(question: str) -> str:
+    """Callback HITL interactif : pose la question à l'opérateur, lit stdin."""
+    typer.echo(f"\n[HITL] Agent asks: {question}")
+    return typer.prompt("[HITL] Your answer")
+
+
 @app.callback()
 def main() -> None:
     """Runtime multi-agents AAOSA - CLI projet-wide."""
@@ -74,6 +80,10 @@ def solve(
     provider: str = typer.Option("ollama", "--provider", help="ollama (défaut) | openai"),
     runs_root: Path = typer.Option(Path("runs"), "--runs-root"),
     roles: Path | None = typer.Option(None, "--roles", help="roles.yaml: provider/model par rôle système (divider/aggregator/tagger/evaluator/diagnostic/triage/task_spec)"),
+    hitl: bool = typer.Option(
+        False, "--hitl/--no-hitl",
+        help="Active le HITL interactif (l'agent peut demander à l'opérateur via stdin)",
+    ),
 ) -> None:
     """Résout une tâche libre avec N rosters injectés -> session + manifest + lien trace."""
     load_dotenv()
@@ -98,7 +108,11 @@ def solve(
         raise typer.Exit(code=1)
 
     try:
-        outcome = solve_once(roster, task, context, runs_root, provider, roles_path=roles)
+        outcome = solve_once(
+            roster, task, context, runs_root, provider,
+            roles_path=roles,
+            hitl_callback=_stdin_hitl if hitl else None,
+        )
     except EmptyTaggingError:
         typer.echo("Tagging produced no tags for this task — cannot route it. Refine --task.")
         raise typer.Exit(code=1)

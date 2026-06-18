@@ -22,7 +22,7 @@ def _fake_outcome(tmp):
 def test_solve_assembles_context_with_provenance_headers(tmp_path, monkeypatch):
     captured = {}
     def fake_solve_once(roster_dirs, task_text, context, runs_root, provider_name="ollama",
-                        roles_path=None):
+                        roles_path=None, hitl_callback=None):
         captured["context"] = context
         captured["task"] = task_text
         return _fake_outcome(tmp_path)
@@ -77,6 +77,34 @@ def test_solve_command_exits_1_on_preflight_error(monkeypatch, tmp_path):
     )
     assert result.exit_code == 1
     assert "Preflight model availability failed" in result.output
+
+
+def test_solve_hitl_flag_passes_callback(tmp_path, monkeypatch):
+    seen = {}
+    def fake_solve_once(roster_dirs, task_text, context, runs_root, provider_name="ollama",
+                        roles_path=None, hitl_callback=None):
+        seen["hitl_callback"] = hitl_callback
+        return _fake_outcome(tmp_path)
+    monkeypatch.setattr(app_mod, "solve_once", fake_solve_once)
+
+    r = _roster(tmp_path)
+    result = runner.invoke(app, ["solve", "--roster", str(r), "--task", "do it", "--hitl"])
+    assert result.exit_code == 0, result.output
+    assert callable(seen["hitl_callback"])
+
+
+def test_solve_no_hitl_defaults_none(tmp_path, monkeypatch):
+    seen = {}
+    def fake_solve_once(roster_dirs, task_text, context, runs_root, provider_name="ollama",
+                        roles_path=None, hitl_callback=None):
+        seen["hitl_callback"] = hitl_callback
+        return _fake_outcome(tmp_path)
+    monkeypatch.setattr(app_mod, "solve_once", fake_solve_once)
+
+    r = _roster(tmp_path)
+    result = runner.invoke(app, ["solve", "--roster", str(r), "--task", "do it"])
+    assert result.exit_code == 0, result.output
+    assert seen["hitl_callback"] is None
 
 
 def _roster(tmp_path) -> Path:
