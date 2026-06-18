@@ -134,3 +134,24 @@ class TestFixTaskSpecCases:
         fix_task_spec_cases(ts, provider)
         assert ts.cases[0].task.description == "original"
         assert ts.cases[0].attribution == "task_spec"
+
+
+class TestFixTaskSpecModelRelay:
+    def test_fix_task_spec_relays_model_to_provider(self):
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = TaskSpecFix(
+            corrected_description="Fixed.", justification="was ambiguous"
+        )
+        fix_task_spec(make_case(), provider, model="gpt-4o-mini")
+        call_kwargs = provider.parse.call_args.kwargs
+        assert call_kwargs.get("model") == "gpt-4o-mini"
+
+    def test_fix_task_spec_cases_passes_model_to_parse(self):
+        ts = TestSet(cases=[make_case("task_spec", "broken")])
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = TaskSpecFix(
+            corrected_description="Fixed.", justification="was ambiguous"
+        )
+        fix_task_spec_cases(ts, provider, model="gpt-4o-mini")
+        call_kwargs = provider.parse.call_args.kwargs
+        assert call_kwargs.get("model") == "gpt-4o-mini"

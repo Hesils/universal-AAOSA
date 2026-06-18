@@ -69,3 +69,11 @@ def test_diagnose_returns_none_on_unrecoverable_llm_failure():
     provider.parse.return_value = None
     out = diagnose_failure(_task(), _output(), _qa_result(), provider)
     assert out is None
+
+
+def test_diagnose_relays_model_to_provider():
+    provider = MagicMock(spec=LLMProvider)
+    provider.parse.return_value = DiagnosticResult(attribution="agent", reason="r")
+    diagnose_failure(_task(), _output(), _qa_result(), provider, model="gpt-4o-mini")
+    call_kwargs = provider.parse.call_args.kwargs
+    assert call_kwargs.get("model") == "gpt-4o-mini"

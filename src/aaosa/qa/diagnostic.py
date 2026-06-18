@@ -61,6 +61,7 @@ def diagnose_failure(
     output: Output,
     qa_result: QAResult,
     provider: LLMProvider,
+    model: str | None = None,
 ) -> DiagnosticResult | None:
     """Diagnostique un qa_fail. Retourne None si le LLM échoue (caller → unattributed)."""
     prompt = _build_diagnostic_prompt(task, output, qa_result)
@@ -68,4 +69,5 @@ def diagnose_failure(
         messages=[{"role": "user", "content": prompt}],
         schema=DiagnosticResult,
         temperature=0,
+        model=model,
     )

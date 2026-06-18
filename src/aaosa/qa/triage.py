@@ -49,17 +49,18 @@ def _build_triage_prompt(case: TestCase) -> str:
     )
 
 
-def triage_case(case: TestCase, provider: LLMProvider) -> TriageResult | None:
+def triage_case(case: TestCase, provider: LLMProvider, model: str | None = None) -> TriageResult | None:
     """Classifie un seul TestCase. Retourne None si le LLM échoue (cas reste unattributed)."""
     prompt = _build_triage_prompt(case)
     return provider.parse(
         messages=[{"role": "user", "content": prompt}],
         schema=TriageResult,
         temperature=0,
+        model=model,
     )
 
 
-def triage_unattributed(test_set: TestSet, provider: LLMProvider) -> TestSet:
+def triage_unattributed(test_set: TestSet, provider: LLMProvider, model: str | None = None) -> TestSet:
     """Retourne un nouveau TestSet avec les cas unattributed maintenant classifiés.
 
     Les cas déjà classifiés sont copiés tels quels (aucun appel LLM).
@@ -70,7 +71,7 @@ def triage_unattributed(test_set: TestSet, provider: LLMProvider) -> TestSet:
         if case.attribution != "unattributed":
             new_cases.append(case)
             continue
-        result = triage_case(case, provider)
+        result = triage_case(case, provider, model=model)
         if result is None:
             new_cases.append(case)  # reste unattributed
         else:

@@ -119,3 +119,20 @@ class TestTriageUnattributed:
         provider.parse.return_value = TriageResult(attribution="agent", justification="because")
         triage_unattributed(ts, provider)
         assert ts.cases[0].attribution == "unattributed"
+
+
+class TestTriageCaseModelRelay:
+    def test_triage_case_relays_model_to_provider(self):
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = TriageResult(attribution="agent", justification="because")
+        triage_case(make_case(), provider, model="gpt-4o-mini")
+        call_kwargs = provider.parse.call_args.kwargs
+        assert call_kwargs.get("model") == "gpt-4o-mini"
+
+    def test_triage_unattributed_passes_model_to_parse(self):
+        ts = TestSet(cases=[make_case("unattributed")])
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = TriageResult(attribution="agent", justification="because")
+        triage_unattributed(ts, provider, model="gpt-4o-mini")
+        call_kwargs = provider.parse.call_args.kwargs
+        assert call_kwargs.get("model") == "gpt-4o-mini"
