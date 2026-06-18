@@ -22,16 +22,19 @@ divider:
   provider: openai
   model: gpt-4o-mini
 
+# ATTENTION — triage (B2) et task_spec (B3) tournent dans le batch health-check,
+# hors chemin `aaosa solve`. Ce batch n'honore que `model` ; son `provider:` est
+# IGNORÉ (le provider reste celui par défaut du run). Pour ces deux rôles, ne fixe
+# que `model` (sur le provider par défaut) — un `provider:` divergent serait silencieux.
+
 # Triage des failures QA (B2) — détermine la source de l'échec (agent/task_spec/evaluator) :
 # un raisonnement fin améliore la précision de l'attribution.
 triage:
-  provider: openai
-  model: gpt-4o-mini
+  model: gpt-4o-mini   # provider: ignoré dans le batch health-check (voir note ci-dessus)
 
 # Correction des task_spec mal formées (B3) :
 task_spec:
-  provider: openai
-  model: gpt-4o-mini
+  model: gpt-4o-mini   # provider: ignoré dans le batch health-check (voir note ci-dessus)
 
 # Rôles non spécifiés -> provider/model par défaut du run :
 #   aggregator  (TaskAggregator)
