@@ -35,7 +35,7 @@ def _agent(name: str, provider=None, model=None) -> Agent:
 def test_all_models_available_passes():
     registry = {"ollama": _FakeProvider("qwen3:4b", {"qwen3:4b", "llama3:8b"})}
     agents = [_agent("a", model="qwen3:4b"), _agent("b")]  # b -> défaut qwen3:4b
-    preflight_models(agents, RoleProviders(), registry, "ollama")  # ne lève pas
+    assert preflight_models(agents, RoleProviders(), registry, "ollama") is None
 
 
 def test_missing_agent_model_raises_with_name_and_model():
@@ -86,3 +86,31 @@ def test_queries_each_provider_once(monkeypatch):
     agents = [_agent("a"), _agent("b"), _agent("c")]
     preflight_models(agents, RoleProviders(), registry, "ollama")
     assert calls["n"] == 1  # un seul appel réseau par provider distinct
+
+
+def test_unknown_provider_name_raises_preflight_error():
+    """Agent or role referencing unknown provider -> PreflightError, not KeyError."""
+    registry = {"ollama": _FakeProvider("qwen3:4b", {"qwen3:4b"})}
+    agents = [_agent("alice", provider="ghost")]  # "ghost" not in registry
+    with pytest.raises(PreflightError) as exc:
+        preflight_models(agents, RoleProviders(), registry, "ollama")
+    msg = str(exc.value)
+    assert "ghost" in msg
+    assert "not in registry" in msg
+
+
+def test_unreachable_provider_subsumes_missing_model():
+    """Provider-level unreachable error subsumes per-model errors for that provider."""
+    registry = {
+        "openai": _FakeProvider("gpt-4o-mini", unreachable=True),
+        "ollama": _FakeProvider("qwen3:4b", {"qwen3:4b"}),
+    }
+    # Agent wants unavailable model from unreachable provider
+    agents = [_agent("a", provider="openai", model="gpt-4o")]
+    with pytest.raises(PreflightError) as exc:
+        preflight_models(agents, RoleProviders(), registry, "ollama")
+    msg = str(exc.value)
+    # Should report provider unreachable
+    assert "openai" in msg and "injoignable" in msg.lower()
+    # Should NOT also report per-model absence for openai
+    assert msg.count("openai") == 1  # one mention of openai (the provider-level line)
