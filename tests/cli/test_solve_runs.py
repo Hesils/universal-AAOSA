@@ -101,3 +101,63 @@ def test_solve_once_raises_when_model_unavailable(tmp_path, monkeypatch):
     roster = _roster(tmp_path / "r")
     with pytest.raises(PreflightError):
         sr.solve_once([roster], "fais un truc", None, tmp_path / "runs", "ollama")
+
+
+def _write_roster(dir: Path) -> None:
+    dir.mkdir(parents=True, exist_ok=True)
+    (dir / "agents.yaml").write_text(
+        textwrap.dedent(
+            """
+            - name: A
+              tags_with_elo: {python: 80}
+              system_prompt: You are A.
+              tools: [ask_human]
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_solve_once_injects_callback_into_agents_and_context(tmp_path, monkeypatch):
+    from aaosa.cli import solve_runs
+    from aaosa.core.hitl import ASK_HUMAN_TOOL_NAME
+
+    roster = tmp_path / "r1"
+    _write_roster(roster)
+
+    seen = {}
+
+    def fake_persisted_run(agents, runs_root, *, build_ctx, make_task):
+        ctx = build_ctx(tracer=_FakeTracer())
+        seen["agents"] = agents
+        seen["ctx"] = ctx
+        # On n'exécute pas le run réel : on inspecte le wiring.
+        raise _StopForTest()
+
+    class _StopForTest(Exception):
+        pass
+
+    class _FakeTracer:
+        events = []
+
+    # Court-circuite tout ce qui touche au provider/LLM en amont de _persisted_run.
+    monkeypatch.setattr(solve_runs, "build_provider_registry",
+                        lambda agents, name, roles: (object(), {}))
+    monkeypatch.setattr(solve_runs, "preflight_models", lambda *a, **k: None)
+    monkeypatch.setattr(solve_runs, "load_elo_into", lambda *a, **k: None)
+    monkeypatch.setattr(solve_runs, "resolve_provider", lambda *a, **k: object())
+    monkeypatch.setattr(solve_runs, "build_root_task", lambda text, ctx, context=None: object())
+    monkeypatch.setattr(solve_runs, "_persisted_run", fake_persisted_run)
+
+    cb = lambda q: "answer"
+    try:
+        solve_runs.solve_once([roster], "do it", None, tmp_path / "runs",
+                              hitl_callback=cb)
+    except _StopForTest:
+        pass
+
+    # 1) le tool ask_human a bien été injecté dans l'agent (built-ins fusionnés)
+    assert any(t.name == ASK_HUMAN_TOOL_NAME for t in seen["agents"][0].tools)
+    # 2) le callback est posé sur le RunContext (seam V2)
+    assert seen["ctx"].hitl_callback is cb

@@ -53,7 +53,7 @@ def test_solve_cli_roles_option_forwarded_to_solve_once(tmp_path, monkeypatch):
     captured = {}
 
     def fake_solve_once(roster_dirs, task_text, context, runs_root, provider_name="ollama",
-                        roles_path=None):
+                        roles_path=None, hitl_callback=None):
         captured["roles_path"] = roles_path
         return _fake_outcome(tmp_path)
 
@@ -80,7 +80,7 @@ def test_solve_cli_no_roles_option_passes_none(tmp_path, monkeypatch):
     captured = {}
 
     def fake_solve_once(roster_dirs, task_text, context, runs_root, provider_name="ollama",
-                        roles_path=None):
+                        roles_path=None, hitl_callback=None):
         captured["roles_path"] = roles_path
         return _fake_outcome(tmp_path)
 
@@ -102,7 +102,7 @@ def test_solve_cli_no_roles_option_passes_none(tmp_path, monkeypatch):
 def test_solve_cli_invalid_roles_file_exits_1(tmp_path, monkeypatch):
     """Un roles file introuvable doit faire sortir avec code 1 via ValueError."""
     def fake_solve_once(roster_dirs, task_text, context, runs_root, provider_name="ollama",
-                        roles_path=None):
+                        roles_path=None, hitl_callback=None):
         raise ValueError(f"Cannot read role providers config at {roles_path}: ...")
 
     monkeypatch.setattr(app_mod, "solve_once", fake_solve_once)
