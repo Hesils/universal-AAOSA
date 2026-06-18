@@ -11,6 +11,7 @@ from pathlib import Path
 from aaosa.cli.incident_runs import RunKind, _persisted_run, load_elo_into
 from aaosa.config.role_providers import load_role_providers
 from aaosa.config.roster import load_rosters
+from aaosa.core.hitl import HITLCallback, build_builtin_tools
 from aaosa.qa.spec_evaluator import AdaptiveSpecEvaluator
 from aaosa.runtime import default_prompts
 from aaosa.runtime.aggregator import TaskAggregator
@@ -43,6 +44,7 @@ def solve_once(
     runs_root: Path,
     provider_name: str = "ollama",
     roles_path: Path | None = None,
+    hitl_callback: HITLCallback | None = None,
 ) -> SolveOutcome:
     """Résout une tâche libre avec N rosters injectés. Lève EmptyTaggingError si la
     tâche ne produit aucun tag (le caller CLI traduit en Exit 1).
@@ -50,7 +52,8 @@ def solve_once(
     roles_path : chemin vers un roles.yaml (provider/model par rôle système). None →
     RoleProviders vide → comportement identique à avant (rétrocompat stricte).
     """
-    agents = load_rosters(roster_dirs)
+    builtin_tools = build_builtin_tools(hitl_callback)
+    agents = load_rosters(roster_dirs, builtin_tools=builtin_tools)
     roles = load_role_providers(roles_path)  # ValueError si fichier absent/malformé
     provider, registry = build_provider_registry(agents, provider_name, roles=roles)
     preflight_models(agents, roles, registry, provider_name)  # échoue AVANT toute session
@@ -73,6 +76,7 @@ def solve_once(
         tracer=None,
         evaluator=AdaptiveSpecEvaluator(eprov, model=emodel),
         provider_registry=registry,
+        hitl_callback=hitl_callback,
         roles=roles,
     )
     task = build_root_task(task_text, pre_ctx, context=context)  # peut lever EmptyTaggingError
