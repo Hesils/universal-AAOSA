@@ -129,3 +129,21 @@ class TestTaskDividerDivide:
         messages = provider.parse.call_args.kwargs["messages"]
         sys_content = next(m["content"] for m in messages if m["role"] == "system")
         assert sys_content == "my-system-prompt"
+
+    def test_divide_relays_model_param_to_parse(self):
+        """model='some-model' must be forwarded to provider.parse."""
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = _make_division()
+        task = _make_task()
+        TaskDivider(system_prompt="sp").divide(task, provider, model="some-model")
+        call_kwargs = provider.parse.call_args.kwargs
+        assert call_kwargs.get("model") == "some-model"
+
+    def test_divide_model_none_by_default(self):
+        """model=None (default) is passed to provider.parse — provider uses its default."""
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = _make_division()
+        task = _make_task()
+        TaskDivider(system_prompt="sp").divide(task, provider)
+        call_kwargs = provider.parse.call_args.kwargs
+        assert call_kwargs.get("model") is None

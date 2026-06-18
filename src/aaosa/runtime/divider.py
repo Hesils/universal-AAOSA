@@ -141,6 +141,7 @@ class TaskDivider:
         chained_context: list[Task] | None = None,
         failure_context: FailureContext | None = None,
         cycle_context: list[int] | None = None,
+        model: str | None = None,
     ) -> "DivisionResult":
         """LLM call → DivisionResult (structurel, sans tags). Ne construit pas de Task,
         ne résout pas les deps, n'émet aucun event — c'est le runner (build_sub_tasks).
@@ -158,6 +159,7 @@ class TaskDivider:
             ],
             schema=DivisionResult,
             temperature=0.0,
+            model=model,
         )
         if parsed is None:
             raise ValueError("divider returned no parsed DivisionResult")

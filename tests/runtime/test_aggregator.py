@@ -119,3 +119,21 @@ class TestTaskAggregator:
         # Must not raise when tracer=None (default)
         result = TaskAggregator(system_prompt="agg").aggregate(task, [sub], provider)
         assert result is not None
+
+    def test_aggregate_relays_model_param_to_complete(self):
+        """model='some-model' must be forwarded to provider.complete."""
+        provider = _make_provider()
+        task = _make_task()
+        sub = _make_output(task.id, "part")
+        TaskAggregator(system_prompt="agg").aggregate(task, [sub], provider, model="some-model")
+        call_kwargs = provider.complete.call_args.kwargs
+        assert call_kwargs.get("model") == "some-model"
+
+    def test_aggregate_model_none_by_default(self):
+        """model=None (default) is passed to provider.complete — provider uses its default."""
+        provider = _make_provider()
+        task = _make_task()
+        sub = _make_output(task.id, "part")
+        TaskAggregator(system_prompt="agg").aggregate(task, [sub], provider)
+        call_kwargs = provider.complete.call_args.kwargs
+        assert call_kwargs.get("model") is None

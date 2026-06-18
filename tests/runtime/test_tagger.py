@@ -89,6 +89,26 @@ def test_build_prompt_states_and_filter_contract():
     assert "name it even though it is absent" in " ".join(lower.split())
 
 
+def test_tag_relays_model_param_to_parse():
+    """model='some-model' must be forwarded to provider.parse."""
+    provider = MagicMock(spec=LLMProvider)
+    provider.parse.return_value = TagSet(tags=["python"])
+    tagger = Tagger(system_prompt="tag it")
+    tagger.tag("optimize a query", [make_agent()], provider, model="some-model")
+    call_kwargs = provider.parse.call_args.kwargs
+    assert call_kwargs.get("model") == "some-model"
+
+
+def test_tag_model_none_by_default():
+    """model=None (default) is passed to provider.parse — provider uses its default."""
+    provider = MagicMock(spec=LLMProvider)
+    provider.parse.return_value = TagSet(tags=["python"])
+    tagger = Tagger(system_prompt="tag it")
+    tagger.tag("optimize a query", [make_agent()], provider)
+    call_kwargs = provider.parse.call_args.kwargs
+    assert call_kwargs.get("model") is None
+
+
 def test_build_prompt_groups_vocabulary_by_role_bundles():
     """Le vocabulaire est présenté par bundles de rôle (une ligne = les tags d'un
     rôle existant), pas à plat : sans les co-occurrences réelles, le LLM ne peut

@@ -51,7 +51,7 @@ class Tagger:
             f"Task: {description}"
         )
 
-    def tag(self, description: str, agents: list[Agent], provider: LLMProvider) -> set[str]:
+    def tag(self, description: str, agents: list[Agent], provider: LLMProvider, model: str | None = None) -> set[str]:
         """Génère un ensemble de tags pour la description.
 
         Retourne un ensemble vide si le LLM échoue ou ne peut pas parser.
@@ -64,6 +64,7 @@ class Tagger:
             ],
             schema=TagSet,
             temperature=0.0,
+            model=model,
         )
         if parsed is None:
             return set()

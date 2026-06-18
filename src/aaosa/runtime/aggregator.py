@@ -43,6 +43,7 @@ class TaskAggregator:
         sub_outputs: list[Output],
         provider: LLMProvider,
         tracer: Tracer | None = None,
+        model: str | None = None,
     ) -> Output:
         """LLM call → Output synthétisant les sub_outputs.
 
@@ -55,6 +56,7 @@ class TaskAggregator:
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": prompt},
             ],
+            model=model,
         )
         latency_ms = (time.monotonic() - start) * 1000
         output = Output(
