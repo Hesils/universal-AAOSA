@@ -8,6 +8,7 @@ from aaosa.qa.protocol import QAEvaluator, QAFailure
 from aaosa.qa.spec_evaluator import AdaptiveSpecEvaluator
 from aaosa.runtime.context import RunContext
 from aaosa.runtime.divider import DivisionResult, find_cycle_indices
+from aaosa.runtime.provider_registry import resolve_provider
 from aaosa.runtime.providers import LLMProvider
 from aaosa.runtime.tagger import EmptyTaggingError
 from aaosa.schemas.elo import DEFAULT_REQUIRED_ELO
@@ -58,12 +59,9 @@ def run_task(
     agent_map = {agent.id: agent for agent in candidate_agents}
     winner = agent_map[result.agent_id]
 
-    # Résolution du provider par agent (d6i fork #2) : si l'agent porte un nom de
-    # provider ET qu'un registre est fourni, on utilise le provider correspondant ;
-    # sinon on retombe sur le provider par défaut du run.
-    exec_provider = provider
-    if winner.provider and provider_registry:
-        exec_provider = provider_registry.get(winner.provider, provider)
+    # Résolution du provider par agent (d6i fork #2) : point de résolution unique
+    # via resolve_provider (DRY — logique en provider_registry.py).
+    exec_provider = resolve_provider(winner.provider, provider_registry, provider)
 
     # Frontière de containment : execute() et evaluate() font des appels LLM (boucle
     # d'outils, juge) qui peuvent lever. run_task ne propage jamais ces erreurs ; il
