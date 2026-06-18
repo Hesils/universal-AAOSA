@@ -21,6 +21,7 @@ from aaosa.cli.incident_runs import (
 from aaosa.cli.report import build_report
 from aaosa.cli.solve_runs import solve_once
 from aaosa.elo.persistence import load_snapshot
+from aaosa.runtime.preflight import PreflightError
 from aaosa.demo.run_health_check_v3 import run_demo_health_check_v3
 from aaosa.runtime.llm_client import create_provider
 from aaosa.runtime.tagger import EmptyTaggingError
@@ -100,6 +101,9 @@ def solve(
         outcome = solve_once(roster, task, context, runs_root, provider, roles_path=roles)
     except EmptyTaggingError:
         typer.echo("Tagging produced no tags for this task — cannot route it. Refine --task.")
+        raise typer.Exit(code=1)
+    except PreflightError as exc:
+        typer.echo(str(exc))
         raise typer.Exit(code=1)
     except ValueError as exc:  # erreurs de chargement roster/roles (collision, agents.yaml manquant, TOOL_REGISTRY, roles.yaml invalide)
         typer.echo(str(exc))

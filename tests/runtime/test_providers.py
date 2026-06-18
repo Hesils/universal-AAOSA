@@ -10,6 +10,7 @@ from aaosa.runtime.providers import (
     LLMProvider,
     OllamaProvider,
     OpenAIProvider,
+    ProviderUnreachableError,
 )
 
 
@@ -121,3 +122,32 @@ class TestOllamaProvider:
         p._client = MagicMock(spec=OpenAI)
         p._client.chat.completions.create.return_value = comp
         assert p.parse(messages=[], schema=_Schema) is None
+
+
+class TestAvailableModels:
+    def test_default_model_property(self):
+        p = OpenAIProvider(client=_fake_openai(), default_model="gpt-4o")
+        assert p.default_model == "gpt-4o"
+
+    def test_available_models_returns_ids(self):
+        client = _fake_openai()
+        m1, m2 = MagicMock(), MagicMock()
+        m1.id, m2.id = "gpt-4o-mini", "gpt-4o"
+        client.models.list.return_value = [m1, m2]
+        p = OpenAIProvider(client=client)
+        assert p.available_models() == {"gpt-4o-mini", "gpt-4o"}
+
+    def test_available_models_raises_provider_unreachable_on_error(self):
+        client = _fake_openai()
+        client.models.list.side_effect = RuntimeError("connection refused")
+        p = OpenAIProvider(client=client)
+        with pytest.raises(ProviderUnreachableError):
+            p.available_models()
+
+    def test_ollama_available_models_uses_same_path(self):
+        p = OllamaProvider()
+        p._client = _fake_openai()  # injecte un client mocké
+        m = MagicMock()
+        m.id = "qwen3:4b"
+        p._client.models.list.return_value = [m]
+        assert p.available_models() == {"qwen3:4b"}

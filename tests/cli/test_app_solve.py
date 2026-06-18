@@ -63,6 +63,22 @@ def test_solve_empty_tagging_exits_1(tmp_path, monkeypatch):
     assert "tag" in result.output.lower()
 
 
+def test_solve_command_exits_1_on_preflight_error(monkeypatch, tmp_path):
+    import aaosa.cli.app as app_mod
+    from aaosa.runtime.preflight import PreflightError
+
+    def boom(*a, **k):
+        raise PreflightError("Preflight model availability failed:\n  - agent 'x': model 'absent:99b' absent")
+
+    monkeypatch.setattr(app_mod, "solve_once", boom)
+    result = runner.invoke(
+        app_mod.app,
+        ["solve", "--roster", str(tmp_path), "--task", "t"],
+    )
+    assert result.exit_code == 1
+    assert "Preflight model availability failed" in result.output
+
+
 def _roster(tmp_path) -> Path:
     d = tmp_path / "r"
     d.mkdir(parents=True, exist_ok=True)

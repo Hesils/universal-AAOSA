@@ -126,6 +126,7 @@ def test_solve_once_roles_path_evaluator_uses_resolved_provider_and_model(tmp_pa
         return None  # evaluator None = pas de run LLM en test
 
     monkeypatch.setattr(mod, "build_provider_registry", fake_build_registry)
+    monkeypatch.setattr(mod, "preflight_models", lambda agents, roles, registry, default_provider_name: None)
     monkeypatch.setattr(mod, "AdaptiveSpecEvaluator", fake_adaptive_evaluator)
 
     outcome = solve_once(
@@ -166,6 +167,7 @@ def test_solve_once_without_roles_path_uses_default_provider(tmp_path, monkeypat
         return None
 
     monkeypatch.setattr(mod, "build_provider_registry", fake_build_registry)
+    monkeypatch.setattr(mod, "preflight_models", lambda agents, roles, registry, default_provider_name: None)
     monkeypatch.setattr(mod, "AdaptiveSpecEvaluator", fake_adaptive_evaluator)
 
     outcome = solve_once(
@@ -202,6 +204,7 @@ def test_solve_once_roles_path_registry_contains_evaluator_provider(tmp_path, mo
         return p, {provider_name: p}
 
     monkeypatch.setattr(mod, "build_provider_registry", fake_build_registry)
+    monkeypatch.setattr(mod, "preflight_models", lambda agents, roles, registry, default_provider_name: None)
     monkeypatch.setattr(mod, "AdaptiveSpecEvaluator", lambda *a, **k: None)
 
     solve_once(
