@@ -8,7 +8,7 @@ from aaosa.schemas.elo import DEFAULT_REQUIRED_ELO
 class _FakeTagger:
     def __init__(self, tags):
         self._tags = set(tags)
-    def tag(self, description, agents, provider):
+    def tag(self, description, agents, provider, model=None):
         return self._tags
 
 

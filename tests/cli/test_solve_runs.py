@@ -77,7 +77,7 @@ def test_solve_once_empty_tagging_raises(tmp_path, monkeypatch):
                         lambda agents, provider_name="ollama": (_FakeProvider(), {}))
     monkeypatch.setattr(mod, "AdaptiveSpecEvaluator", lambda provider: None)
     # tagger renvoie set() -> EmptyTaggingError
-    monkeypatch.setattr("aaosa.runtime.tagger.Tagger.tag", lambda self, d, a, p: set())
+    monkeypatch.setattr("aaosa.runtime.tagger.Tagger.tag", lambda self, d, a, p, model=None: set())
     roster = _roster(tmp_path / "r")
     with pytest.raises(EmptyTaggingError):
         solve_once([roster], "ambiguous", context=None, runs_root=tmp_path / "runs")

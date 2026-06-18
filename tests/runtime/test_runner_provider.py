@@ -188,7 +188,7 @@ class _FakeTagger:
     def __init__(self, default=("python",)):
         self.default = set(default)
 
-    def tag(self, description, agents, provider):
+    def tag(self, description, agents, provider, model=None):
         return set(self.default)
 
 
@@ -196,12 +196,12 @@ class _StaticDivider:
     def __init__(self, division):
         self.division = division
 
-    def divide(self, task, provider, chained_context=None, failure_context=None, cycle_context=None):
+    def divide(self, task, provider, chained_context=None, failure_context=None, cycle_context=None, model=None):
         return self.division
 
 
 class _RecordingAggregator:
-    def aggregate(self, parent_task, sub_outputs, provider, tracer=None):
+    def aggregate(self, parent_task, sub_outputs, provider, tracer=None, model=None):
         from aaosa.schemas.output import LLMMetadata, Output
         return Output(
             task_id=parent_task.id, agent_id="aggregator", content="agg",

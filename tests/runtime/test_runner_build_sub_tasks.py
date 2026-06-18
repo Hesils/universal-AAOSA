@@ -9,7 +9,7 @@ from aaosa.schemas.task import Task
 
 
 class _StubTagger:
-    def tag(self, description, agents, provider):
+    def tag(self, description, agents, provider, model=None):
         return ["python"]
 
 
