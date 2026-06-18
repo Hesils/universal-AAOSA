@@ -65,7 +65,7 @@ def test_route_evaluator_reeval_ok_returns_output(monkeypatch):
                         lambda *a, **k: DiagnosticResult(attribution="evaluator", consignes=None, reason="r"))
     good_qa = QAResult(task_id="t", agent_id="a", success=True, score=0.9, reason="ok", criteria_results={})
     monkeypatch.setattr(runner, "AdaptiveSpecEvaluator",
-                        lambda client, failure_context=None: SimpleNamespace(evaluate=lambda task, output: good_qa))
+                        lambda client, failure_context=None, model=None: SimpleNamespace(evaluate=lambda task, output: good_qa))
     out = runner.run_with_recovery(_task(), _ctx())
     assert isinstance(out, Output)
     assert out.content == "bad"   # l'output original passe avec le nouvel evaluator
@@ -78,7 +78,7 @@ def test_route_evaluator_reeval_ko_then_agent_retry_ok(monkeypatch):
                         lambda *a, **k: DiagnosticResult(attribution="evaluator", consignes="clarify", reason="r"))
     bad_qa = QAResult(task_id="t", agent_id="a", success=False, score=0.1, reason="still bad", criteria_results={})
     monkeypatch.setattr(runner, "AdaptiveSpecEvaluator",
-                        lambda client, failure_context=None: SimpleNamespace(evaluate=lambda task, output: bad_qa))
+                        lambda client, failure_context=None, model=None: SimpleNamespace(evaluate=lambda task, output: bad_qa))
     out = runner.run_with_recovery(_task(), _ctx())
     assert isinstance(out, Output)
     assert out.content == "recovered"
@@ -91,7 +91,7 @@ def test_route_evaluator_reeval_ko_then_agent_retry_ko(monkeypatch):
                         lambda *a, **k: DiagnosticResult(attribution="evaluator", consignes="clarify", reason="r"))
     bad_qa = QAResult(task_id="t", agent_id="a", success=False, score=0.1, reason="bad", criteria_results={})
     monkeypatch.setattr(runner, "AdaptiveSpecEvaluator",
-                        lambda client, failure_context=None: SimpleNamespace(evaluate=lambda task, output: bad_qa))
+                        lambda client, failure_context=None, model=None: SimpleNamespace(evaluate=lambda task, output: bad_qa))
     out = runner.run_with_recovery(_task(), _ctx())
     assert out.status == "qa_failed"
     assert out.attribution == "evaluator"
@@ -125,19 +125,19 @@ class _DividerStub:
         self.division = division
         self.calls = []
 
-    def divide(self, task, provider, chained_context=None, failure_context=None, cycle_context=None):
+    def divide(self, task, provider, chained_context=None, failure_context=None, cycle_context=None, model=None):
         self.calls.append(failure_context)
         return self.division
 
 
 class _AggStub:
-    def aggregate(self, task, sinks, provider, tracer=None):
+    def aggregate(self, task, sinks, provider, tracer=None, model=None):
         return Output(task_id=task.id, agent_id="aggregator", content="aggregated",
                       llm_metadata=LLMMetadata(model_name="m", tokens_in=1, tokens_out=1, latency_ms=1.0))
 
 
 class _TaggerStub:
-    def tag(self, description, agents, provider):
+    def tag(self, description, agents, provider, model=None):
         return ["python"]
 
 
@@ -212,7 +212,7 @@ def test_route_evaluator_passes_failure_context(monkeypatch):
     good_qa = QAResult(task_id="t", agent_id="a", success=True, score=0.9,
                        reason="ok", criteria_results={})
 
-    def fake_evaluator(client, failure_context=None):
+    def fake_evaluator(client, failure_context=None, model=None):
         captured["fc"] = failure_context
         return SimpleNamespace(evaluate=lambda task, output: good_qa)
 

@@ -45,7 +45,7 @@ class _ScriptedDivider:
         self.cycle_contexts_seen = []
         self.calls = 0
 
-    def divide(self, task, client, chained_context=None, failure_context=None, cycle_context=None):
+    def divide(self, task, client, chained_context=None, failure_context=None, cycle_context=None, model=None):
         self.cycle_contexts_seen.append(cycle_context)
         self.calls += 1
         return self.script.pop(0)
@@ -72,7 +72,7 @@ def _ctx(divider, agents, tracer=None) -> RunContext:
         agents=agents, provider=SimpleNamespace(),
         divider=divider,
         aggregator=SimpleNamespace(),
-        tagger=SimpleNamespace(tag=lambda desc, agents, provider: ["python"]),
+        tagger=SimpleNamespace(tag=lambda desc, agents, provider, model=None: ["python"]),
         tracer=tracer,
     )
 

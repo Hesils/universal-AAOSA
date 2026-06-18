@@ -8,6 +8,7 @@ from aaosa.qa.protocol import QAEvaluator, QAFailure
 from aaosa.qa.spec_evaluator import AdaptiveSpecEvaluator
 from aaosa.runtime.context import RunContext
 from aaosa.runtime.divider import DivisionResult, find_cycle_indices
+from aaosa.runtime.provider_registry import resolve_provider
 from aaosa.runtime.providers import LLMProvider
 from aaosa.runtime.tagger import EmptyTaggingError
 from aaosa.schemas.elo import DEFAULT_REQUIRED_ELO
@@ -58,12 +59,9 @@ def run_task(
     agent_map = {agent.id: agent for agent in candidate_agents}
     winner = agent_map[result.agent_id]
 
-    # Résolution du provider par agent (d6i fork #2) : si l'agent porte un nom de
-    # provider ET qu'un registre est fourni, on utilise le provider correspondant ;
-    # sinon on retombe sur le provider par défaut du run.
-    exec_provider = provider
-    if winner.provider and provider_registry:
-        exec_provider = provider_registry.get(winner.provider, provider)
+    # Résolution du provider par agent (d6i fork #2) : point de résolution unique
+    # via resolve_provider (DRY — logique en provider_registry.py).
+    exec_provider = resolve_provider(winner.provider, provider_registry, provider)
 
     # Frontière de containment : execute() et evaluate() font des appels LLM (boucle
     # d'outils, juge) qui peuvent lever. run_task ne propage jamais ces erreurs ; il
@@ -228,9 +226,10 @@ def build_sub_tasks(parent_task: Task, division: DivisionResult, ctx: RunContext
     barre uniforme DEFAULT_REQUIRED_ELO, résout les deps indices→IDs, et émet le
     TaskDividedEvent (avec les vrais tags). Lève EmptyTaggingError si une sous-spec ne
     produit aucun tag (clean-crash géré par run_with_recovery)."""
+    tprov, tmodel = ctx.resolve_role("tagger")
     sub_tasks: list[Task] = []
     for i, spec in enumerate(division.sub_tasks):
-        tags = ctx.tagger.tag(spec.description, ctx.agents, ctx.provider)
+        tags = ctx.tagger.tag(spec.description, ctx.agents, tprov, model=tmodel)
         if not tags:
             raise EmptyTaggingError(spec.description)
         sub_tasks.append(Task(
@@ -273,10 +272,12 @@ def _divide_with_cycle_retry(
     brut est tracé à chaque détection (jamais conservé auparavant). Retourne None si
     le retry reste cyclique — l'appelant retombe sur l'erreur contenue actuelle. Un
     seul retry, jamais de boucle."""
+    dprov, dmodel = ctx.resolve_role("divider")
     division = ctx.divider.divide(
-        task, ctx.provider,
+        task, dprov,
         chained_context=chained_context,
         failure_context=failure_context,
+        model=dmodel,
     )
     if division.is_atomic:
         return division
@@ -287,10 +288,11 @@ def _divide_with_cycle_retry(
 
     _emit_cycle_event(task, division, cycle, retried=True, ctx=ctx)
     division = ctx.divider.divide(
-        task, ctx.provider,
+        task, dprov,
         chained_context=chained_context,
         failure_context=failure_context,
         cycle_context=cycle,
+        model=dmodel,
     )
     if division.is_atomic:
         return division
@@ -370,8 +372,9 @@ def _divide_and_recover(
     if len(sinks) == 1:
         return sinks[0]   # court-circuit : un seul résultat terminal, rien à synthétiser
 
+    aprov, amodel = ctx.resolve_role("aggregator")
     try:
-        return ctx.aggregator.aggregate(task, sinks, ctx.provider, ctx.tracer)
+        return ctx.aggregator.aggregate(task, sinks, aprov, ctx.tracer, model=amodel)
     except Exception:
         return sinks[-1]
 
@@ -414,7 +417,8 @@ def _route_diagnostic(
     depth: int,
     chained_context: list[Task] | None,
 ) -> "Output | DispatchResult | QAFailure":
-    diagnostic = diagnose_failure(task, failure.output, failure.qa_result, ctx.provider)
+    gprov, gmodel = ctx.resolve_role("diagnostic")
+    diagnostic = diagnose_failure(task, failure.output, failure.qa_result, gprov, model=gmodel)
 
     # Pattern observer : le RUNNER émet (diagnostic.py reste pur). Émis y compris
     # sur échec LLM (diagnostic=None → unattributed, reason vide).
@@ -440,7 +444,8 @@ def _route_diagnostic(
             qa_result=failure.qa_result,
             diagnostic_reason=diagnostic.reason,
         )
-        new_evaluator = AdaptiveSpecEvaluator(ctx.provider, failure_context=fc)
+        eprov, emodel = ctx.resolve_role("evaluator")
+        new_evaluator = AdaptiveSpecEvaluator(eprov, failure_context=fc, model=emodel)
         qa2 = new_evaluator.evaluate(task, failure.output)
         # Ré-évaluation VISIBLE : le runner trace la QA v2 (spec régénérée portée par spec_used).
         if ctx.tracer is not None:
@@ -526,7 +531,8 @@ def build_root_task(
     (le caller décide de la dégradation). Partagé par run_recovery et solve_once."""
     if pinned_tags:
         return Task(description=description, required_tags=pinned_tags, context=context)
-    tags = ctx.tagger.tag(description, ctx.agents, ctx.provider)
+    tprov, tmodel = ctx.resolve_role("tagger")
+    tags = ctx.tagger.tag(description, ctx.agents, tprov, model=tmodel)
     if not tags:
         raise EmptyTaggingError(description)
     return Task(

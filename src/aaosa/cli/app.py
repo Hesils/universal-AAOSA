@@ -72,6 +72,7 @@ def solve(
     context_max: int = typer.Option(20000, "--context-max", help="Refus dur si le contexte dépasse (caractères)"),
     provider: str = typer.Option("ollama", "--provider", help="ollama (défaut) | openai"),
     runs_root: Path = typer.Option(Path("runs"), "--runs-root"),
+    roles: Path | None = typer.Option(None, "--roles", help="roles.yaml: provider/model par rôle système (divider/aggregator/tagger/evaluator/diagnostic/triage/task_spec)"),
 ) -> None:
     """Résout une tâche libre avec N rosters injectés -> session + manifest + lien trace."""
     load_dotenv()
@@ -96,11 +97,11 @@ def solve(
         raise typer.Exit(code=1)
 
     try:
-        outcome = solve_once(roster, task, context, runs_root, provider)
+        outcome = solve_once(roster, task, context, runs_root, provider, roles_path=roles)
     except EmptyTaggingError:
         typer.echo("Tagging produced no tags for this task — cannot route it. Refine --task.")
         raise typer.Exit(code=1)
-    except ValueError as exc:  # erreurs de chargement roster (collision, agents.yaml manquant, TOOL_REGISTRY)
+    except ValueError as exc:  # erreurs de chargement roster/roles (collision, agents.yaml manquant, TOOL_REGISTRY, roles.yaml invalide)
         typer.echo(str(exc))
         raise typer.Exit(code=1)
 

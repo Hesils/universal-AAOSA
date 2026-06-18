@@ -32,7 +32,7 @@ class _FakeTagger:
         self.mapping = mapping or {}
         self.default = set(default)
 
-    def tag(self, description, agents, provider):
+    def tag(self, description, agents, provider, model=None):
         return set(self.mapping.get(description, self.default))
 
 
@@ -40,17 +40,17 @@ class _StaticDivider:
     def __init__(self, division):
         self.division = division
 
-    def divide(self, task, provider, chained_context=None, failure_context=None):
+    def divide(self, task, provider, chained_context=None, failure_context=None, cycle_context=None, model=None):
         return self.division
 
 
 class _RecordingAggregator:
-    def aggregate(self, parent_task, sub_outputs, provider, tracer=None):
+    def aggregate(self, parent_task, sub_outputs, provider, tracer=None, model=None):
         return make_output(parent_task.id, "agg")
 
 
 class _ExplodingAggregator:
-    def aggregate(self, parent_task, sub_outputs, provider, tracer=None):
+    def aggregate(self, parent_task, sub_outputs, provider, tracer=None, model=None):
         raise RuntimeError("boom")
 
 
@@ -92,7 +92,7 @@ class _SpyAggregator:
     def __init__(self):
         self.called_with = None
 
-    def aggregate(self, parent_task, sub_outputs, provider, tracer=None):
+    def aggregate(self, parent_task, sub_outputs, provider, tracer=None, model=None):
         self.called_with = list(sub_outputs)
         return make_output(parent_task.id, "agg")
 
@@ -187,7 +187,7 @@ class TestRunWithRecovery:
 
     def test_divider_exception_returns_execution_failed(self):
         class _ExplodingDivider:
-            def divide(self, task, provider):
+            def divide(self, task, provider, chained_context=None, failure_context=None, cycle_context=None, model=None):
                 raise RuntimeError("LLM timeout")
 
         ctx = _ctx(_ExplodingDivider())
@@ -233,7 +233,7 @@ class TestRunRecovery:
         called = {"tag": False}
 
         class _SpyTagger(_FakeTagger):
-            def tag(self, description, agents, provider):
+            def tag(self, description, agents, provider, model=None):
                 called["tag"] = True
                 return {"python"}
 

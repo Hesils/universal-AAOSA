@@ -5,12 +5,14 @@ appel récursif. Seul `depth` reste threadé explicitement. Frozen : aucune muta
 cours de run.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from aaosa.config.role_providers import RoleProviders
 from aaosa.core.agent import Agent
 from aaosa.qa.protocol import QAEvaluator
 from aaosa.runtime.aggregator import TaskAggregator
 from aaosa.runtime.divider import TaskDivider
+from aaosa.runtime.provider_registry import resolve_provider
 from aaosa.runtime.providers import LLMProvider
 from aaosa.runtime.tagger import Tagger
 from aaosa.tracing.tracer import Tracer
@@ -26,3 +28,12 @@ class RunContext:
     tracer: Tracer | None = None
     evaluator: QAEvaluator | None = None
     provider_registry: "dict[str, LLMProvider] | None" = None
+    roles: RoleProviders = field(default_factory=RoleProviders)
+
+    def resolve_role(self, name: str) -> "tuple[LLMProvider, str | None]":
+        """(provider effectif, model) pour un rôle, via resolve_provider + le registre.
+
+        Rôle sans provider/model -> (provider défaut du run, None) = comportement actuel.
+        """
+        rp = getattr(self.roles, name)
+        return resolve_provider(rp.provider, self.provider_registry, self.provider), rp.model

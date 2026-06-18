@@ -53,9 +53,9 @@ def _roster(dir: Path) -> Path:
 def _patch_provider(monkeypatch):
     import aaosa.cli.solve_runs as mod
     monkeypatch.setattr(mod, "build_provider_registry",
-                        lambda agents, provider_name="ollama": (_FakeProvider(), {provider_name: _FakeProvider()}))
+                        lambda agents, provider_name="ollama", roles=None: (_FakeProvider(), {provider_name: _FakeProvider()}))
     # l'évaluateur LLM-judge ne doit pas tourner en test : forcer un evaluator None.
-    monkeypatch.setattr(mod, "AdaptiveSpecEvaluator", lambda provider: None)
+    monkeypatch.setattr(mod, "AdaptiveSpecEvaluator", lambda provider, failure_context=None, model=None: None)
 
 
 def test_solve_once_produces_session_trace_and_manifest(tmp_path, monkeypatch):
@@ -74,10 +74,10 @@ def test_solve_once_produces_session_trace_and_manifest(tmp_path, monkeypatch):
 def test_solve_once_empty_tagging_raises(tmp_path, monkeypatch):
     import aaosa.cli.solve_runs as mod
     monkeypatch.setattr(mod, "build_provider_registry",
-                        lambda agents, provider_name="ollama": (_FakeProvider(), {}))
-    monkeypatch.setattr(mod, "AdaptiveSpecEvaluator", lambda provider: None)
+                        lambda agents, provider_name="ollama", roles=None: (_FakeProvider(), {}))
+    monkeypatch.setattr(mod, "AdaptiveSpecEvaluator", lambda provider, failure_context=None, model=None: None)
     # tagger renvoie set() -> EmptyTaggingError
-    monkeypatch.setattr("aaosa.runtime.tagger.Tagger.tag", lambda self, d, a, p: set())
+    monkeypatch.setattr("aaosa.runtime.tagger.Tagger.tag", lambda self, d, a, p, model=None: set())
     roster = _roster(tmp_path / "r")
     with pytest.raises(EmptyTaggingError):
         solve_once([roster], "ambiguous", context=None, runs_root=tmp_path / "runs")

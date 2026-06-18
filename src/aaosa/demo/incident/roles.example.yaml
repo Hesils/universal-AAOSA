@@ -1,0 +1,42 @@
+# roles.yaml — provider/model par rôle système (curseur de coût).
+#
+# Usage :
+#   aaosa solve --roster <dir> --task "..." --roles roles.yaml
+#
+# Chaque rôle est OPTIONNEL. Un rôle ou champ absent hérite du provider
+# par défaut du run (--provider, défaut ollama) et du modèle par défaut
+# de ce provider.
+#
+# Stratégie typique : agents de domaine sur ollama (gratuit, local),
+# rôles d'orchestration/évaluation sur un modèle externe plus fort.
+
+# Évaluation de la qualité des outputs (AdaptiveSpecEvaluator) :
+# un modèle plus intelligent améliore la précision des specs générées.
+evaluator:
+  provider: openai
+  model: gpt-4o
+
+# Division des tâches complexes en sous-tâches (TaskDivider) :
+# un modèle léger suffit ; gpt-4o-mini réduit le coût de l'orchestration.
+divider:
+  provider: openai
+  model: gpt-4o-mini
+
+# ATTENTION — triage (B2) et task_spec (B3) tournent dans le batch health-check,
+# hors chemin `aaosa solve`. Ce batch n'honore que `model` ; son `provider:` est
+# IGNORÉ (le provider reste celui par défaut du run). Pour ces deux rôles, ne fixe
+# que `model` (sur le provider par défaut) — un `provider:` divergent serait silencieux.
+
+# Triage des failures QA (B2) — détermine la source de l'échec (agent/task_spec/evaluator) :
+# un raisonnement fin améliore la précision de l'attribution.
+triage:
+  model: gpt-4o-mini   # provider: ignoré dans le batch health-check (voir note ci-dessus)
+
+# Correction des task_spec mal formées (B3) :
+task_spec:
+  model: gpt-4o-mini   # provider: ignoré dans le batch health-check (voir note ci-dessus)
+
+# Rôles non spécifiés -> provider/model par défaut du run :
+#   aggregator  (TaskAggregator)
+#   tagger      (Tagger)
+#   diagnostic  (moteur diagnostic D4)

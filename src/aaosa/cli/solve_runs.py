@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from aaosa.cli.incident_runs import RunKind, _persisted_run, load_elo_into
+from aaosa.config.role_providers import load_role_providers
 from aaosa.config.roster import load_rosters
 from aaosa.qa.spec_evaluator import AdaptiveSpecEvaluator
 from aaosa.runtime import default_prompts
@@ -16,7 +17,7 @@ from aaosa.runtime.aggregator import TaskAggregator
 from aaosa.runtime.context import RunContext
 from aaosa.runtime.divider import TaskDivider
 from aaosa.runtime.manifest import build_manifest
-from aaosa.runtime.provider_registry import build_provider_registry
+from aaosa.runtime.provider_registry import build_provider_registry, resolve_provider
 from aaosa.runtime.runner import build_root_task
 from aaosa.runtime.tagger import Tagger
 from aaosa.tracing.events import ClaimEvent
@@ -40,12 +41,23 @@ def solve_once(
     context: str | None,
     runs_root: Path,
     provider_name: str = "ollama",
+    roles_path: Path | None = None,
 ) -> SolveOutcome:
     """Résout une tâche libre avec N rosters injectés. Lève EmptyTaggingError si la
-    tâche ne produit aucun tag (le caller CLI traduit en Exit 1)."""
+    tâche ne produit aucun tag (le caller CLI traduit en Exit 1).
+
+    roles_path : chemin vers un roles.yaml (provider/model par rôle système). None →
+    RoleProviders vide → comportement identique à avant (rétrocompat stricte).
+    """
     agents = load_rosters(roster_dirs)
-    provider, registry = build_provider_registry(agents, provider_name)
+    roles = load_role_providers(roles_path)  # ValueError si fichier absent/malformé
+    provider, registry = build_provider_registry(agents, provider_name, roles=roles)
     load_elo_into(agents, runs_root)
+
+    # Résoudre le provider/model de l'évaluateur via les rôles.
+    # roles.evaluator.provider=None (défaut) -> resolve_provider retourne provider (défaut du run).
+    eprov = resolve_provider(roles.evaluator.provider, registry, provider)
+    emodel = roles.evaluator.model
 
     # pre_ctx (tracer=None) pour taguer la racine AVANT toute création de session :
     # un échec de tagging ne doit pas laisser de session demi-écrite. build_root_task
@@ -57,8 +69,9 @@ def solve_once(
         aggregator=TaskAggregator(system_prompt=default_prompts.AGGREGATOR_PROMPT),
         tagger=Tagger(system_prompt=default_prompts.TAGGER_PROMPT),
         tracer=None,
-        evaluator=AdaptiveSpecEvaluator(provider),
+        evaluator=AdaptiveSpecEvaluator(eprov, model=emodel),
         provider_registry=registry,
+        roles=roles,
     )
     task = build_root_task(task_text, pre_ctx, context=context)  # peut lever EmptyTaggingError
 

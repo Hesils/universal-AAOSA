@@ -212,6 +212,7 @@ def build_llm_spec(
     task: Task,
     provider: LLMProvider,
     failure_context: FailureContext | None = None,
+    model: str | None = None,
 ) -> EvaluatorSpec:
     """Génère un EvaluatorSpec via LLM (structured output).
 
@@ -229,6 +230,7 @@ def build_llm_spec(
             ],
             schema=_LLMEvaluatorSpec,
             temperature=0.0,
+            model=model,
         )
         if parsed is None:
             raise ValueError("LLM returned no parsed _LLMEvaluatorSpec")

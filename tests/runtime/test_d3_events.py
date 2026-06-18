@@ -77,7 +77,7 @@ def test_diagnosed_emitted_on_task_spec_route(monkeypatch):
                         lambda *a, **k: DiagnosticResult(attribution="task_spec", reason="ambiguous"))
 
     class _AtomicDivider:
-        def divide(self, task, provider, chained_context=None, failure_context=None, cycle_context=None):
+        def divide(self, task, provider, chained_context=None, failure_context=None, cycle_context=None, model=None):
             from aaosa.runtime.divider import DivisionResult
             return DivisionResult(is_atomic=True)
 
@@ -110,7 +110,7 @@ def test_reeval_emits_second_qa_event_with_regenerated_spec(monkeypatch):
     good_qa = QAResult(task_id="t", agent_id="a", success=True, score=0.9, reason="ok",
                        criteria_results={"non_empty": True}, spec_used=spec_v2)
     monkeypatch.setattr(runner, "AdaptiveSpecEvaluator",
-                        lambda client, failure_context=None: SimpleNamespace(evaluate=lambda task, output: good_qa))
+                        lambda client, failure_context=None, model=None: SimpleNamespace(evaluate=lambda task, output: good_qa))
     tracer = Tracer("s")
     out = runner.run_with_recovery(_task(), _ctx(tracer))
     assert isinstance(out, Output)
@@ -131,7 +131,7 @@ def test_reeval_fail_still_emits_qa2_then_retries(monkeypatch):
                         lambda *a, **k: DiagnosticResult(attribution="evaluator", consignes="clarify", reason="r"))
     bad_qa = QAResult(task_id="t", agent_id="a", success=False, score=0.1, reason="still bad", criteria_results={})
     monkeypatch.setattr(runner, "AdaptiveSpecEvaluator",
-                        lambda client, failure_context=None: SimpleNamespace(evaluate=lambda task, output: bad_qa))
+                        lambda client, failure_context=None, model=None: SimpleNamespace(evaluate=lambda task, output: bad_qa))
     tracer = Tracer("s")
     out = runner.run_with_recovery(_task(), _ctx(tracer))
     assert isinstance(out, Output) and out.content == "recovered"

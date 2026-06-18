@@ -98,6 +98,7 @@ def llm_check(task: Task, output: Output, params: dict) -> CriterionOutcome:
     provider = params.get("provider")
     if provider is None:
         raise ValueError("llm_check requires a 'provider' in params")
+    model = params.get("model")
 
     system = (
         "You are a strict QA criterion checker. Given a task, an agent output, and a "
@@ -116,6 +117,7 @@ def llm_check(task: Task, output: Output, params: dict) -> CriterionOutcome:
         ],
         schema=_LLMCheckResult,
         temperature=0.0,
+        model=model,
     )
     if parsed is None:
         raise ValueError("llm_check returned no parsed result")

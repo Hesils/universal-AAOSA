@@ -48,7 +48,7 @@ def _build_fix_prompt(case: TestCase) -> str:
     )
 
 
-def fix_task_spec(case: TestCase, provider: LLMProvider) -> TestCase | None:
+def fix_task_spec(case: TestCase, provider: LLMProvider, model: str | None = None) -> TestCase | None:
     """Retourne un nouveau TestCase avec description corrigée et attribution='unattributed'.
 
     Retourne None si le LLM échoue (le cas reste task_spec dans le TestSet).
@@ -59,6 +59,7 @@ def fix_task_spec(case: TestCase, provider: LLMProvider) -> TestCase | None:
         messages=[{"role": "user", "content": prompt}],
         schema=TaskSpecFix,
         temperature=0,
+        model=model,
     )
     if result is None:
         return None  # LLM failure — cas reste task_spec
@@ -66,7 +67,7 @@ def fix_task_spec(case: TestCase, provider: LLMProvider) -> TestCase | None:
     return case.model_copy(update={"task": new_task, "attribution": "unattributed"})
 
 
-def fix_task_spec_cases(test_set: TestSet, provider: LLMProvider) -> TestSet:
+def fix_task_spec_cases(test_set: TestSet, provider: LLMProvider, model: str | None = None) -> TestSet:
     """Retourne un nouveau TestSet avec les cas task_spec corrigés. Autres cas inchangés.
 
     Les cas dont le fix échoue (LLM failure) restent task_spec. Ne mute pas l'input.
@@ -76,6 +77,6 @@ def fix_task_spec_cases(test_set: TestSet, provider: LLMProvider) -> TestSet:
         if case.attribution != "task_spec":
             new_cases.append(case)
             continue
-        fixed = fix_task_spec(case, provider)
+        fixed = fix_task_spec(case, provider, model=model)
         new_cases.append(fixed if fixed is not None else case)
     return TestSet(cases=new_cases)
