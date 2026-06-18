@@ -28,8 +28,8 @@ def make_ask_human_tool(callback: HITLCallback | None = None) -> ToolDef:
     callback=None -> unattended_callback (dégradation sûre)."""
     cb = callback or unattended_callback
 
-    def _fn(question: str) -> str:
-        return cb(question)
+    def _fn(**kwargs: str) -> str:
+        return cb(kwargs["question"])
 
     return ToolDef(
         name=ASK_HUMAN_TOOL_NAME,
