@@ -54,6 +54,8 @@ def _patch_provider(monkeypatch):
     import aaosa.cli.solve_runs as mod
     monkeypatch.setattr(mod, "build_provider_registry",
                         lambda agents, provider_name="ollama", roles=None: (_FakeProvider(), {provider_name: _FakeProvider()}))
+    # preflight appelle available_models() sur le vrai registry -> no-op en test.
+    monkeypatch.setattr(mod, "preflight_models", lambda agents, roles, registry, default_provider_name: None)
     # l'évaluateur LLM-judge ne doit pas tourner en test : forcer un evaluator None.
     monkeypatch.setattr(mod, "AdaptiveSpecEvaluator", lambda provider, failure_context=None, model=None: None)
 
@@ -75,9 +77,23 @@ def test_solve_once_empty_tagging_raises(tmp_path, monkeypatch):
     import aaosa.cli.solve_runs as mod
     monkeypatch.setattr(mod, "build_provider_registry",
                         lambda agents, provider_name="ollama", roles=None: (_FakeProvider(), {}))
+    monkeypatch.setattr(mod, "preflight_models", lambda agents, roles, registry, default_provider_name: None)
     monkeypatch.setattr(mod, "AdaptiveSpecEvaluator", lambda provider, failure_context=None, model=None: None)
     # tagger renvoie set() -> EmptyTaggingError
     monkeypatch.setattr("aaosa.runtime.tagger.Tagger.tag", lambda self, d, a, p, model=None: set())
     roster = _roster(tmp_path / "r")
     with pytest.raises(EmptyTaggingError):
         solve_once([roster], "ambiguous", context=None, runs_root=tmp_path / "runs")
+
+
+def test_solve_once_raises_when_model_unavailable(tmp_path, monkeypatch):
+    import aaosa.cli.solve_runs as sr
+    from aaosa.runtime.preflight import PreflightError
+
+    def boom(agents, roles, registry, default_provider_name):
+        raise PreflightError("Preflight model availability failed:\n  - agent 'x'")
+
+    monkeypatch.setattr(sr, "preflight_models", boom)
+    roster = _roster(tmp_path / "r")
+    with pytest.raises(PreflightError):
+        sr.solve_once([roster], "fais un truc", None, tmp_path / "runs", "ollama")

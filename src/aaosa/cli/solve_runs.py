@@ -17,6 +17,7 @@ from aaosa.runtime.aggregator import TaskAggregator
 from aaosa.runtime.context import RunContext
 from aaosa.runtime.divider import TaskDivider
 from aaosa.runtime.manifest import build_manifest
+from aaosa.runtime.preflight import preflight_models
 from aaosa.runtime.provider_registry import build_provider_registry, resolve_provider
 from aaosa.runtime.runner import build_root_task
 from aaosa.runtime.tagger import Tagger
@@ -52,6 +53,7 @@ def solve_once(
     agents = load_rosters(roster_dirs)
     roles = load_role_providers(roles_path)  # ValueError si fichier absent/malformé
     provider, registry = build_provider_registry(agents, provider_name, roles=roles)
+    preflight_models(agents, roles, registry, provider_name)  # échoue AVANT toute session
     load_elo_into(agents, runs_root)
 
     # Résoudre le provider/model de l'évaluateur via les rôles.
