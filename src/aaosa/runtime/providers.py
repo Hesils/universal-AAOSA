@@ -16,6 +16,10 @@ from pydantic import BaseModel
 DEFAULT_MODEL = "gpt-4o-mini"
 
 
+class ProviderUnreachableError(Exception):
+    """Le provider n'a pas pu être interrogé (serveur éteint, auth KO, réseau)."""
+
+
 class LLMProvider(ABC):
     """Interface agnostique au provider. Les sous-classes wrappent un SDK concret."""
 
@@ -59,6 +63,22 @@ class LLMProvider(ABC):
             return schema.model_validate_json(raw)
         except Exception:
             return None
+
+    @property
+    def default_model(self) -> str:
+        """Modèle utilisé quand aucun model explicite n'est demandé."""
+        return self._default_model
+
+    def available_models(self) -> set[str]:
+        """Set des model ids exposés par le provider (OpenAI: /v1/models ;
+        Ollama: endpoint OpenAI-compatible /v1/models = models pullés).
+
+        Lève ProviderUnreachableError si le provider est injoignable.
+        """
+        try:
+            return {m.id for m in self._client.models.list()}
+        except Exception as exc:  # noqa: BLE001 — toute panne provider = injoignable
+            raise ProviderUnreachableError(str(exc)) from exc
 
 
 class OpenAIProvider(LLMProvider):
