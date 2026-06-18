@@ -90,6 +90,10 @@ def test_solve_once_raises_when_model_unavailable(tmp_path, monkeypatch):
     import aaosa.cli.solve_runs as sr
     from aaosa.runtime.preflight import PreflightError
 
+    # Stub build_provider_registry to prevent real provider construction
+    monkeypatch.setattr(sr, "build_provider_registry",
+                        lambda agents, default_provider="ollama", roles=None: (object(), {}))
+
     def boom(agents, roles, registry, default_provider_name):
         raise PreflightError("Preflight model availability failed:\n  - agent 'x'")
 
