@@ -33,17 +33,42 @@ def _load_tool_registry(directory: Path) -> dict[str, ToolDef] | None:
     return registry
 
 
-def load_roster(directory: Path) -> list[Agent]:
-    """Charge UN roster : agents.yaml résolu contre le TOOL_REGISTRY de son tools.py."""
+def _merge_builtins(
+    roster_registry: dict[str, ToolDef] | None,
+    builtin_tools: dict[str, ToolDef] | None,
+) -> dict[str, ToolDef] | None:
+    """Fusionne les tools framework au registre du roster. Un nom built-in
+    redéfini par le roster est réservé -> ValueError."""
+    if not builtin_tools:
+        return roster_registry
+    merged: dict[str, ToolDef] = dict(roster_registry or {})
+    for name, tool in builtin_tools.items():
+        if name in merged:
+            raise ValueError(
+                f"Tool name {name!r} is reserved (built-in) and cannot be "
+                f"redefined by a roster"
+            )
+        merged[name] = tool
+    return merged
+
+
+def load_roster(
+    directory: Path, builtin_tools: dict[str, ToolDef] | None = None
+) -> list[Agent]:
+    """Charge UN roster : agents.yaml résolu contre le TOOL_REGISTRY de son
+    tools.py, fusionné avec les built-ins framework (ask_human)."""
     directory = Path(directory)
     agents_path = directory / "agents.yaml"
     if not agents_path.exists():
         raise ValueError(f"Roster {directory} is missing agents.yaml")
     registry = _load_tool_registry(directory)
+    registry = _merge_builtins(registry, builtin_tools)
     return load_agents(agents_path, registry)
 
 
-def load_rosters(directories: list[Path]) -> list[Agent]:
+def load_rosters(
+    directories: list[Path], builtin_tools: dict[str, ToolDef] | None = None
+) -> list[Agent]:
     """Charge N rosters et fusionne. Collision de noms d'agents -> ValueError."""
     if not directories:
         raise ValueError("load_rosters requires at least one roster directory")
@@ -51,7 +76,7 @@ def load_rosters(directories: list[Path]) -> list[Agent]:
     seen: dict[str, Path] = {}
     for d in directories:
         d = Path(d)
-        for agent in load_roster(d):
+        for agent in load_roster(d, builtin_tools=builtin_tools):
             if agent.name in seen:
                 raise ValueError(
                     f"Agent name collision: {agent.name!r} in {d} "

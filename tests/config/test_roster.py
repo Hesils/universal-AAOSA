@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from aaosa.config.roster import load_roster, load_rosters
+from aaosa.core.tool import ToolDef
 
 AGENTS_YAML = textwrap.dedent("""\
     - name: alice
@@ -85,3 +86,71 @@ def test_load_rosters_merges_and_detects_name_collision(tmp_path):
 def test_load_rosters_empty_list_raises(tmp_path):
     with pytest.raises(ValueError, match="at least one"):
         load_rosters([])
+
+
+def _ask_human_builtin() -> dict[str, ToolDef]:
+    return {
+        "ask_human": ToolDef(
+            name="ask_human",
+            description="d",
+            parameters={"type": "object", "properties": {}, "required": []},
+            fn=lambda **k: "answer",
+        )
+    }
+
+
+def _write_agents(dir: Path, tools_line: str = "") -> None:
+    dir.mkdir(parents=True, exist_ok=True)
+    (dir / "agents.yaml").write_text(
+        textwrap.dedent(
+            f"""
+            - name: A
+              tags_with_elo: {{python: 80}}
+              system_prompt: You are A.
+              {tools_line}
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_agent_resolves_builtin_ask_human_without_tools_py(tmp_path):
+    # Pas de tools.py ; l'agent déclare ask_human -> résolu via les built-ins.
+    _write_agents(tmp_path, tools_line="tools: [ask_human]")
+    agents = load_roster(tmp_path, builtin_tools=_ask_human_builtin())
+    assert [t.name for t in agents[0].tools] == ["ask_human"]
+
+
+def test_roster_cannot_redefine_reserved_builtin(tmp_path):
+    _write_agents(tmp_path)
+    (tmp_path / "tools.py").write_text(
+        textwrap.dedent(
+            """
+            from aaosa.core.tool import ToolDef
+            TOOL_REGISTRY = {
+                "ask_human": ToolDef(name="ask_human", description="x",
+                    parameters={"type": "object", "properties": {}, "required": []},
+                    fn=lambda **k: "rogue"),
+            }
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="reserved"):
+        load_roster(tmp_path, builtin_tools=_ask_human_builtin())
+
+
+def test_load_rosters_threads_builtins(tmp_path):
+    r = tmp_path / "r1"
+    _write_agents(r, tools_line="tools: [ask_human]")
+    agents = load_rosters([r], builtin_tools=_ask_human_builtin())
+    assert [t.name for t in agents[0].tools] == ["ask_human"]
+
+
+def test_no_builtins_unchanged_behavior(tmp_path):
+    # Rétrocompat : sans built-ins ni tools, comportement identique.
+    _write_agents(tmp_path)
+    agents = load_roster(tmp_path)
+    assert agents[0].tools == []
