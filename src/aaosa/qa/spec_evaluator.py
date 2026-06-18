@@ -31,6 +31,7 @@ class SpecEvaluator:
         spec: EvaluatorSpec,
         client: LLMProvider | None = None,
         reference: str | None = None,
+        model: str | None = None,
     ):
         needs_client = spec.judge is not None or any(
             c.name == "llm_check" for c in spec.criteria
@@ -40,6 +41,7 @@ class SpecEvaluator:
         self.spec = spec
         self.provider = client
         self.reference = reference
+        self.model = model
 
     def evaluate(self, task: Task, output: Output) -> QAResult:
         criteria_results: dict[str, bool] = {}
@@ -50,7 +52,7 @@ class SpecEvaluator:
         for c, key in keyed:
             if not c.gate:
                 continue
-            outcome = get_criterion(c.name)(task, output, {**c.params, "provider": self.provider})
+            outcome = get_criterion(c.name)(task, output, {**c.params, "provider": self.provider, "model": self.model})
             criteria_results[key] = outcome.passed
             if not outcome.passed:
                 return QAResult(
@@ -66,7 +68,7 @@ class SpecEvaluator:
             total_weight = sum(c.weight for c, _ in scored)
             weighted = 0.0
             for c, key in scored:
-                outcome = get_criterion(c.name)(task, output, {**c.params, "provider": self.provider})
+                outcome = get_criterion(c.name)(task, output, {**c.params, "provider": self.provider, "model": self.model})
                 criteria_results[key] = outcome.passed
                 weighted += outcome.score * c.weight
             det_score = weighted / total_weight if total_weight > 0 else 1.0
@@ -106,8 +108,9 @@ def from_spec(
     spec: EvaluatorSpec,
     client: LLMProvider | None = None,
     reference: str | None = None,
+    model: str | None = None,
 ) -> SpecEvaluator:
-    return SpecEvaluator(spec, client=client, reference=reference)
+    return SpecEvaluator(spec, client=client, reference=reference, model=model)
 
 
 class AdaptiveSpecEvaluator:
@@ -117,10 +120,11 @@ class AdaptiveSpecEvaluator:
     s'il est fourni, build_llm_spec régénère une spec informée par l'échec.
     """
 
-    def __init__(self, client: LLMProvider, failure_context: FailureContext | None = None):
+    def __init__(self, client: LLMProvider, failure_context: FailureContext | None = None, model: str | None = None):
         self.provider = client
         self.failure_context = failure_context
+        self.model = model
 
     def evaluate(self, task: Task, output: Output) -> QAResult:
-        spec = build_llm_spec(task, self.provider, self.failure_context)
-        return SpecEvaluator(spec, client=self.provider).evaluate(task, output)
+        spec = build_llm_spec(task, self.provider, self.failure_context, model=self.model)
+        return SpecEvaluator(spec, client=self.provider, model=self.model).evaluate(task, output)
