@@ -21,6 +21,7 @@ from aaosa.cli.incident_runs import (
 )
 from aaosa.cli.report import build_report
 from aaosa.cli.solve_runs import solve_once
+from aaosa.core.sandbox import SandboxViolation
 from aaosa.elo.persistence import load_snapshot
 from aaosa.runtime.preflight import PreflightError
 from aaosa.demo.run_health_check_v3 import run_demo_health_check_v3
@@ -82,6 +83,10 @@ def solve(
         help="Arborescence (chemins relatifs) injectée dans le contexte ; les agents fetchent les fichiers via leurs tools. Filtré (dotfiles + .gitignore).",
     ),
     context_max: int = typer.Option(20000, "--context-max", help="Refus dur si le contexte dépasse (caractères)"),
+    fetch_max: int = typer.Option(
+        50000, "--fetch-max",
+        help="Refus dur si un fichier fetché via fetch_file dépasse (caractères)",
+    ),
     provider: str = typer.Option("ollama", "--provider", help="ollama (défaut) | openai"),
     runs_root: Path = typer.Option(Path("runs"), "--runs-root"),
     roles: Path | None = typer.Option(None, "--roles", help="roles.yaml: provider/model par rôle système (divider/aggregator/tagger/evaluator/diagnostic/triage/task_spec)"),
@@ -124,11 +129,16 @@ def solve(
             roster, task, context, runs_root, provider,
             roles_path=roles,
             hitl_callback=_stdin_hitl if hitl else None,
+            context_dir=context_dir,
+            fetch_max=fetch_max,
         )
     except EmptyTaggingError:
         typer.echo("Tagging produced no tags for this task — cannot route it. Refine --task.")
         raise typer.Exit(code=1)
     except PreflightError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1)
+    except SandboxViolation as exc:
         typer.echo(str(exc))
         raise typer.Exit(code=1)
     except ValueError as exc:  # erreurs de chargement roster/roles (collision, agents.yaml manquant, TOOL_REGISTRY, roles.yaml invalide)
