@@ -39,7 +39,7 @@ def _ctxdir(tmp_path) -> Path:
 def test_context_dir_injects_tree_with_provenance_header(tmp_path, monkeypatch):
     captured = {}
     def fake_solve_once(roster_dirs, task_text, context, runs_root, provider_name="ollama",
-                        roles_path=None, hitl_callback=None):
+                        roles_path=None, hitl_callback=None, **kwargs):
         captured["context"] = context
         return _fake_outcome(tmp_path)
     monkeypatch.setattr(app_mod, "solve_once", fake_solve_once)
@@ -58,7 +58,7 @@ def test_context_dir_injects_tree_with_provenance_header(tmp_path, monkeypatch):
 def test_context_dir_combines_with_context_text(tmp_path, monkeypatch):
     captured = {}
     def fake_solve_once(roster_dirs, task_text, context, runs_root, provider_name="ollama",
-                        roles_path=None, hitl_callback=None):
+                        roles_path=None, hitl_callback=None, **kwargs):
         captured["context"] = context
         return _fake_outcome(tmp_path)
     monkeypatch.setattr(app_mod, "solve_once", fake_solve_once)
