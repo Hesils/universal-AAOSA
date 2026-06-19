@@ -1,6 +1,6 @@
 # Spec `v1m` — Sécurité Monde B : sandbox FS par run + plancher de non-destruction + lecteur fs réel
 
-> Statut : **proposée** (à valider par Quentin avant plan TDD).
+> Statut : **implémentée (suite verte)** — smoke LLM-réel à valider par Quentin.
 > Ticket : `v1m` (P2, épique `aaosa-subbrain`, gate-INDÉPENDANT).
 > Source de vérité du cadrage : `seconde_brain/raw/brainstorms/2026-06-17-aaosa-subbrain-agentic.md` (pilier sécurité Monde B, Q8 + open-flags) + décisions de la session `/ticket v1m` (2026-06-19, ci-dessous §9).
 > Précédent d'architecture directement réutilisé : `ipv` (`docs/superpowers/specs/2026-06-18-ipv-hitl-tool-design.md`) — tool framework par builder-closure, registre built-in fusionné par nom, runtime synchrone non touché.
