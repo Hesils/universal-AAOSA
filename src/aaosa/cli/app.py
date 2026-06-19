@@ -11,6 +11,7 @@ from pathlib import Path
 import typer
 from dotenv import load_dotenv
 
+from aaosa.cli.context_dir import build_context_tree
 from aaosa.cli.incident_runs import (
     CampaignIndex,
     StoreNotEmptyError,
@@ -76,6 +77,10 @@ def solve(
     task: str = typer.Option(..., "--task", help="Description libre de la tâche"),
     context_text: str | None = typer.Option(None, "--context-text"),
     context_file: Path | None = typer.Option(None, "--context-file"),
+    context_dir: Path | None = typer.Option(
+        None, "--context-dir",
+        help="Arborescence (chemins relatifs) injectée dans le contexte ; les agents fetchent les fichiers via leurs tools. Filtré (dotfiles + .gitignore).",
+    ),
     context_max: int = typer.Option(20000, "--context-max", help="Refus dur si le contexte dépasse (caractères)"),
     provider: str = typer.Option("ollama", "--provider", help="ollama (défaut) | openai"),
     runs_root: Path = typer.Option(Path("runs"), "--runs-root"),
@@ -98,6 +103,13 @@ def solve(
             typer.echo(f"Cannot read --context-file {context_file}: {exc}")
             raise typer.Exit(code=1)
         parts.append(f"# context: {context_file}\n{file_text}")
+    if context_dir is not None:
+        try:
+            tree = build_context_tree(context_dir)
+        except ValueError as exc:
+            typer.echo(str(exc))
+            raise typer.Exit(code=1)
+        parts.append(f"# context: tree of {context_dir}\n{tree}")
     context = "\n\n".join(parts) if parts else None
 
     if context is not None and len(context) > context_max:
