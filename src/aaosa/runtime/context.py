@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from aaosa.config.role_providers import RoleProviders
 from aaosa.core.agent import Agent
 from aaosa.core.hitl import HITLCallback
+from aaosa.core.sandbox import Sandbox
 from aaosa.qa.protocol import QAEvaluator
 from aaosa.runtime.aggregator import TaskAggregator
 from aaosa.runtime.divider import TaskDivider
@@ -30,6 +31,7 @@ class RunContext:
     evaluator: QAEvaluator | None = None
     provider_registry: "dict[str, LLMProvider] | None" = None
     hitl_callback: "HITLCallback | None" = None
+    sandbox: "Sandbox | None" = None        # v1m — racine FS jalée du run
     roles: RoleProviders = field(default_factory=RoleProviders)
 
     def resolve_role(self, name: str) -> "tuple[LLMProvider, str | None]":

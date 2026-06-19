@@ -161,3 +161,81 @@ def test_solve_once_injects_callback_into_agents_and_context(tmp_path, monkeypat
     assert any(t.name == ASK_HUMAN_TOOL_NAME for t in seen["agents"][0].tools)
     # 2) le callback est posé sur le RunContext (seam V2)
     assert seen["ctx"].hitl_callback is cb
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — sandbox + fetch_file wiring
+# ---------------------------------------------------------------------------
+
+from aaosa.core.fs_tools import FETCH_FILE_TOOL_NAME  # noqa: E402
+from aaosa.core.sandbox import SandboxViolation  # noqa: E402
+
+
+def _make_roster(tmp_path):
+    d = tmp_path / "r"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "agents.yaml").write_text(
+        "- name: a\n  tags_with_elo: {x: 1500}\n  system_prompt: p\n", encoding="utf-8"
+    )
+    return d
+
+
+def _ctxdir(tmp_path):
+    c = tmp_path / "ctx"
+    c.mkdir(parents=True, exist_ok=True)
+    (c / "f.txt").write_text("content", encoding="utf-8")
+    return c
+
+
+def _capture_builtins(monkeypatch):
+    """Stoppe solve_once juste après load_rosters et renvoie les builtin_tools vus."""
+    seen = {}
+    import aaosa.cli.solve_runs as sr
+
+    def fake_load_rosters(roster_dirs, builtin_tools=None):
+        seen["builtins"] = builtin_tools
+        raise _StopForTest()
+
+    monkeypatch.setattr(sr, "load_rosters", fake_load_rosters)
+    return seen
+
+
+class _StopForTest(Exception):
+    pass
+
+
+def test_solve_once_injects_fetch_file_when_context_dir(tmp_path, monkeypatch):
+    seen = _capture_builtins(monkeypatch)
+    with pytest.raises(_StopForTest):
+        solve_once(
+            [_make_roster(tmp_path)], "task", None, tmp_path / "runs",
+            context_dir=_ctxdir(tmp_path),
+        )
+    assert FETCH_FILE_TOOL_NAME in seen["builtins"]
+
+
+def test_solve_once_no_fetch_file_without_context_dir(tmp_path, monkeypatch):
+    seen = _capture_builtins(monkeypatch)
+    with pytest.raises(_StopForTest):
+        solve_once([_make_roster(tmp_path)], "task", None, tmp_path / "runs")
+    assert FETCH_FILE_TOOL_NAME not in (seen["builtins"] or {})
+
+
+def test_solve_once_fetch_max_propagated(tmp_path, monkeypatch):
+    seen = _capture_builtins(monkeypatch)
+    with pytest.raises(_StopForTest):
+        solve_once(
+            [_make_roster(tmp_path)], "task", None, tmp_path / "runs",
+            context_dir=_ctxdir(tmp_path), fetch_max=3,
+        )
+    # "content" = 7 chars > fetch_max=3 -> refus dur
+    out = seen["builtins"][FETCH_FILE_TOOL_NAME].fn(path="f.txt")
+    assert out.startswith("[file too large:")
+
+
+def test_solve_once_missing_context_dir_raises(tmp_path):
+    with pytest.raises(SandboxViolation):
+        solve_once(
+            [_make_roster(tmp_path)], "task", None, tmp_path / "runs",
+            context_dir=tmp_path / "nope",
+        )
