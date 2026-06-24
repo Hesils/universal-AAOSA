@@ -1,6 +1,6 @@
 # Spec — Épique « hygiène d'ingénierie production-grade »
 
-> Statut : **proposée** (à valider par Quentin avant plan TDD / exécution).
+> Statut : **validée** — 4 forks tranchés + décision roster actée (Quentin, 2026-06-24). Prête pour découpe en tickets + plan.
 > Contexte : MVP production-ready de universal-AAOSA, fer de lance présentation SFEIR. Décision de cadrage : `AIOS/decisions/log.md` 2026-06-24 (reframe runtime émergent + socle prod-grade réel).
 > Sous-projet 1 / 2 de l'épique MVP. Sous-projet 2 = pont `fqd` (AIOS→AAOSA), spec séparée à venir.
 
@@ -38,7 +38,7 @@ C'est de la crédibilité, pas de la fonctionnalité : aucun comportement runtim
 ### 3.1 Convention de branche + PR + branch protection
 
 - Nommage : `feat/<ticket>-<slug>`, `fix/<slug>`, `docs/<slug>`, `chore/<slug>`. (Aligne l'existant : `feat/ipv-hitl-tool`, `feature/d6i-...` → normaliser sur `feat/`.)
-- Flux : branche → push → `gh pr create` → CI verte → **self-merge** (squash ou merge, à fixer §4.3) → tag si bump → suppression de branche.
+- Flux : branche → push → `gh pr create` → CI verte → **self-merge en squash** (§4.3) → tag auto si bump → suppression de branche.
 - Branch protection master : `require a pull request before merging` + `require status checks to pass` (le job CI) + **pas** de `require approvals` (solo dev, sinon auto-blocage).
 
 ### 3.2 CI GitHub Actions
@@ -47,11 +47,12 @@ C'est de la crédibilité, pas de la fonctionnalité : aucun comportement runtim
 - Steps : `astral-sh/setup-uv` → `uv python install 3.14` → `uv sync --extra dev` → `uv run pytest -q`.
 - Plateforme : **`ubuntu-latest`** par défaut (rapide, standard, attendu par un reviewer). Risque connu : la sandbox a des tests « path jail symlink-aware » et plancher de non-destruction potentiellement sensibles à l'OS (repo dev = Windows). Stratégie : lancer sur ubuntu d'abord ; si rouge sur ces tests, **préférer les rendre platform-agnostic** plutôt qu'ajouter un job `windows-latest` (un seul OS vert = signal plus propre). Décision finale §4.2.
 - Badge CI dans le README.
+- **Job de tag auto** (séparé, sur `push` master uniquement) : `permissions: contents: write`, lit `pyproject.toml`, crée + pousse `v{version}` si absent (cf. §3.3, §4.4).
 
 ### 3.3 Versioning / tags (consomme 95c)
 
-- Règle 95c (semver) : patch `x.x.X+1` (mineur), `x.X+1.0` (majeur sans breaking), `X+1.0.0` (majeur breaking).
-- Mécanique : le bump de `version` dans `pyproject.toml` fait partie du diff de la PR quand le changement le justifie ; **tag `v{version}` créé sur master après merge** (manuel ou step CI, §4.4). Pas de tag si pas de bump.
+- Règle 95c (semver, alignée sur le ticket board) : **patch** `x.x.X+1`, **mineur** `x.X+1.0`, **majeur (breaking)** `X+1.0.0`.
+- Mécanique : le bump de `version` dans `pyproject.toml` fait partie du diff de la PR quand le changement le justifie ; **tag `v{version}` créé automatiquement** par un job CI sur `push` vers master (lit la version dans `pyproject.toml`, crée + pousse `v{version}` si le tag n'existe pas encore ; no-op sinon). Pas de tag si pas de bump. Requiert `permissions: contents: write` sur ce job (§4.4 tranché).
 - État de départ : `0.1.0`. Le push initial du backlog accumulé peut justifier un premier bump cadré (à trancher au moment du push).
 - `CHANGELOG.md` : **non** au MVP (YAGNI — l'historique git + les tags suffisent ; à réévaluer si la roadmap publique le demande).
 
@@ -69,22 +70,22 @@ Ton : technique, sobre, zéro chrome marketing (cohérent avec `PRODUCT.md`).
 ### 3.5 gitignore + push
 
 - Ajouter au `.gitignore` : `runs_live_check/`, `runs_solve_smoke/`, `runs_solve_smoke_hitl/`, `smoke_v1m/`. (Cohérent avec `runs/` et `runs_campaign*/` déjà ignorés ; `runs_demo/` reste **versionné** car exhibits curés.)
-- `rosters/` : **tracké** (contient `jouet/agents.yaml`, `jouet_hitl/agents.yaml` = définitions de roster, pas des sorties). Les stores ELO par-roster générés au runtime devront, eux, viser un chemin ignoré (à confirmer contre l'implémentation actuelle d'`elo_snapshots/`).
+- `rosters/` : **tracké** (contient `jouet/agents.yaml`, `jouet_hitl/agents.yaml` = définitions de roster d'exemple, pas des sorties). Vérifié : non load-bearing pour la suite de tests (fixtures `tmp_path`), mais référencés par la doc/plans comme commandes d'exemple `aaosa solve --roster rosters/jouet` → les tracker rend ces commandes rejouables à froid. **TODO du ticket** : réécrire l'en-tête de ces deux fichiers (`Artefact de smoke — NE PAS committer`) en « roster d'exemple », sinon le commentaire contredit le tracking. Les stores ELO par-roster générés au runtime devront, eux, viser un chemin ignoré (à confirmer contre l'implémentation actuelle d'`elo_snapshots/`).
 - Commit de nettoyage `.gitignore` + ajout `rosters/` + (séparément) push master.
 
-## 4. Décisions ouvertes
+## 4. Décisions tranchées (Quentin, 2026-06-24)
 
-### 4.1 Branch protection vs night-run (impact opérationnel réel)
-Activer la protection master casse le push direct **et** le merge auto du night-run sur ce repo. Recommandation : **PR pour tout**, et ouvrir un follow-up AIOS pour que `/night-run review` fasse `gh pr create` au lieu de merger en direct (scriptable). Intérim : self-merge manuel des PR night-run au matin. À valider : PR-pour-tout, ou exemption documentée des branches `night/*` ?
+### 4.1 Branch protection vs night-run — **PR pour tout, y compris les night-runs**
+Pas d'exemption `night/*`. La protection master exige une PR pour 100 % des changements. Conséquence : **follow-up AIOS obligatoire** — modifier le skill global `/night-run review` pour qu'il fasse `gh pr create` au lieu de merger en direct (sinon le night-run sur ce repo se bloque tout seul). Intérim avant ce follow-up : self-merge manuel des PR night-run au matin. Ticket AIOS séparé (hors de ce repo).
 
-### 4.2 Plateforme CI
-ubuntu-only (recommandé) vs ajout d'un job windows-latest pour matcher le dev. Recommandation : ubuntu, fixer les tests OS-sensibles si rouge.
+### 4.2 Plateforme CI — **ubuntu-latest seul**
+Pas de job `windows-latest`. Si des tests OS-sensibles (path jail symlink-aware, plancher non-destruction) sont rouges sur ubuntu, les rendre platform-agnostic plutôt qu'ajouter un OS (un seul OS vert = signal plus propre).
 
-### 4.3 Stratégie de merge
-Squash-merge (historique master linéaire et propre, recommandé pour un repo vitrine) vs merge-commit (préserve le détail TDD par commit). Recommandation : **squash** sur master.
+### 4.3 Stratégie de merge — **squash-merge**
+Historique master linéaire, une ligne propre par feature, lisible comme un changelog par un évaluateur. Le détail TDD survit dans la PR GitHub.
 
-### 4.4 Tag manuel vs automatisé
-Tag posé à la main après merge (simple, MVP) vs step CI qui tag quand `version` change. Recommandation : **manuel au MVP**, automatiser plus tard si friction.
+### 4.4 Tag — **automatisé via CI**
+Job CI sur `push` master : lit `version` dans `pyproject.toml`, crée + pousse `v{version}` si absent, no-op sinon (cf. §3.3). Pas de tag manuel.
 
 ## 5. Critère de done (vérifiable)
 
