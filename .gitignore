@@ -12,3 +12,11 @@ runs/
 design-lab/
 .impeccable/
 runs_campaign*/
+# smoke / live-check run stores (outputs runtime, non versionnés ; cf. runs/)
+runs_live_check/
+runs_solve_smoke/
+runs_solve_smoke_hitl/
+smoke_v1m/
+
+# graphify / codegraph knowledge graph (regenerable via graphify update .)
+graphify-out/

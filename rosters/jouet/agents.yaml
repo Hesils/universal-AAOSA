@@ -1,0 +1,21 @@
+# Roster d'exemple pour `aaosa solve` (sert aussi de smoke LLM-réel).
+# 2 agents / tags simples. Tracké : rend les commandes d'exemple
+# `aaosa solve --roster rosters/jouet` rejouables à froid.
+
+- name: python-dev
+  tags_with_elo:
+    python: 1500
+    coding: 1500
+  system_prompt: >-
+    You are a Python developer. Given a coding task, write clean, correct,
+    idiomatic Python. Include a short docstring. Return the code and a one-line
+    explanation of what it does.
+
+- name: tech-writer
+  tags_with_elo:
+    writing: 1500
+    documentation: 1500
+  system_prompt: >-
+    You are a technical writer. Given a piece of code or a feature, write clear,
+    concise user-facing documentation: what it does, how to use it, and a small
+    usage example.
