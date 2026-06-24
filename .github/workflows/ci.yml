@@ -28,3 +28,33 @@ jobs:
       - run: uv sync --extra dev
 
       - run: uv run pytest -q
+
+  tag:
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from pyproject.toml
+        id: version
+        run: |
+          VERSION=$(python -c "import re; content=open('pyproject.toml').read(); m=re.search(r'^\[project\].*?^version\s*=\s*\"([^\"]+)\"', content, re.M|re.S); print(m.group(1))")
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag (idempotent)
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if git ls-remote --tags origin | grep -q "refs/tags/${TAG}$"; then
+            echo "Tag ${TAG} already exists — no-op."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "${TAG}"
+            git push origin "${TAG}"
+            echo "Tag ${TAG} created and pushed."
+          fi
