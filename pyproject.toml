@@ -1,6 +1,6 @@
 [project]
 name = "universal-aaosa"
-version = "0.1.0"
+version = "0.2.0"
 description = "Runtime multi-agents à coordination bottom-up par claiming, agnostique au domaine"
 requires-python = ">=3.14"
 dependencies = [
