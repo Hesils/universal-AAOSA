@@ -3,7 +3,7 @@
 - **Couche** : `src/aaosa/` (nouveau `config/`) + `src/aaosa/demo/`
 - **Statut** : deep-dive terminé → prêt pour plan + exécution
 - **Dépendances** : aucune. **Premier point d'entrée V3.**
-- **Roadmap** : `C:\Users\Desvignes\Documents\AIOS\context\projects\universal-AAOSA\roadmap.md` — section V3, épique A1
+- **Roadmap** : `AIOS\context\projects\universal-AAOSA\roadmap.md` — section V3, épique A1
 
 ---
 

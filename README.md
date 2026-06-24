@@ -55,6 +55,14 @@ uv run aaosa run
 | `aaosa dashboard [--port 5001]` | observability UI (`http://127.0.0.1:5001`) |
 | `aaosa health-check` | replay known cases, measure success rates |
 
+## Contributing
+
+`master` is protected: every change lands through a pull request, and CI must pass before merge (no approval required — solo project).
+
+- **Branch naming**: `feat/<ticket>-<slug>`, `fix/<slug>`, `docs/<slug>`, `chore/<slug>`.
+- **Flow**: branch → push → open PR → CI green → **squash-merge** → delete branch.
+- **Versioning**: semver; a `v{version}` tag is pushed automatically by CI on `master` when `pyproject.toml` is bumped.
+
 ## Documentation
 
 - **[Technical documentation](docs/documentation-technique.md)** — the full narrative: the problem with central orchestration, the claiming mechanism, execution, self-correction through ELO, and observability. _(In French.)_

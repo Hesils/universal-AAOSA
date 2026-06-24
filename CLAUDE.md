@@ -8,7 +8,7 @@ Ce fichier ne porte que le **stable** (archi, stack, conventions, spécificités
 
 Charger si tu manques de contexte sur l'état, les décisions ou l'historique :
 
-- **État courant + carte du projet** : `C:\Users\Desvignes\Documents\obsidian\seconde_brain\wiki\Projects\universal-AAOSA\index.md` (+ `architecture.md`, `avancement.md`, `roadmap.md`, `stack.md`, `decisions.md`, `evals.md`, `observability.md`, `todo.md`, `sessions/`)
+- **État courant + carte du projet** : `seconde_brain\wiki\Projects\universal-AAOSA\index.md` (+ `architecture.md`, `avancement.md`, `roadmap.md`, `stack.md`, `decisions.md`, `evals.md`, `observability.md`, `todo.md`, `sessions/`)
 - **Specs, plans & invariants détaillés par version** (dans ce repo) : `docs/superpowers/specs/` (V2a/V2b/V2c/V3) · `docs/superpowers/plans/` · `docs/superpowers/epics/` · `docs/backlog/` (tickets techniques)
 - **Charger l'état** : `/prime` (détecte ce repo via le frontmatter `repo:` de la fiche vault et lit l'état + la daily). Pas d'autoload automatique ici — `/prime` est le geste de démarrage.
 
@@ -51,6 +51,15 @@ Détail complet (rôle par fichier, séparations par version) → vault `archite
 - Tests : `.venv\Scripts\python -m pytest <fichier> -v`
 - CLI projet-wide : `.venv\Scripts\aaosa run [--scenario main|roster_gap]` · `aaosa campaign --n N --runs-root <frais>` · `aaosa report [--runs-root]` · `aaosa health-check`. Requiert `.env` avec `OPENAI_API_KEY` (sauf `report`, offline).
 - Dashboard : `.venv\Scripts\aaosa dashboard [--port] [--runs-root]` (= `python -m dashboard`, défaut http://127.0.0.1:5001).
+
+## Conventions git
+
+`master` est protégée : **PR obligatoire + CI verte requise** (pas de review d'approbation — solo dev). Aucun commit direct sur `master`, y compris les night-runs.
+
+- **Nommage de branche** : `feat/<ticket>-<slug>`, `fix/<slug>`, `docs/<slug>`, `chore/<slug>`. `<ticket>` = l'ancre 🆔 à 3 caractères du board.
+- **Flux** : branche → push → `gh pr create` → CI verte → **squash-merge** → tag auto si bump version → suppression de la branche.
+- **Merge** : squash uniquement (historique `master` linéaire, une ligne lisible par feature ; le détail TDD survit dans la PR).
+- **Versioning** : règle 95c (semver) — patch `x.x.X+1`, mineur `x.X+1.0`, majeur `X+1.0.0`. Le bump de `pyproject.toml` fait partie du diff de la PR quand justifié ; le tag `v{version}` est créé automatiquement par la CI sur push `master`.
 
 ## Night-run — spécificités projet
 
