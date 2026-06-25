@@ -10,7 +10,7 @@ from aaosa.runtime.context import RunContext
 from aaosa.runtime.divider import DivisionResult, find_cycle_indices
 from aaosa.runtime.provider_registry import resolve_provider
 from aaosa.runtime.providers import LLMProvider
-from aaosa.runtime.tagger import EmptyTaggingError
+from aaosa.runtime.tagger import EmptyTaggingError, UnsatisfiableTagSetError
 from aaosa.schemas.elo import DEFAULT_REQUIRED_ELO
 from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
@@ -22,6 +22,7 @@ from aaosa.tracing.events import (
     ExecutedEvent,
     QAEvaluatedEvent,
     RosterGapEvent,
+    RetagEvent,
     TagAcquiredEvent,
     TagLostEvent,
     TaskDividedEvent,
@@ -240,9 +241,26 @@ def build_sub_tasks(parent_task: Task, division: DivisionResult, ctx: RunContext
     tprov, tmodel = ctx.resolve_role("tagger")
     sub_tasks: list[Task] = []
     for i, spec in enumerate(division.sub_tasks):
-        tags = ctx.tagger.tag(spec.description, ctx.agents, tprov, model=tmodel)
+        tags = set(ctx.tagger.tag(spec.description, ctx.agents, tprov, model=tmodel))
         if not tags:
             raise EmptyTaggingError(spec.description)
+        if _cross_role_unsatisfiable(tags, ctx.agents):
+            original = tags
+            tags = ctx.tagger.tag(
+                spec.description, ctx.agents, tprov, model=tmodel,
+                unsatisfiable_hint=original,
+            )
+            resolved = bool(tags) and not _cross_role_unsatisfiable(tags, ctx.agents)
+            if ctx.tracer is not None:
+                ctx.tracer.emit(RetagEvent(
+                    session_id=ctx.tracer.session_id,
+                    task_id=parent_task.id,
+                    original_tags=sorted(original),
+                    retagged_tags=sorted(tags) if tags else None,
+                    resolved=resolved,
+                ))
+            if not resolved:
+                raise UnsatisfiableTagSetError(spec.description, tags)
         sub_tasks.append(Task(
             description=spec.description,
             required_tags={t: DEFAULT_REQUIRED_ELO for t in tags},
@@ -369,6 +387,11 @@ def _divide_and_recover(
         return DispatchResult(
             status="execution_failed", agent_id=None,
             reason="tagging produced no tags",
+        )
+    except UnsatisfiableTagSetError:
+        return DispatchResult(
+            status="execution_failed", agent_id=None,
+            reason="unsatisfiable cross-role tag set",
         )
 
     child_context = (chained_context or []) + [task]
