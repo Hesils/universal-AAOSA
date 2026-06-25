@@ -10,7 +10,7 @@ from aaosa.runtime.context import RunContext
 from aaosa.runtime.divider import DivisionResult, find_cycle_indices
 from aaosa.runtime.provider_registry import resolve_provider
 from aaosa.runtime.providers import LLMProvider
-from aaosa.runtime.tagger import EmptyTaggingError
+from aaosa.runtime.tagger import EmptyTaggingError, UnsatisfiableTagSetError
 from aaosa.schemas.elo import DEFAULT_REQUIRED_ELO
 from aaosa.schemas.output import Output
 from aaosa.schemas.task import Task
@@ -22,6 +22,7 @@ from aaosa.tracing.events import (
     ExecutedEvent,
     QAEvaluatedEvent,
     RosterGapEvent,
+    RetagEvent,
     TagAcquiredEvent,
     TagLostEvent,
     TaskDividedEvent,
@@ -36,6 +37,17 @@ def _roster_gap(task: Task, agents: list[Agent]) -> set[str]:
     pas son niveau d'ELO (un ELO insuffisant n'est pas un trou de roster)."""
     roster = {tag for a in agents for tag in a.tags_with_elo}
     return set(task.required_tags) - roster
+
+
+def _cross_role_unsatisfiable(tags: set[str], agents: list[Agent]) -> bool:
+    """Vrai ssi l'AND-set `tags` est couvert par l'UNION du roster mais par AUCUN
+    agent seul. C'est un défaut de tagging (sur-couverture cross-rôle), distinct du
+    roster_gap (tag absent de l'union). Pur, sans LLM, sans ELO (présence de tag
+    seulement, comme _roster_gap). Re-diviser un tel set est futile."""
+    union = {tag for a in agents for tag in a.tags_with_elo}
+    if not tags <= union:
+        return False  # un tag manque à l'union → roster_gap, pas notre cas
+    return not any(tags <= set(a.tags_with_elo) for a in agents)
 
 
 def run_task(
@@ -232,6 +244,25 @@ def build_sub_tasks(parent_task: Task, division: DivisionResult, ctx: RunContext
         tags = ctx.tagger.tag(spec.description, ctx.agents, tprov, model=tmodel)
         if not tags:
             raise EmptyTaggingError(spec.description)
+        # Lock v24 : le détecteur doit recevoir le set post-split (= clé de routage).
+        # Ne pas déplacer le split de tags en aval sans déplacer cet appel avec lui.
+        if _cross_role_unsatisfiable(tags, ctx.agents):
+            original = tags
+            tags = ctx.tagger.tag(
+                spec.description, ctx.agents, tprov, model=tmodel,
+                unsatisfiable_hint=original,
+            )
+            resolved = bool(tags) and not _cross_role_unsatisfiable(tags, ctx.agents)
+            if ctx.tracer is not None:
+                ctx.tracer.emit(RetagEvent(
+                    session_id=ctx.tracer.session_id,
+                    task_id=parent_task.id,
+                    original_tags=sorted(original),
+                    retagged_tags=sorted(tags) if tags else None,
+                    resolved=resolved,
+                ))
+            if not resolved:
+                raise UnsatisfiableTagSetError(spec.description, tags)
         sub_tasks.append(Task(
             description=spec.description,
             required_tags={t: DEFAULT_REQUIRED_ELO for t in tags},
@@ -358,6 +389,11 @@ def _divide_and_recover(
         return DispatchResult(
             status="execution_failed", agent_id=None,
             reason="tagging produced no tags",
+        )
+    except UnsatisfiableTagSetError:
+        return DispatchResult(
+            status="execution_failed", agent_id=None,
+            reason="unsatisfiable cross-role tag set",
         )
 
     child_context = (chained_context or []) + [task]

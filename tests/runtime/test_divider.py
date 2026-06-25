@@ -147,3 +147,16 @@ class TestTaskDividerDivide:
         TaskDivider(system_prompt="sp").divide(task, provider)
         call_kwargs = provider.parse.call_args.kwargs
         assert call_kwargs.get("model") is None
+
+
+# ---------------------------------------------------------------------------
+# Prompt content — read/understand phantom sub-task rule
+# ---------------------------------------------------------------------------
+
+def test_divide_prompt_forbids_read_subtask():
+    d = TaskDivider(system_prompt="sys")
+    task = Task(description="Read solve.py then write a helper", required_tags={"coding": 30})
+    prompt = d._build_divide_prompt(task, None, None)
+    low = prompt.lower()
+    assert "tool" in low and ("not a sub-task" in low or "not a deliverable" in low)
+    assert "read" in low  # la règle nomme explicitement la lecture

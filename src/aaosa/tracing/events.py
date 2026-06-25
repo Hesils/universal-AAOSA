@@ -132,6 +132,13 @@ class DividerCycleEvent(_BaseEvent):
     retried: bool                         # True = 1er cycle → retry déclenché ; False = retry échoué
 
 
+class RetagEvent(_BaseEvent):
+    type: Literal["retag"] = "retag"
+    original_tags: list[str]               # set cross-rôle détecté (trié)
+    retagged_tags: list[str] | None = None  # set après re-tag (None si re-tag échoué)
+    resolved: bool                          # True = re-tag single-rôle satisfiable ; False = clean-crash
+
+
 ClaimEvent = Annotated[
     Union[
         Phase1FilteredEvent,
@@ -149,6 +156,7 @@ ClaimEvent = Annotated[
         TaskDividedEvent,
         TaskAggregatedEvent,
         DividerCycleEvent,
+        RetagEvent,
     ],
     Field(discriminator="type"),
 ]
