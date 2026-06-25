@@ -38,6 +38,17 @@ def _roster_gap(task: Task, agents: list[Agent]) -> set[str]:
     return set(task.required_tags) - roster
 
 
+def _cross_role_unsatisfiable(tags: set[str], agents: list[Agent]) -> bool:
+    """Vrai ssi l'AND-set `tags` est couvert par l'UNION du roster mais par AUCUN
+    agent seul. C'est un défaut de tagging (sur-couverture cross-rôle), distinct du
+    roster_gap (tag absent de l'union). Pur, sans LLM, sans ELO (présence de tag
+    seulement, comme _roster_gap). Re-diviser un tel set est futile."""
+    union = {tag for a in agents for tag in a.tags_with_elo}
+    if not tags <= union:
+        return False  # un tag manque à l'union → roster_gap, pas notre cas
+    return not any(tags <= set(a.tags_with_elo) for a in agents)
+
+
 def run_task(
     task: Task,
     agents: list[Agent],
