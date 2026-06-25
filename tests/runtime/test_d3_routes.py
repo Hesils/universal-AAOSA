@@ -138,7 +138,7 @@ class _AggStub:
 
 class _TaggerStub:
     def tag(self, description, agents, provider, model=None):
-        return ["python"]
+        return {"python"}
 
 
 def test_route_task_spec_divides_with_failure_context(monkeypatch):

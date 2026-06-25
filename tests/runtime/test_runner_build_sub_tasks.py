@@ -105,7 +105,7 @@ def test_single_agent_covering_all_is_satisfiable():
 
 class _StubTagger:
     def tag(self, description, agents, provider, model=None, unsatisfiable_hint=None):
-        return ["python"]
+        return {"python"}
 
 
 def _ctx() -> RunContext:

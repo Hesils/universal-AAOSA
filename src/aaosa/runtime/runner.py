@@ -241,7 +241,7 @@ def build_sub_tasks(parent_task: Task, division: DivisionResult, ctx: RunContext
     tprov, tmodel = ctx.resolve_role("tagger")
     sub_tasks: list[Task] = []
     for i, spec in enumerate(division.sub_tasks):
-        tags = set(ctx.tagger.tag(spec.description, ctx.agents, tprov, model=tmodel))
+        tags = ctx.tagger.tag(spec.description, ctx.agents, tprov, model=tmodel)
         if not tags:
             raise EmptyTaggingError(spec.description)
         if _cross_role_unsatisfiable(tags, ctx.agents):

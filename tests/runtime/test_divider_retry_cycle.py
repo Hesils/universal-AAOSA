@@ -72,7 +72,7 @@ def _ctx(divider, agents, tracer=None) -> RunContext:
         agents=agents, provider=SimpleNamespace(),
         divider=divider,
         aggregator=SimpleNamespace(),
-        tagger=SimpleNamespace(tag=lambda desc, agents, provider, model=None: ["python"]),
+        tagger=SimpleNamespace(tag=lambda desc, agents, provider, model=None: {"python"}),
         tracer=tracer,
     )
 
