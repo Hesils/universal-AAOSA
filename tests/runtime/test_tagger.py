@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from aaosa.core.agent import Agent
 from aaosa.runtime.providers import LLMProvider
-from aaosa.runtime.tagger import TagSet, Tagger
+from aaosa.runtime.tagger import TagSet, Tagger, UnsatisfiableTagSetError
 
 
 def make_agent(name="A", **tags) -> Agent:
@@ -117,8 +117,12 @@ def test_build_prompt_states_and_filter_contract():
     prompt = tagger._build_prompt("investigate the breach", [make_agent()])
     lower = prompt.lower()
     assert "single agent must hold all" in lower
-    assert "not every capability the task touches" in lower
-    assert "never mix tags from different lines" in lower
+    # "not every capability it touches" — wording tightened in v24 prompt hardening
+    # (was "not every capability the task touches"); intent unchanged: doer-role only
+    assert "not every capability it touches" in lower
+    # "never mix lines" — wording tightened in v24 prompt hardening
+    # (was "never mix tags from different lines"); intent unchanged: single-role
+    assert "never mix lines" in lower
     # clause qui préserve la détection de roster gap : une capacité réellement
     # requise mais absente du roster doit quand même être nommée
     # (espaces normalisés : la phrase peut chevaucher un retour à la ligne)
@@ -158,3 +162,49 @@ def test_build_prompt_groups_vocabulary_by_role_bundles():
     assert "- data_analysis, database, reporting" in prompt
     # pas de ligne fusionnant les deux bundles
     assert "investigation, logs, reporting" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# Tests v24 — unsatisfiable_hint + UnsatisfiableTagSetError
+# ---------------------------------------------------------------------------
+
+class _CaptureProvider:
+    def __init__(self, tags):
+        self._tags = tags
+        self.last_messages = None
+
+    def parse(self, messages, schema, temperature=0.0, model=None):
+        self.last_messages = messages
+        return TagSet(tags=self._tags)
+
+
+def _agents():
+    return [
+        Agent(name="python-dev", tags_with_elo={"python": 1500, "coding": 1500}, system_prompt="x"),
+        Agent(name="tech-writer", tags_with_elo={"writing": 1500, "documentation": 1500}, system_prompt="x"),
+    ]
+
+
+def test_unsatisfiable_hint_named_in_prompt():
+    prov = _CaptureProvider(["python", "coding"])
+    tagger = Tagger(system_prompt="sys")
+    tagger.tag("Write a helper function", _agents(), prov,
+               unsatisfiable_hint={"writing", "python", "coding", "documentation"})
+    user_msg = prov.last_messages[-1]["content"]
+    # le set fautif est nommé et l'instruction single-rôle présente
+    assert "documentation" in user_msg and "python" in user_msg
+    assert "single role" in user_msg.lower() or "one role" in user_msg.lower()
+
+
+def test_no_hint_keeps_prompt_clean():
+    prov = _CaptureProvider(["python", "coding"])
+    tagger = Tagger(system_prompt="sys")
+    tagger.tag("Write a helper function", _agents(), prov)
+    user_msg = prov.last_messages[-1]["content"]
+    assert "previous tag set" not in user_msg.lower()
+
+
+def test_unsatisfiable_error_carries_payload():
+    err = UnsatisfiableTagSetError("Write a helper", {"writing", "python"})
+    assert err.description == "Write a helper"
+    assert err.tags == {"writing", "python"}
