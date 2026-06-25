@@ -244,6 +244,8 @@ def build_sub_tasks(parent_task: Task, division: DivisionResult, ctx: RunContext
         tags = ctx.tagger.tag(spec.description, ctx.agents, tprov, model=tmodel)
         if not tags:
             raise EmptyTaggingError(spec.description)
+        # Lock v24 : le détecteur doit recevoir le set post-split (= clé de routage).
+        # Ne pas déplacer le split de tags en aval sans déplacer cet appel avec lui.
         if _cross_role_unsatisfiable(tags, ctx.agents):
             original = tags
             tags = ctx.tagger.tag(

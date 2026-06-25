@@ -9,6 +9,7 @@ from aaosa.tracing.events import (
     ExecutedEvent,
     Phase1FilteredEvent,
     QAEvaluatedEvent,
+    RetagEvent,
     RosterGapEvent,
     TagAcquiredEvent,
 )
@@ -279,7 +280,17 @@ def test_roster_gap_event_in_claim_event_union():
     assert isinstance(restored, RosterGapEvent)
 
 
-from aaosa.tracing.events import RetagEvent
+def test_retag_event_in_claim_event_union():
+    e = RetagEvent(
+        session_id="s1", task_id="t1",
+        original_tags=["coding", "documentation", "python"],
+        retagged_tags=["coding", "python"],
+        resolved=True,
+    )
+    restored = TypeAdapter(ClaimEvent).validate_python(e.model_dump())
+    assert isinstance(restored, RetagEvent)
+    assert restored.resolved is True
+    assert restored.retagged_tags == ["coding", "python"]
 
 
 def test_retag_event_roundtrip():
