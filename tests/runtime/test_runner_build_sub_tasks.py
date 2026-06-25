@@ -119,6 +119,22 @@ def _ctx() -> RunContext:
     )
 
 
+def test_cross_role_does_not_trigger_redivision():
+    """La sous-spec 'Write…' cross-rôle est re-taguée single-rôle AU BUILD →
+    elle ne reviendra jamais 'unassigned' → zéro re-division (verrou v24)."""
+    tagger = _ScriptedTagger(
+        first={"writing", "python", "coding", "documentation"},
+        recovered={"python", "coding"},
+    )
+    ctx = make_ctx(tagger=tagger)
+    division = DivisionResult(is_atomic=False, sub_tasks=[
+        SubTaskSpec(description="Write the helper validate_verdict"),
+    ])
+    subs = build_sub_tasks(_parent_task(), division, ctx)
+    # single-rôle satisfiable → un agent unique (python-dev) couvre
+    assert _cross_role_unsatisfiable(set(subs[0].required_tags), ctx.agents) is False
+
+
 def test_build_sub_tasks_propagates_context():
     parent = Task(description="parent", required_tags={"python": 50})
     division = DivisionResult(sub_tasks=[
