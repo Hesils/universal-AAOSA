@@ -73,6 +73,10 @@ Le détecteur (Fix 3) est clair ; **l'action** ne l'est pas. Trois options :
 
 **Tranché (2026-06-25) : option A.** Sur détection cross-rôle, re-tag single-rôle puis retry dispatch ; si toujours non-satisfiable, fail loud (= B comme branche terminale de A, pas comme stratégie). Le re-tag ne doit jamais produire un set vide (invariant tagger ≥ 1 tag).
 
+### 4.1 Pourquoi le re-tag est un appel LLM, pas un collapse déterministe
+
+Tentation légitime à l'implémentation : « pas besoin d'un re-appel tagger — il suffit d'**intersecter** le set cross-rôle avec l'agent au meilleur overlap et de garder ce sous-ensemble single-rôle. » **Rejeté.** Sur le cas réel `{writing, python, coding, documentation}`, les overlaps sont à **égalité** : python-dev `{python,coding}` (2) vs tech-writer `{writing,documentation}` (2). Un collapse déterministe doit donc trancher un **tie-break arbitraire** — et choisir tech-writer ici donnerait *exactement* le mis-routing qu'on corrige (« write a function » → documentation). Le bon collapse (`{python,coding}`) exige de comprendre que la tâche **produit du code**, pas qu'elle *touche* à de la doc : c'est un jugement sémantique, pas une opération ensembliste. D'où le re-tag LLM ciblé (`unsatisfiable_hint`), seul capable de relire la description et choisir le rôle producteur. Le collapse déterministe reste un fallback envisageable **uniquement** si overlap unique sans égalité — non retenu (complexité pour un gain nul, le LLM tranche déjà bien quand on le recadre).
+
 ## 5. Invariants à préserver
 
 - **Le graphe émerge** : on ne hardcode aucune découpe. Fix 1/2 = consignes de prompt ; Fix 3 = détecteur pur, pas une découpe imposée.
