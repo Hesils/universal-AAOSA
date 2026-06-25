@@ -277,3 +277,29 @@ def test_roster_gap_event_in_claim_event_union():
     dumped = e.model_dump()
     restored = TypeAdapter(ClaimEvent).validate_python(dumped)
     assert isinstance(restored, RosterGapEvent)
+
+
+from aaosa.tracing.events import RetagEvent
+
+
+def test_retag_event_roundtrip():
+    e = RetagEvent(
+        session_id="s1", task_id="t1",
+        original_tags=["coding", "documentation", "python", "writing"],
+        retagged_tags=["coding", "python"],
+        resolved=True,
+    )
+    assert e.type == "retag"
+    dumped = e.model_dump()
+    assert dumped["resolved"] is True
+    assert dumped["retagged_tags"] == ["coding", "python"]
+
+
+def test_retag_event_unresolved_has_null_retagged():
+    e = RetagEvent(
+        session_id="s1", task_id="t1",
+        original_tags=["coding", "documentation", "python", "writing"],
+        retagged_tags=None, resolved=False,
+    )
+    assert e.resolved is False
+    assert e.retagged_tags is None
