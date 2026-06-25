@@ -30,6 +30,42 @@ def test_tag_dedups_and_strips():
     assert tagger.tag("x", [make_agent()], provider) == {"python", "sql"}
 
 
+def test_tag_splits_comma_joined_tags():
+    """Le LLM recopie parfois une ligne-bundle entière comme un seul tag composé
+    ("coding, python"). Le matcher aval (_roster_gap) est un AND-filter ATOMIQUE :
+    aucun agent ne porte le tag composé → roster_gap fantôme. Le parsing doit éclater
+    sur la virgule en tags atomiques (bug smoke réel hsd, 2026-06-25)."""
+    provider = MagicMock(spec=LLMProvider)
+    provider.parse.return_value = TagSet(tags=["coding, python"])
+    tagger = Tagger(system_prompt="tag it")
+    assert tagger.tag("write a helper", [make_agent()], provider) == {"coding", "python"}
+
+
+def test_tag_splits_on_non_comma_separators():
+    """Le tag composé survient quel que soit le séparateur que le LLM choisit en
+    recopiant une ligne-bundle (', '/'; '/' / '). Les tags légitimes ne contiennent
+    jamais d'espace ni de ponctuation de séparation : on atomise sur toute la classe,
+    pour ne pas rester couplé au seul format ', ' du prompt (code-review hsd)."""
+    tagger = Tagger(system_prompt="tag it")
+    for raw, expected in [
+        ("coding; python", {"coding", "python"}),
+        ("coding / python", {"coding", "python"}),
+        ("coding python", {"coding", "python"}),
+    ]:
+        provider = MagicMock(spec=LLMProvider)
+        provider.parse.return_value = TagSet(tags=[raw])
+        assert tagger.tag("x", [make_agent()], provider) == expected, raw
+
+
+def test_tag_splits_then_dedups_across_pieces():
+    """Le split sur virgule alimente la déduplication : un tag répété entre une ligne
+    bundle et un tag atomique ne doit apparaître qu'une fois."""
+    provider = MagicMock(spec=LLMProvider)
+    provider.parse.return_value = TagSet(tags=["coding, python", "python"])
+    tagger = Tagger(system_prompt="tag it")
+    assert tagger.tag("x", [make_agent()], provider) == {"coding", "python"}
+
+
 def test_tag_returns_empty_set_when_parse_returns_none():
     provider = MagicMock(spec=LLMProvider)
     provider.parse.return_value = None

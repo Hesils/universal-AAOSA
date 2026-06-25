@@ -119,10 +119,14 @@ class TaskDivider:
             )
 
         return (
-            "If the task is atomic (a single capability, not usefully decomposable),\n"
-            "set is_atomic=true and return no sub-tasks.\n"
+            "A task is atomic ONLY when it is a single capability producing a single\n"
+            "deliverable. If it chains multiple distinct deliverables or capabilities\n"
+            "(e.g. write code AND then document it, implement a feature AND test it),\n"
+            "it is NOT atomic, even when phrased as one sentence.\n"
+            "If the task is atomic, set is_atomic=true and return no sub-tasks.\n"
             "Otherwise set is_atomic=false and decompose it into ordered sub-tasks, each\n"
-            "a description plus dependencies (0-based indices into your sub_tasks list).\n"
+            "a single capability one specialist role can own, with dependencies\n"
+            "(0-based indices into your sub_tasks list).\n"
             "Do NOT assign tags — only describe the work and its ordering.\n"
             "For each sub-task, set `context`: the distilled domain context that THIS "
             "sub-task needs (from the inherited context below), focused — not a copy of "
