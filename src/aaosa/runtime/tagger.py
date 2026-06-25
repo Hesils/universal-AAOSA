@@ -3,10 +3,20 @@
 Génère les tags d'une tâche en fonction de sa description et du roster.
 """
 
+import re
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from aaosa.core.agent import Agent
 from aaosa.runtime.providers import LLMProvider
+
+# Le LLM recopie parfois une ligne-bundle entière comme un seul tag composé
+# ("coding, python"). Le matcher aval est un AND-filter ATOMIQUE : un tag composé
+# ne matche aucun agent → roster_gap fantôme. Les tags légitimes sont des tokens
+# sans espace ni ponctuation de séparation, donc on atomise sur toute cette classe —
+# robuste quel que soit le séparateur choisi par le LLM, sans rester couplé au seul
+# format ", " du prompt bundle (_build_prompt).
+_TAG_SEPARATORS = re.compile(r"[\s,;/|]+")
 
 
 class TagSet(BaseModel):
@@ -68,4 +78,9 @@ class Tagger:
         )
         if parsed is None:
             return set()
-        return {t.strip() for t in parsed.tags if t.strip()}
+        return {
+            piece
+            for t in parsed.tags
+            for piece in _TAG_SEPARATORS.split(t.strip())
+            if piece
+        }

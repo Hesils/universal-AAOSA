@@ -55,3 +55,22 @@ class TestTaskDivider:
         divider = TaskDivider(system_prompt="split")
         with pytest.raises(ValueError, match="no parsed"):
             divider.divide(Task(description="t", required_tags={"python": 30}), _provider_returning(None))
+
+
+class TestBuildDividePrompt:
+    def test_prompt_forces_decomposition_of_multi_deliverable_tasks(self):
+        """Une tâche chaînant plusieurs livrables/capacités distincts (p.ex. "écris
+        un helper PUIS documente-le") n'est PAS atomique : la définition par défaut
+        ("a single capability, not usefully decomposable") laisse le LLM marquer
+        is_atomic=true → la tâche unique exige les tags de deux rôles → irroutable sur
+        un roster de spécialistes étroits (bug smoke réel hsd, 2026-06-25). Le prompt
+        doit expliciter qu'atomique = un seul livrable d'une seule capacité, et qu'un
+        enchaînement de livrables distincts doit être décomposé."""
+        divider = TaskDivider(system_prompt="split")
+        prompt = divider._build_divide_prompt(
+            Task(description="write a helper then document it", required_tags={"python": 30}),
+            None, None,
+        )
+        norm = " ".join(prompt.lower().split())
+        assert "single capability producing a single deliverable" in norm
+        assert "multiple distinct deliverables" in norm
