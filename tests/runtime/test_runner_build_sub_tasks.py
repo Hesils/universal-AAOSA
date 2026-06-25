@@ -131,6 +131,7 @@ def test_cross_role_does_not_trigger_redivision():
         SubTaskSpec(description="Write the helper validate_verdict"),
     ])
     subs = build_sub_tasks(_parent_task(), division, ctx)
+    assert subs[0].required_tags, "build_sub_tasks must produce non-empty required_tags"
     # single-rôle satisfiable → un agent unique (python-dev) couvre
     assert _cross_role_unsatisfiable(set(subs[0].required_tags), ctx.agents) is False
 
